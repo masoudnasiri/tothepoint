@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Test - Procurement DSS</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1976d2;
+            margin-top: 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #1976d2;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #1565c0;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            margin-bottom: 20px;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Login Test - Procurement DSS</h1>
+        
+        <div class="info">
+            <strong>ℹ️ Test Information:</strong><br>
+            This page tests the login functionality of the Procurement DSS backend API.<br>
+            <strong>API Endpoint:</strong> http://localhost:8000/auth/login
+        </div>
+
+        <div class="form-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" value="admin" placeholder="Enter username">
+        </div>
+
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" value="admin123" placeholder="Enter password">
+        </div>
+
+        <button onclick="testLogin()">🚀 Test Login</button>
+        <button onclick="testHealth()" style="background-color: #4caf50; margin-top: 5px;">❤️ Test Health Endpoint</button>
+        <button onclick="openApp()" style="background-color: #ff9800; margin-top: 5px;">📱 Open Main App</button>
+
+        <div id="result" class="result"></div>
+    </div>
+
+    <script>
+        async function testHealth() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result info';
+            resultDiv.innerHTML = '<strong>Testing...</strong> Checking backend health...';
+
+            try {
+                const response = await fetch('http://localhost:8000/health');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>✅ Health Check Successful!</strong><br>
+                        <strong>Status:</strong> ${response.status} ${response.statusText}<br>
+                        <strong>Response:</strong>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <strong>❌ Health Check Failed!</strong><br>
+                        <strong>Status:</strong> ${response.status} ${response.statusText}<br>
+                        <strong>Response:</strong>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <strong>❌ Connection Error!</strong><br>
+                    <strong>Error:</strong> ${error.message}<br>
+                    <strong>Details:</strong> Make sure the backend is running on http://localhost:8000
+                `;
+            }
+        }
+
+        async function testLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('result');
+
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result info';
+            resultDiv.innerHTML = '<strong>Testing...</strong> Attempting login...';
+
+            try {
+                const response = await fetch('http://localhost:8000/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <strong>✅ Login Successful!</strong><br>
+                        <strong>Username:</strong> ${username}<br>
+                        <strong>Status:</strong> ${response.status} ${response.statusText}<br>
+                        <strong>Token Type:</strong> ${data.token_type}<br>
+                        <strong>Access Token:</strong>
+                        <pre>${data.access_token.substring(0, 50)}...</pre>
+                        <br>
+                        <strong>🎉 The backend API is working correctly!</strong><br>
+                        You can now try the main application at <a href="http://localhost:3000" target="_blank">http://localhost:3000</a>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <strong>❌ Login Failed!</strong><br>
+                        <strong>Status:</strong> ${response.status} ${response.statusText}<br>
+                        <strong>Error:</strong> ${data.detail || JSON.stringify(data)}<br>
+                        <strong>Hint:</strong> Check your username and password
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <strong>❌ Connection Error!</strong><br>
+                    <strong>Error:</strong> ${error.message}<br>
+                    <strong>Details:</strong> Make sure the backend is running on http://localhost:8000<br>
+                    <strong>Common causes:</strong>
+                    <ul>
+                        <li>Backend container not running (run: docker-compose up -d)</li>
+                        <li>Backend still starting up (wait a few seconds)</li>
+                        <li>Port 8000 blocked by firewall</li>
+                        <li>CORS configuration issue</li>
+                    </ul>
+                `;
+            }
+        }
+
+        function openApp() {
+            window.open('http://localhost:3000', '_blank');
+        }
+
+        // Default credentials reference
+        const credentials = {
+            admin: 'admin123',
+            pm1: 'pm123',
+            proc1: 'proc123',
+            finance1: 'finance123'
+        };
+
+        // Show default credentials hint
+        console.log('Available test credentials:', credentials);
+    </script>
+</body>
+</html>
