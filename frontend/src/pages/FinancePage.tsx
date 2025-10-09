@@ -160,7 +160,7 @@ export const FinancePage: React.FC = () => {
   };
 
   const calculateTotalBudget = () => {
-    return budgetData.reduce((sum, budget) => sum + budget.available_budget, 0);
+    return budgetData.reduce((sum, budget) => sum + Number(budget.available_budget || 0), 0);
   };
 
   if (loading) {
@@ -262,7 +262,7 @@ export const FinancePage: React.FC = () => {
                 </TableCell>
                 <TableCell align="right">
                   <Typography variant="body1" fontWeight="medium" color="primary">
-                    {formatCurrency(budget.available_budget)}
+                    {formatCurrency(Number(budget.available_budget || 0))}
                   </Typography>
                 </TableCell>
                 <TableCell align="center">
@@ -279,7 +279,7 @@ export const FinancePage: React.FC = () => {
                           setSelectedBudget(budget);
                           setFormData({
                             budget_date: budget.budget_date,
-                            available_budget: budget.available_budget,
+                            available_budget: Number(budget.available_budget || 0),
                           });
                           setEditDialogOpen(true);
                         }}
