@@ -10,7 +10,7 @@ import logging
 
 from app.config import settings
 from app.database import init_db
-from app.routers import auth, users, projects, items, procurement, finance, excel, phases, weights, decisions, dashboard, delivery_options
+from app.routers import auth, users, projects, items, items_master, procurement, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -79,6 +79,7 @@ async def health_check():
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(projects.router)
+app.include_router(items_master.router)
 app.include_router(items.router)
 app.include_router(phases.router)
 app.include_router(weights.router)
@@ -88,6 +89,8 @@ app.include_router(procurement.router)
 app.include_router(finance.router)
 app.include_router(excel.router)
 app.include_router(dashboard.router)
+app.include_router(analytics.router)
+app.include_router(files.router)
 
 
 # Root endpoint

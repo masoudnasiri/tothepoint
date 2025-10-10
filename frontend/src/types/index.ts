@@ -34,6 +34,7 @@ export interface ProjectSummary {
   item_count: number;
   total_quantity: number;
   estimated_cost: number;
+  estimated_revenue: number;
 }
 
 export interface ProjectPhase {
@@ -59,6 +60,44 @@ export interface ProjectPhaseUpdate {
   end_date?: string;
 }
 
+// Items Master (Centralized Catalog)
+export interface ItemMaster {
+  id: number;
+  item_code: string;
+  company: string;
+  item_name: string;
+  model?: string;
+  specifications?: any;
+  category?: string;
+  unit: string;
+  description?: string;
+  created_at: string;
+  updated_at?: string;
+  created_by_id?: number;
+  is_active: boolean;
+}
+
+export interface ItemMasterCreate {
+  company: string;
+  item_name: string;
+  model?: string;
+  specifications?: any;
+  category?: string;
+  unit?: string;
+  description?: string;
+}
+
+export interface ItemMasterUpdate {
+  company?: string;
+  item_name?: string;
+  model?: string;
+  specifications?: any;
+  category?: string;
+  unit?: string;
+  description?: string;
+  is_active?: boolean;
+}
+
 export type ProjectItemStatus = 
   | 'PENDING'
   | 'SUGGESTED'
@@ -77,6 +116,9 @@ export interface ProjectItem {
   delivery_options: string[];  // Array of possible delivery dates
   status: ProjectItemStatus;
   external_purchase: boolean;
+  description?: string | null;  // Item description/specifications
+  file_path?: string | null;    // Attached file path
+  file_name?: string | null;    // Attached file name
   decision_date: string | null;
   procurement_date: string | null;
   payment_date: string | null;
@@ -89,11 +131,13 @@ export interface ProjectItem {
 
 export interface ProjectItemCreate {
   project_id: number;
+  master_item_id?: number;  // Reference to Items Master
   item_code: string;
   item_name?: string;
   quantity: number;
   delivery_options: string[];  // Array of possible delivery dates (at least 1)
   external_purchase?: boolean;
+  description?: string;  // Project-specific context
 }
 
 export interface ProjectItemUpdate {
@@ -103,6 +147,7 @@ export interface ProjectItemUpdate {
   delivery_options?: string[];  // Array of possible delivery dates
   status?: ProjectItemStatus;
   external_purchase?: boolean;
+  description?: string;  // Item description/specifications
   decision_date?: string;
   procurement_date?: string;
   payment_date?: string;

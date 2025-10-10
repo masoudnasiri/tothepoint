@@ -76,6 +76,22 @@ export const projectsAPI = {
     api.get(`/projects/${projectId}/assignments`),
 };
 
+// Items Master API
+export const itemsMasterAPI = {
+  list: (params?: { skip?: number; limit?: number; search?: string; category?: string; active_only?: boolean }) =>
+    api.get('/items-master/', { params }),
+  get: (id: number) => api.get(`/items-master/${id}`),
+  create: (item: any) => api.post('/items-master/', item),
+  update: (id: number, item: any) => api.put(`/items-master/${id}`, item),
+  delete: (id: number) => api.delete(`/items-master/${id}`),
+  previewCode: (company: string, itemName: string, model?: string) => {
+    const params: any = { company, item_name: itemName };
+    if (model) params.model = model;
+    return api.get('/items-master/preview/code', { params });
+  },
+  getByCode: (itemCode: string) => api.get(`/items-master/search/by-code/${itemCode}`),
+};
+
 // Project Items API
 export const itemsAPI = {
   listByProject: (projectId: number, params?: { skip?: number; limit?: number }) =>
@@ -132,6 +148,12 @@ export const decisionsAPI = {
     actual_invoice_received_date?: string;
     notes?: string;
   }) => api.post(`/decisions/${decisionId}/actual-invoice`, data),
+  enterActualPayment: (decisionId: number, data: {
+    actual_payment_amount: number;
+    actual_payment_date: string;
+    actual_payment_installments?: Array<{ date: string; amount: number }>;
+    notes?: string;
+  }) => api.post(`/decisions/${decisionId}/actual-payment`, data),
   updateStatus: (id: number, statusUpdate: { status: string; notes?: string }) =>
     api.put(`/decisions/${id}/status`, statusUpdate),
   update: (id: number, decision: any) => api.put(`/decisions/${id}`, decision),
@@ -141,6 +163,7 @@ export const decisionsAPI = {
 // Procurement API
 export const procurementAPI = {
   getItemCodes: () => api.get('/procurement/item-codes'),
+  getItemsWithDetails: () => api.get('/procurement/items-with-details'),
   listOptions: (params?: { skip?: number; limit?: number; item_code?: string }) =>
     api.get('/procurement/options', { params }),
   listByItemCode: (itemCode: string) =>

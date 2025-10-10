@@ -3,6 +3,7 @@ CRUD operations for database interactions
 """
 
 from typing import List, Optional, Dict, Any
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, and_, or_
 from sqlalchemy.orm import selectinload
@@ -165,8 +166,37 @@ async def get_user_project_assignments(db: AsyncSession, user_id: int) -> List[P
 
 # Project Item CRUD operations
 async def create_project_item(db: AsyncSession, item: ProjectItemCreate) -> ProjectItem:
-    """Create a new project item"""
-    db_item = ProjectItem(**item.dict())
+    """
+    Create a new project item
+    
+    If master_item_id is provided:
+    - Fetches master item and denormalizes item_code and item_name
+    If not provided (backward compatibility):
+    - Uses provided item_code and item_name
+    """
+    from app.models import ItemMaster
+    
+    item_dict = item.dict()
+    
+    # If master_item_id is provided, denormalize from master
+    if item_dict.get('master_item_id'):
+        master_result = await db.execute(
+            select(ItemMaster).where(ItemMaster.id == item_dict['master_item_id'])
+        )
+        master_item = master_result.scalar_one_or_none()
+        
+        if not master_item:
+            raise ValueError(f"Master item #{item_dict['master_item_id']} not found")
+        
+        if not master_item.is_active:
+            raise ValueError(f"Master item {master_item.item_code} is inactive")
+        
+        # Denormalize fields from master
+        item_dict['item_code'] = master_item.item_code
+        item_dict['item_name'] = master_item.item_name
+    
+    # Create project item
+    db_item = ProjectItem(**item_dict)
     db.add(db_item)
     await db.commit()
     await db.refresh(db_item)
@@ -486,18 +516,36 @@ async def get_project_summaries(db: AsyncSession, user_projects: Optional[List[i
             select(func.sum(ProjectItem.quantity)).where(ProjectItem.project_id == project.id)
         )
         
-        # Calculate estimated cost (simplified - could be more sophisticated)
-        estimated_cost = await db.scalar(
-            select(func.sum(
-                ProjectItem.quantity * 
-                func.coalesce(ProcurementOption.base_cost, 0)
-            ))
-            .select_from(ProjectItem)
-            .outerjoin(ProcurementOption, 
-                      and_(ProjectItem.item_code == ProcurementOption.item_code,
-                           ProcurementOption.is_active == True))
+        # Calculate estimated cost and revenue
+        # Get all items for this project with their delivery options
+        items_result = await db.execute(
+            select(ProjectItem)
+            .options(selectinload(ProjectItem.delivery_options_rel))
             .where(ProjectItem.project_id == project.id)
         )
+        project_items = items_result.scalars().all()
+        
+        estimated_cost = Decimal('0')
+        estimated_revenue = Decimal('0')
+        
+        for item in project_items:
+            # Get average cost for this item from procurement options
+            avg_cost_result = await db.scalar(
+                select(func.avg(ProcurementOption.base_cost))
+                .where(ProcurementOption.item_code == item.item_code)
+                .where(ProcurementOption.is_active == True)
+            )
+            if avg_cost_result:
+                estimated_cost += Decimal(str(avg_cost_result)) * item.quantity
+            
+            # Get revenue from delivery options (invoice amounts)
+            if hasattr(item, 'delivery_options_rel') and item.delivery_options_rel:
+                # Use first delivery option's invoice amount
+                first_delivery = item.delivery_options_rel[0]
+                estimated_revenue += first_delivery.invoice_amount_per_unit * item.quantity
+            elif avg_cost_result:
+                # Fallback: Use 20% markup on cost
+                estimated_revenue += Decimal(str(avg_cost_result)) * item.quantity * Decimal('1.20')
         
         summaries.append({
             "id": project.id,
@@ -505,7 +553,8 @@ async def get_project_summaries(db: AsyncSession, user_projects: Optional[List[i
             "name": project.name,
             "item_count": item_count or 0,
             "total_quantity": total_quantity or 0,
-            "estimated_cost": estimated_cost or 0
+            "estimated_cost": float(estimated_cost) if estimated_cost else 0.0,
+            "estimated_revenue": float(estimated_revenue) if estimated_revenue else 0.0
         })
     
     return summaries

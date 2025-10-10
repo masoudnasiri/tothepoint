@@ -253,33 +253,6 @@ export const DashboardPage: React.FC = () => {
         </Box>
       </Box>
 
-      {isPMO && (
-        <Alert severity="success" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>PMO Access:</strong> You have full dashboard access to monitor all projects, revenues, and payments. 
-            You can view complete financial overview and manage project portfolio.
-          </Typography>
-        </Alert>
-      )}
-
-      {isPM && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>PM Access:</strong> You can view revenue inflow data only. 
-            Budget allocations, payment outflows, and net positions are restricted to Finance and Admin users.
-          </Typography>
-        </Alert>
-      )}
-
-      {isProcurement && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Procurement Access:</strong> You can view payment outflow data only. 
-            Budget allocations, revenue inflows, and net positions are restricted to Finance and Admin users.
-          </Typography>
-        </Alert>
-      )}
-
       {/* Project Filter */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <ProjectFilter

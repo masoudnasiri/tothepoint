@@ -110,6 +110,28 @@ class EnhancedProcurementOptimizer:
             if best_proposal and proposals:
                 await self._save_optimization_results(proposals)
             
+            # Create user-friendly message
+            if len(proposals) == 0:
+                user_message = (
+                    "❌ Could not generate any feasible solutions.\n\n"
+                    "📝 Possible reasons and solutions:\n\n"
+                    "1️⃣ Budget constraints too tight:\n"
+                    "   • Go to Finance → Budget Management\n"
+                    "   • Increase monthly budgets\n"
+                    "   • Add more budget periods\n\n"
+                    "2️⃣ Procurement options too expensive:\n"
+                    "   • Go to Procurement page\n"
+                    "   • Add more cost-effective supplier options\n"
+                    "   • Review base costs and payment terms\n\n"
+                    "3️⃣ Lead times too long:\n"
+                    "   • Check supplier lead times\n"
+                    "   • Add suppliers with shorter lead times\n"
+                    "   • Adjust item delivery dates if possible\n\n"
+                    "💡 Tip: Try increasing the time limit or using a different solver (Glop, CBC)."
+                )
+            else:
+                user_message = f"✅ Successfully generated {len(proposals)} proposal(s) using {self.solver_type} solver"
+            
             return OptimizationRunResponse(
                 run_id=uuid.UUID(self.run_id),
                 run_timestamp=self.start_time,
@@ -118,12 +140,34 @@ class EnhancedProcurementOptimizer:
                 total_cost=best_proposal.total_cost if best_proposal else Decimal('0'),
                 items_optimized=best_proposal.items_count if best_proposal else 0,
                 proposals=proposals,
-                message=f"Generated {len(proposals)} proposal(s) using {self.solver_type} solver"
+                message=user_message
             )
             
         except Exception as e:
             logger.error(f"Optimization failed: {str(e)}", exc_info=True)
             execution_time = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0
+            # Format error message for user
+            error_msg = str(e)
+            if "No active projects" in error_msg or "No project items" in error_msg or \
+               "No procurement options" in error_msg or "No budget data" in error_msg:
+                # User-friendly validation errors - pass through as-is
+                user_message = error_msg
+            else:
+                # Technical errors - format for user
+                user_message = (
+                    f"❌ Optimization failed with technical error.\n\n"
+                    f"Error details: {error_msg}\n\n"
+                    "📝 What you can try:\n"
+                    "   1. Check that all your data is valid:\n"
+                    "      • Projects are active\n"
+                    "      • Items have delivery dates\n"
+                    "      • Procurement options exist\n"
+                    "      • Budget data is entered\n"
+                    "   2. Try reducing the time limit\n"
+                    "   3. Try a different solver (Glop or CBC)\n\n"
+                    "💡 If problem persists, contact system administrator."
+                )
+            
             return OptimizationRunResponse(
                 run_id=uuid.UUID(self.run_id),
                 run_timestamp=self.start_time if self.start_time else datetime.now(),
@@ -132,7 +176,7 @@ class EnhancedProcurementOptimizer:
                 total_cost=Decimal('0'),
                 items_optimized=0,
                 proposals=[],
-                message=f"Optimization error: {str(e)}"
+                message=user_message
             )
     
     async def _generate_multiple_proposals(
@@ -196,7 +240,8 @@ class EnhancedProcurementOptimizer:
             if not delivery_options:
                 continue
             
-            valid_times = list(range(1, min(len(delivery_options) + 1, request.max_time_slots + 1)))
+            # Use a larger range to accommodate lead times (start from 5 instead of 1)
+            valid_times = list(range(5, min(len(delivery_options) + 5, request.max_time_slots + 1)))
             item_options = [opt for opt in self.procurement_options.values() 
                           if opt.item_code == item.item_code]
             
@@ -274,7 +319,8 @@ class EnhancedProcurementOptimizer:
             if not delivery_options:
                 continue
             
-            valid_times = list(range(1, min(len(delivery_options) + 1, request.max_time_slots + 1)))
+            # Use a larger range to accommodate lead times (start from 5 instead of 1)
+            valid_times = list(range(5, min(len(delivery_options) + 5, request.max_time_slots + 1)))
             item_options = [opt for opt in self.procurement_options.values() 
                           if opt.item_code == item.item_code]
             
@@ -288,7 +334,8 @@ class EnhancedProcurementOptimizer:
                     # Use continuous variable [0, 1] for LP relaxation
                     variables[var_name] = solver.NumVar(0, 1, var_name)
         
-        # Add demand fulfillment constraints (each item must be procured exactly once)
+        # Add demand fulfillment constraints (each item can be procured at most once)
+        # Allow partial optimization when budget is insufficient
         item_groups = {}
         for var_name, var in variables.items():
             parts = var_name.split('_')
@@ -298,7 +345,7 @@ class EnhancedProcurementOptimizer:
             item_groups[key].append(var)
         
         for vars_list in item_groups.values():
-            constraint = solver.Constraint(1, 1)
+            constraint = solver.Constraint(0, 1)  # At most once (allows skipping items)
             for var in vars_list:
                 constraint.SetCoefficient(var, 1)
         
@@ -306,9 +353,11 @@ class EnhancedProcurementOptimizer:
         time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
         for time_slot, var_data in time_groups.items():
             if time_slot not in self.budget_data:
-                continue
+                # Use a large budget for time slots without explicit budget data
+                budget_limit = 1000000.0  # $1M default
+            else:
+                budget_limit = float(self.budget_data[time_slot].available_budget)
             
-            budget_limit = float(self.budget_data[time_slot].available_budget)
             constraint = solver.Constraint(0, budget_limit)
             
             for var, cost in var_data:
@@ -367,7 +416,8 @@ class EnhancedProcurementOptimizer:
             if not delivery_options:
                 continue
             
-            valid_times = list(range(1, min(len(delivery_options) + 1, request.max_time_slots + 1)))
+            # Use a larger range to accommodate lead times (start from 5 instead of 1)
+            valid_times = list(range(5, min(len(delivery_options) + 5, request.max_time_slots + 1)))
             item_options = [opt for opt in self.procurement_options.values() 
                           if opt.item_code == item.item_code]
             
@@ -381,7 +431,7 @@ class EnhancedProcurementOptimizer:
                     # Binary variable
                     variables[var_name] = solver.IntVar(0, 1, var_name)
         
-        # Add demand fulfillment constraints
+        # Add demand fulfillment constraints (allow partial optimization)
         item_groups = {}
         for var_name, var in variables.items():
             parts = var_name.split('_')
@@ -391,7 +441,7 @@ class EnhancedProcurementOptimizer:
             item_groups[key].append(var)
         
         for vars_list in item_groups.values():
-            constraint = solver.Constraint(1, 1)
+            constraint = solver.Constraint(0, 1)  # At most once (allows skipping items)
             for var in vars_list:
                 constraint.SetCoefficient(var, 1)
         
@@ -399,9 +449,11 @@ class EnhancedProcurementOptimizer:
         time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
         for time_slot, var_data in time_groups.items():
             if time_slot not in self.budget_data:
-                continue
+                # Use a large budget for time slots without explicit budget data
+                budget_limit = 1000000.0  # $1M default
+            else:
+                budget_limit = float(self.budget_data[time_slot].available_budget)
             
-            budget_limit = float(self.budget_data[time_slot].available_budget)
             constraint = solver.Constraint(0, budget_limit)
             
             for var, cost in var_data:
@@ -517,21 +569,36 @@ class EnhancedProcurementOptimizer:
     # ============== Helper Methods ==============
     
     async def _load_data(self):
-        """Load all necessary data from database"""
-        # [Same as original implementation]
+        """Load all necessary data from database with validation"""
+        # Load projects
         projects_result = await self.db.execute(
             select(Project).where(Project.is_active == True)
         )
         self.projects = {p.id: p for p in projects_result.scalars().all()}
         
+        if not self.projects:
+            raise ValueError(
+                "❌ No active projects found.\n\n"
+                "📝 What you need to do:\n"
+                "   1. Go to 'Projects' page\n"
+                "   2. Create at least one project\n"
+                "   3. Make sure the project is marked as 'Active'\n\n"
+                "💡 Tip: A project must have items before optimization can run."
+            )
+        
+        # Load locked items
         locked_query = await self.db.execute(
             select(FinalizedDecision.project_id, FinalizedDecision.item_code)
             .where(FinalizedDecision.status == 'LOCKED')
         )
         locked_items = {(row.project_id, row.item_code) for row in locked_query.all()}
         
+        # Load project items with delivery options relationship
+        from sqlalchemy.orm import selectinload
         items_result = await self.db.execute(
-            select(ProjectItem).where(ProjectItem.project_id.in_(self.projects.keys()))
+            select(ProjectItem)
+            .options(selectinload(ProjectItem.delivery_options_rel))
+            .where(ProjectItem.project_id.in_(self.projects.keys()))
         )
         all_items = list(items_result.scalars().all())
         self.project_items = [
@@ -539,11 +606,71 @@ class EnhancedProcurementOptimizer:
             if (item.project_id, item.item_code) not in locked_items
         ]
         
+        if not self.project_items:
+            if all_items:
+                raise ValueError(
+                    "❌ All items are locked (already finalized).\n\n"
+                    "📝 What you need to do:\n"
+                    "   1. Go to 'Finalized Decisions' page\n"
+                    "   2. Unlock some items you want to re-optimize\n"
+                    "   3. Or add new items to your projects\n\n"
+                    "💡 Tip: You can revert locked decisions to make them available for optimization."
+                )
+            else:
+                raise ValueError(
+                    "❌ No project items found.\n\n"
+                    "📝 What you need to do:\n"
+                    "   1. Go to 'Project Items' page\n"
+                    "   2. Select a project\n"
+                    "   3. Click 'Add Item' button\n"
+                    "   4. Select items from the Items Master catalog\n"
+                    "   5. Set quantities and delivery dates\n\n"
+                    "💡 Tip: You need at least one item to run optimization."
+                )
+        
+        # Load procurement options
         options_result = await self.db.execute(
             select(ProcurementOption).where(ProcurementOption.is_active == True)
         )
         self.procurement_options = {opt.id: opt for opt in options_result.scalars().all()}
         
+        if not self.procurement_options:
+            raise ValueError(
+                "❌ No procurement options found.\n\n"
+                "📝 What you need to do:\n"
+                "   1. Go to 'Procurement' page\n"
+                "   2. For each item, click 'Add Option' button\n"
+                "   3. Enter supplier details:\n"
+                "      • Supplier name\n"
+                "      • Base cost per unit\n"
+                "      • Lead time (delivery days)\n"
+                "      • Payment terms (cash/installments)\n"
+                "   4. Add at least 2-3 options per item for better optimization\n\n"
+                "💡 Tip: More procurement options = better optimization results!"
+            )
+        
+        # Validate items have procurement options
+        items_without_options = []
+        for item in self.project_items[:5]:  # Check first 5 items
+            matching_options = [opt for opt in self.procurement_options.values() 
+                              if opt.item_code == item.item_code]
+            if not matching_options:
+                items_without_options.append(item.item_code)
+        
+        if items_without_options:
+            raise ValueError(
+                f"❌ Some items don't have procurement options.\n\n"
+                f"Items without options: {', '.join(items_without_options[:3])}"
+                f"{' and more...' if len(items_without_options) > 3 else ''}\n\n"
+                "📝 What you need to do:\n"
+                "   1. Go to 'Procurement' page\n"
+                "   2. Find these items in the list\n"
+                "   3. Click 'Add Option' for each item\n"
+                "   4. Add at least one supplier option per item\n\n"
+                "💡 Tip: All items must have at least one procurement option."
+            )
+        
+        # Load budget data
         budget_result = await self.db.execute(
             select(BudgetData).order_by(BudgetData.budget_date)
         )
@@ -552,7 +679,20 @@ class EnhancedProcurementOptimizer:
         for idx, bd in enumerate(budget_list, start=1):
             self.budget_data[idx] = bd
         
-        logger.info(f"Loaded {len(self.projects)} projects, {len(self.project_items)} items, "
+        if not self.budget_data:
+            raise ValueError(
+                "❌ No budget data found.\n\n"
+                "📝 What you need to do:\n"
+                "   1. Go to 'Finance' page\n"
+                "   2. Click 'Budget Management' tab\n"
+                "   3. Add monthly budgets:\n"
+                "      • Select month\n"
+                "      • Enter available budget amount\n"
+                "   4. Add at least 3-6 months of budget data\n\n"
+                "💡 Tip: Budget data determines when purchases can be made."
+            )
+        
+        logger.info(f"✅ Data loaded: {len(self.projects)} projects, {len(self.project_items)} items, "
                    f"{len(self.procurement_options)} options, {len(self.budget_data)} budget periods")
     
     def _add_cpsat_demand_constraints(self, model: cp_model.CpModel, variables: Dict):
@@ -565,11 +705,13 @@ class EnhancedProcurementOptimizer:
                 item_groups[key] = []
             item_groups[key].append(var)
         
+        # Allow partial optimization: each item can be purchased at most once (<= 1)
+        # This allows the optimizer to skip items when budget is insufficient
         for vars_list in item_groups.values():
-            model.Add(sum(vars_list) == 1)
+            model.Add(sum(vars_list) <= 1)
     
     def _add_cpsat_budget_constraints(self, model: cp_model.CpModel, variables: Dict, max_time_slots: int):
-        """Add budget constraints for CP-SAT"""
+        """Add soft budget constraints for CP-SAT with slack variables"""
         time_groups = {}
         
         for var_name, var in variables.items():
@@ -591,6 +733,9 @@ class EnhancedProcurementOptimizer:
             if item:
                 time_groups[purchase_time].append((var, option, item))
         
+        # Store slack variables for penalty in objective
+        self.cpsat_budget_slack_vars = []
+        
         for time_slot in range(1, max_time_slots + 1):
             if time_slot not in time_groups:
                 continue
@@ -601,19 +746,38 @@ class EnhancedProcurementOptimizer:
             for var, option, item in time_groups[time_slot]:
                 cost = self._calculate_effective_cost(option, item) * item.quantity
                 cash_flow_vars.append(var)
-                cash_flow_coeffs.append(int(cost * 100))
+                # Scale to thousands for numerical stability
+                cash_flow_coeffs.append(int(cost / 1000))
             
             if time_slot in self.budget_data:
-                budget_limit = int(self.budget_data[time_slot].available_budget * 100)
+                budget_limit = int(self.budget_data[time_slot].available_budget / 1000)
             else:
-                budget_limit = 0
+                # Use a large budget for time slots without explicit budget data
+                budget_limit = 1000  # $1M default
             
             if cash_flow_vars:
-                model.Add(sum(v * c for v, c in zip(cash_flow_vars, cash_flow_coeffs)) <= budget_limit)
+                # Create slack variable to allow exceeding budget
+                max_slack = max(budget_limit // 2, 500)  # At least $500K
+                slack_var = model.NewIntVar(0, max_slack, f'cpsat_budget_slack_{time_slot}')
+                
+                # Soft constraint: spending <= budget + slack
+                total_spending = sum(v * c for v, c in zip(cash_flow_vars, cash_flow_coeffs))
+                model.Add(total_spending <= budget_limit + slack_var)
+                
+                # Store slack for penalty
+                self.cpsat_budget_slack_vars.append(slack_var)
     
     def _set_cpsat_objective(self, model: cp_model.CpModel, variables: Dict, strategy: OptimizationStrategy):
-        """Set objective function for CP-SAT based on strategy"""
-        objective_terms = []
+        """Set objective function for CP-SAT based on strategy
+        
+        Goal: Maximize business value minus cost
+        Formula: Minimize(Total_Cost - Total_Business_Value + Budget_Penalty)
+        
+        This creates a proper trade-off between value and cost, making purchasing
+        items profitable while still respecting strategy-based preferences.
+        """
+        cost_terms = []
+        value_terms = []
         
         for var_name, var in variables.items():
             parts = var_name.split('_')
@@ -629,32 +793,72 @@ class EnhancedProcurementOptimizer:
             if not item:
                 continue
             
-            cost = self._calculate_effective_cost(option, item) * item.quantity
+            # Calculate procurement cost
+            cost = float(self._calculate_effective_cost(option, item) * item.quantity)
+            
+            # Calculate business value (revenue from item)
+            business_value = 0
+            if hasattr(item, 'delivery_options_rel') and item.delivery_options_rel:
+                # Use the first delivery option's invoice amount
+                first_delivery = item.delivery_options_rel[0]
+                business_value = float(first_delivery.invoice_amount_per_unit) * item.quantity
+            
+            # If no delivery option, use 20% markup as default
+            if business_value == 0:
+                business_value = cost * 1.20
+            
             project = self.projects.get(project_id)
             
-            # Apply strategy-specific weighting
+            # Apply strategy-specific weighting to BOTH cost and value
+            # This ensures strategies still differentiate while maintaining profitability
             if strategy == OptimizationStrategy.LOWEST_COST:
-                weight = 1
+                cost_weight = 1.0
+                value_weight = 1.0
             elif strategy == OptimizationStrategy.PRIORITY_WEIGHTED:
-                priority_weight = project.priority_weight if project else 5
-                weight = 11 - priority_weight
+                priority = project.priority_weight if project else 5
+                # Higher priority = lower cost weight, higher value weight
+                cost_weight = float(11 - priority) * 0.1
+                value_weight = float(priority) * 0.1
             elif strategy == OptimizationStrategy.FAST_DELIVERY:
-                weight = delivery_time  # Prefer earlier deliveries
+                # Earlier delivery = higher value
+                cost_weight = 1.0
+                value_weight = float(12 - delivery_time) * 0.1
             elif strategy == OptimizationStrategy.SMOOTH_CASHFLOW:
-                # Penalize extreme time slots
-                mid_point = 6
-                weight = 1 + abs(delivery_time - mid_point) * 0.1
+                # Prefer middle time slots
+                mid_point = 8.5
+                distance = abs(delivery_time - mid_point)
+                cost_weight = 1.0 + distance * 0.1
+                value_weight = 1.0 - distance * 0.05
             else:  # BALANCED
-                priority_weight = project.priority_weight if project else 5
-                weight = (11 - priority_weight) * 0.7 + delivery_time * 0.3
+                priority = project.priority_weight if project else 5
+                priority_factor = float(11 - priority) * 0.05
+                delivery_factor = float(12 - delivery_time) * 0.05
+                cost_weight = priority_factor + delivery_factor + 0.5
+                value_weight = 1.0
             
-            weighted_cost = int(cost * 100 * weight)
-            objective_terms.append(var * weighted_cost)
+            # Scale to thousands for numerical stability
+            cost_scaled = int(cost / 1000 * cost_weight)
+            value_scaled = int(business_value / 1000 * value_weight)
+            
+            cost_terms.append(var * cost_scaled)
+            value_terms.append(var * value_scaled)
         
-        model.Minimize(sum(objective_terms))
+        # Add budget penalty if slack variables exist
+        budget_penalty = 0
+        if hasattr(self, 'cpsat_budget_slack_vars') and self.cpsat_budget_slack_vars:
+            BUDGET_PENALTY_MULTIPLIER = 10
+            budget_penalty = sum(slack * BUDGET_PENALTY_MULTIPLIER for slack in self.cpsat_budget_slack_vars)
+        
+        # Objective: Minimize(Cost - Value + Budget_Penalty)
+        model.Minimize(sum(cost_terms) - sum(value_terms) + budget_penalty)
     
     def _set_glop_objective(self, objective, variables: Dict, strategy: OptimizationStrategy):
-        """Set objective for Glop LP solver"""
+        """Set objective for Glop LP solver
+        
+        Goal: Maximize items purchased while minimizing cost
+        """
+        PURCHASE_BONUS = 50000.0  # $50K bonus per item purchased (80% of avg cost)
+        
         for var_name, var in variables.items():
             parts = var_name.split('_')
             option_id = int(parts[3])
@@ -674,16 +878,23 @@ class EnhancedProcurementOptimizer:
             
             # Strategy-based weighting (same logic as CP-SAT)
             if strategy == OptimizationStrategy.LOWEST_COST:
-                weight = 1.0
+                weight = 1.0  # Pure cost minimization
             elif strategy == OptimizationStrategy.PRIORITY_WEIGHTED:
                 priority_weight = project.priority_weight if project else 5
-                weight = float(11 - priority_weight)
+                weight = float(11 - priority_weight)  # Higher priority = lower weight = better
             elif strategy == OptimizationStrategy.FAST_DELIVERY:
-                weight = float(delivery_time)
-            else:
-                weight = 1.0
+                weight = float(12 - delivery_time)  # Earlier delivery = lower weight = better
+            elif strategy == OptimizationStrategy.SMOOTH_CASHFLOW:
+                mid_point = 8.5  # Middle of range 5-12
+                weight = 1.0 + float(abs(delivery_time - mid_point)) * 0.2
+            else:  # BALANCED
+                priority_weight = project.priority_weight if project else 5
+                priority_factor = float(11 - priority_weight) * 0.7  # Higher priority = better
+                delivery_factor = float(12 - delivery_time) * 0.3    # Earlier delivery = better
+                weight = priority_factor + delivery_factor
             
-            objective.SetCoefficient(var, cost * weight)
+            # Objective: Cost - Purchase Bonus (encourages purchasing)
+            objective.SetCoefficient(var, (cost * weight) - PURCHASE_BONUS)
     
     def _set_mip_objective(self, objective, variables: Dict, strategy: OptimizationStrategy):
         """Set objective for MIP solver (same as Glop)"""

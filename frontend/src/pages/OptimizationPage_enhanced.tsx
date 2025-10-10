@@ -143,7 +143,71 @@ export const OptimizationPageEnhanced: React.FC = () => {
   useEffect(() => {
     fetchSolverInfo();
     fetchProcurementOptions();
+    fetchExistingProposals();
   }, []);
+  
+  const fetchExistingProposals = async () => {
+    try {
+      // Fetch PROPOSED decisions (not yet finalized/locked)
+      const response = await decisionsAPI.list({ limit: 1000 });
+      const proposedDecisions = response.data.filter((d: any) => d.status === 'PROPOSED');
+      
+      if (proposedDecisions.length > 0) {
+        // Group by run_id
+        const runGroups = proposedDecisions.reduce((groups: any, decision: any) => {
+          if (!groups[decision.run_id]) {
+            groups[decision.run_id] = [];
+          }
+          groups[decision.run_id].push(decision);
+          return groups;
+        }, {});
+        
+        // Convert to proposals format
+        const proposals = Object.entries(runGroups).map(([run_id, decisions]: any) => {
+          const total_cost = decisions.reduce((sum: number, d: any) => sum + (d.final_cost || 0), 0);
+          const items_count = decisions.length;
+          
+          return {
+            proposal_id: `existing_${run_id}`,
+            run_id: run_id,
+            strategy: 'Existing Proposal',
+            solver: 'User Created',
+            total_cost: total_cost,
+            items_count: items_count,
+            decisions: decisions.map((d: any) => ({
+              project_id: d.project_id,
+              project_code: d.project_code,
+              item_code: d.item_code,
+              item_name: d.item_name || d.item_code,
+              quantity: d.quantity,
+              supplier_name: d.supplier_name,
+              delivery_time: 0,
+              final_cost: d.final_cost,
+              delivery_date: d.delivery_date,
+              payment_terms: d.payment_terms || { type: 'cash' },
+            })),
+            status: 'PROPOSED',
+            timestamp: new Date().toISOString(),
+          };
+        });
+        
+        // Set as lastRun with existing proposals
+        setLastRun({
+          status: 'success',
+          message: `Loaded ${proposals.length} existing proposal(s)`,
+          total_cost: proposals[0]?.total_cost || 0,
+          solver_type: 'Multiple',
+          strategy: 'Existing',
+          proposals: proposals,
+          timestamp: new Date().toISOString(),
+        });
+        
+        setSuccess(`Loaded ${proposals.length} existing proposal(s) with ${proposedDecisions.length} items. You can edit, finalize, or delete them.`);
+      }
+    } catch (err: any) {
+      console.error('Failed to load existing proposals:', err);
+    }
+  };
 
   const fetchSolverInfo = async () => {
     try {
@@ -363,6 +427,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
       setRemovedDecisions(new Set());
       setAddedDecisions([]);
       
+      // Refresh existing proposals to show the newly saved one
+      await fetchExistingProposals();
+      
       // Fetch the saved decisions to get their IDs for finalization
       if (lastRun?.run_id) {
         const decisionsResponse = await decisionsAPI.list({ run_id: lastRun.run_id });
@@ -396,6 +463,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
       setSuccess(`✅ Successfully locked ${response.data.finalized_count} decisions! They will not be re-optimized.`);
       setFinalizeDialogOpen(false);
       setSavedDecisionIds([]);
+      
+      // Refresh existing proposals to remove finalized ones
+      await fetchExistingProposals();
       
     } catch (err: any) {
       setError(formatApiError(err, 'Failed to finalize decisions'));
@@ -688,7 +758,10 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         variant="outlined"
                         size="small"
                         startIcon={<AddIcon />}
-                        onClick={() => setAddDialogOpen(true)}
+                        onClick={() => {
+                          setSelectedDecision(null);
+                          setAddDialogOpen(true);
+                        }}
                       >
                         Add Item
                       </Button>

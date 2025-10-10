@@ -28,8 +28,8 @@ class ExcelHandler:
             'item_code': ['ITEM001', 'ITEM002'],
             'item_name': ['Sample Item 1', 'Sample Item 2'],
             'quantity': [10, 5],
-            'must_buy_time': [2, ''],
-            'allowed_times': ['1,2,3', '2,4'],
+            'delivery_options': ['2025-01-15,2025-02-15', '2025-03-01'],
+            'description': ['Structural steel beam, Grade A36', 'Electrical cable, 50m'],
             'external_purchase': [True, False]
         }
         
@@ -40,17 +40,17 @@ class ExcelHandler:
             
             # Add instructions sheet
             instructions = pd.DataFrame({
-                'Field': ['project_id', 'item_code', 'item_name', 'quantity', 'must_buy_time', 'allowed_times', 'external_purchase'],
+                'Field': ['project_id', 'item_code', 'item_name', 'quantity', 'delivery_options', 'description', 'external_purchase'],
                 'Description': [
                     'Project ID (integer)',
                     'Unique item code (string)',
-                    'Item description',
+                    'Item name/title',
                     'Required quantity (integer > 0)',
-                    'Required delivery time slot (integer, optional)',
-                    'Allowed delivery times, comma-separated (e.g., "1,2,4")',
+                    'Delivery dates, comma-separated (e.g., "2025-01-15,2025-02-15")',
+                    'Item description, specifications, notes (optional)',
                     'Whether external purchase (True/False)'
                 ],
-                'Example': ['1', 'ITEM001', 'Sample Item', '10', '2', '1,2,3', 'True']
+                'Example': ['1', 'ITEM001', 'Sample Item', '10', '2025-01-15,2025-02-15', 'Grade A36 steel', 'True']
             })
             instructions.to_excel(writer, sheet_name='Instructions', index=False)
         
@@ -137,7 +137,7 @@ class ExcelHandler:
             df = pd.read_excel(BytesIO(file_content), sheet_name='Project Items')
             
             # Validate required columns
-            required_columns = ['project_id', 'item_code', 'item_name', 'quantity', 'allowed_times']
+            required_columns = ['project_id', 'item_code', 'quantity', 'delivery_options']
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
@@ -154,21 +154,25 @@ class ExcelHandler:
             
             for index, row in df.iterrows():
                 try:
-                    # Parse payment terms for external purchases
-                    external_purchase = bool(row.get('external_purchase', False))
-                    must_buy_time = row.get('must_buy_time')
-                    if pd.isna(must_buy_time) or must_buy_time == '':
-                        must_buy_time = None
+                    # Parse delivery_options (comma-separated dates)
+                    delivery_options_str = str(row['delivery_options'])
+                    if pd.isna(row['delivery_options']) or delivery_options_str == '':
+                        delivery_options = [pd.Timestamp.now().strftime('%Y-%m-%d')]
                     else:
-                        must_buy_time = int(must_buy_time)
+                        delivery_options = [date.strip() for date in delivery_options_str.split(',')]
+                    
+                    # Parse optional fields
+                    external_purchase = bool(row.get('external_purchase', False))
+                    item_name = str(row['item_name']) if 'item_name' in row and pd.notna(row['item_name']) else None
+                    description = str(row['description']) if 'description' in row and pd.notna(row['description']) else None
                     
                     item_data = {
                         'project_id': int(row['project_id']),
                         'item_code': str(row['item_code']),
-                        'item_name': str(row['item_name']) if pd.notna(row['item_name']) else None,
+                        'item_name': item_name,
                         'quantity': int(row['quantity']),
-                        'must_buy_time': must_buy_time,
-                        'allowed_times': str(row['allowed_times']),
+                        'delivery_options': delivery_options,
+                        'description': description,
                         'external_purchase': external_purchase
                     }
                     
@@ -370,13 +374,16 @@ class ExcelHandler:
         # Convert to DataFrame
         data = []
         for item in items:
+            # Convert delivery_options list to comma-separated string
+            delivery_options_str = ','.join(item.delivery_options) if item.delivery_options else ''
+            
             data.append({
                 'project_id': item.project_id,
                 'item_code': item.item_code,
-                'item_name': item.item_name,
+                'item_name': item.item_name or '',
                 'quantity': item.quantity,
-                'must_buy_time': item.must_buy_time,
-                'allowed_times': item.allowed_times,
+                'delivery_options': delivery_options_str,
+                'description': item.description or '',
                 'external_purchase': item.external_purchase
             })
         

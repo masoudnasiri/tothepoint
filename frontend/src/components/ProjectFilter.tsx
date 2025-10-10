@@ -4,8 +4,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Checkbox,
-  ListItemText,
   Chip,
   Box,
   SelectChangeEvent,
@@ -54,58 +52,37 @@ export const ProjectFilter: React.FC<ProjectFilterProps> = ({
     onChange(typeof value === 'string' ? [] : value as number[]);
   };
 
-  const getSelectedNames = () => {
-    if (selectedProjects.length === 0) return 'All Projects';
-    if (selectedProjects.length === projects.length) return 'All Projects';
-    return selectedProjects
-      .map(id => projects.find(p => p.id === id)?.project_code)
-      .filter(Boolean)
-      .join(', ');
-  };
-
   return (
-    <FormControl fullWidth size="small" sx={{ minWidth: 250 }}>
+    <FormControl fullWidth sx={{ minWidth: 250 }}>
       <InputLabel>{label}</InputLabel>
       <Select
         multiple={multiple}
         value={selectedProjects}
         onChange={handleChange}
         label={label}
-        renderValue={() => getSelectedNames()}
         disabled={loading}
+        renderValue={(selected) => {
+          if (selected.length === 0) {
+            return <Box sx={{ color: 'text.secondary' }}>All Projects</Box>;
+          }
+          return (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {selected.map((id) => {
+                const project = projects.find(p => p.id === id);
+                return project ? (
+                  <Chip key={id} label={project.project_code} size="small" />
+                ) : null;
+              })}
+            </Box>
+          );
+        }}
       >
-        <MenuItem
-          value={0}
-          onClick={() => onChange([])}
-        >
-          <Checkbox checked={selectedProjects.length === 0} />
-          <ListItemText primary="All Projects" />
-        </MenuItem>
         {projects.map((project) => (
           <MenuItem key={project.id} value={project.id}>
-            <Checkbox checked={selectedProjects.indexOf(project.id) > -1} />
-            <ListItemText 
-              primary={project.project_code}
-              secondary={project.project_name}
-            />
+            {project.project_code} - {project.project_name}
           </MenuItem>
         ))}
       </Select>
-      {selectedProjects.length > 0 && (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
-          {selectedProjects.map(projectId => {
-            const project = projects.find(p => p.id === projectId);
-            return project ? (
-              <Chip
-                key={projectId}
-                label={project.project_code}
-                size="small"
-                onDelete={() => onChange(selectedProjects.filter(id => id !== projectId))}
-              />
-            ) : null;
-          })}
-        </Box>
-      )}
     </FormControl>
   );
 };

@@ -159,13 +159,21 @@ export const UsersPage: React.FC = () => {
           >
             Refresh
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setCreateDialogOpen(true)}
-          >
-            Add User
-          </Button>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => {
+                setFormData({
+                  username: '',
+                  password: '',
+                  role: 'pm',
+                  is_active: true,
+                });
+                setCreateDialogOpen(true);
+              }}
+            >
+              Add User
+            </Button>
         </Box>
       </Box>
 

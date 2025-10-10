@@ -21,6 +21,7 @@ from app.schemas import (
     FinalizeDecisionsRequest,
     BatchSaveDecisionsRequest,
     ActualInvoiceDataRequest,
+    ActualPaymentDataRequest,
     DecisionStatusUpdate
 )
 from decimal import Decimal
@@ -34,7 +35,7 @@ router = APIRouter(prefix="/decisions", tags=["finalized-decisions"])
 @router.get("/", response_model=List[FinalizedDecisionSchema])
 async def list_finalized_decisions(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 1000,  # Increased from 100 to 1000 to handle large datasets
     run_id: Optional[str] = None,
     project_id: Optional[int] = None,
     status: Optional[str] = None,
@@ -46,6 +47,8 @@ async def list_finalized_decisions(
     Get all finalized decisions with optional filtering
     
     Parameters:
+    - skip: Number of records to skip (pagination)
+    - limit: Maximum number of records to return (default: 1000, max: 1000)
     - hide_superseded: If True (default), hides REVERTED decisions that have been superseded by new decisions
     - status: Filter by status (PROPOSED, LOCKED, REVERTED)
     """
@@ -305,6 +308,21 @@ async def save_proposal_as_decisions(
             purchase_date = datetime.fromisoformat(decision_data['purchase_date'].replace('Z', '+00:00')).date() if isinstance(decision_data['purchase_date'], str) else decision_data['purchase_date']
             delivery_date = datetime.fromisoformat(decision_data['delivery_date'].replace('Z', '+00:00')).date() if isinstance(decision_data['delivery_date'], str) else decision_data['delivery_date']
             
+            # Get invoice amount from delivery options (20% markup fallback)
+            delivery_opt_result = await db.execute(
+                select(DeliveryOption)
+                .where(DeliveryOption.project_item_id == project_item.id)
+                .limit(1)
+            )
+            delivery_opt = delivery_opt_result.scalars().first()
+            
+            if delivery_opt and delivery_opt.invoice_amount_per_unit:
+                # Use actual invoice amount from delivery option
+                forecast_invoice_amount = delivery_opt.invoice_amount_per_unit * decision_data['quantity']
+            else:
+                # Fallback: Use 20% markup on cost
+                forecast_invoice_amount = Decimal(str(decision_data['final_cost'])) * Decimal('1.20')
+            
             decision = FinalizedDecision(
                 run_id=run_uuid,
                 project_id=project_id,
@@ -320,10 +338,10 @@ async def save_proposal_as_decisions(
                 status='PROPOSED',
                 is_manual_edit=decision_data.get('is_manual_edit', False),
                 notes=f"Saved from proposal: {proposal_name}",
-                # Forecast invoice - use defaults for now
+                # Forecast invoice - use actual invoice amount from delivery options
                 forecast_invoice_timing_type='RELATIVE',
                 forecast_invoice_days_after_delivery=30,
-                forecast_invoice_amount=Decimal(str(decision_data['final_cost']))
+                forecast_invoice_amount=forecast_invoice_amount
             )
             db.add(decision)
             await db.flush()
@@ -549,6 +567,21 @@ async def save_batch_decisions(
             purchase_date = date.today() + timedelta(days=opt_result.purchase_time * 30)
             delivery_date = date.today() + timedelta(days=opt_result.delivery_time * 30)
             
+            # Get invoice amount from delivery options (20% markup fallback)
+            delivery_opt_result = await db.execute(
+                select(DeliveryOption)
+                .where(DeliveryOption.project_item_id == project_item.id)
+                .limit(1)
+            )
+            delivery_opt = delivery_opt_result.scalars().first()
+            
+            if delivery_opt and delivery_opt.invoice_amount_per_unit:
+                # Use actual invoice amount from delivery option
+                forecast_invoice_amount = delivery_opt.invoice_amount_per_unit * opt_result.quantity
+            else:
+                # Fallback: Use 20% markup on cost
+                forecast_invoice_amount = opt_result.final_cost * Decimal('1.20')
+            
             # Check if decision already exists
             existing_check = await db.execute(
                 select(FinalizedDecision).where(
@@ -576,7 +609,7 @@ async def save_batch_decisions(
                 status='PROPOSED',
                 forecast_invoice_timing_type='RELATIVE',
                 forecast_invoice_days_after_delivery=30,
-                forecast_invoice_amount=opt_result.final_cost
+                forecast_invoice_amount=forecast_invoice_amount
             )
             db.add(decision)
             await db.flush()
@@ -598,7 +631,7 @@ async def save_batch_decisions(
                 event_type='INFLOW',
                 forecast_type='FORECAST',
                 event_date=invoice_date,
-                amount=decision.final_cost,
+                amount=decision.forecast_invoice_amount,  # Use invoice amount, not cost!
                 description=f"Revenue from {opt_result.item_code}"
             )
             db.add(inflow)
@@ -811,6 +844,86 @@ async def enter_actual_invoice_data(
             description=f"Actual revenue from {decision.item_code}"
         )
         db.add(actual_inflow)
+    
+    await db.commit()
+    
+    # Fetch and return updated decision
+    result = await db.execute(
+        select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
+    )
+    return result.scalar_one()
+
+
+@router.post("/{decision_id}/actual-payment", response_model=FinalizedDecisionSchema)
+async def enter_actual_payment_data(
+    decision_id: int,
+    payment_data: ActualPaymentDataRequest,
+    current_user: User = Depends(require_finance()),
+    db: AsyncSession = Depends(get_db)
+):
+    """Enter actual payment data to supplier (for finance team)"""
+    from sqlalchemy.orm import selectinload
+    
+    result = await db.execute(
+        select(FinalizedDecision)
+        .options(selectinload(FinalizedDecision.procurement_option))
+        .where(FinalizedDecision.id == decision_id)
+    )
+    decision = result.scalar_one_or_none()
+    
+    if not decision:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Decision not found"
+        )
+    
+    # Get supplier name from procurement option
+    supplier_name = decision.procurement_option.supplier_name if decision.procurement_option else "Supplier"
+    
+    # Update actual payment fields
+    await db.execute(
+        update(FinalizedDecision)
+        .where(FinalizedDecision.id == decision_id)
+        .values(
+            actual_payment_amount=payment_data.actual_payment_amount,
+            actual_payment_date=payment_data.actual_payment_date,
+            actual_payment_installments=payment_data.actual_payment_installments,
+            payment_entered_by_id=current_user.id,
+            payment_entered_at=datetime.utcnow(),
+            notes=sql_func.concat(
+                sql_func.coalesce(FinalizedDecision.notes, ''),
+                f"\n[Payment] {payment_data.notes}" if payment_data.notes else ''
+            )
+        )
+    )
+    
+    # Create ACTUAL cashflow events for payments
+    if payment_data.actual_payment_installments:
+        # Multiple installments
+        for installment in payment_data.actual_payment_installments:
+            installment_date = datetime.strptime(installment['date'], '%Y-%m-%d').date()
+            installment_amount = Decimal(str(installment['amount']))
+            
+            actual_outflow = CashflowEvent(
+                related_decision_id=decision_id,
+                event_type='OUTFLOW',
+                forecast_type='ACTUAL',
+                event_date=installment_date,
+                amount=installment_amount,
+                description=f"Actual payment installment to {supplier_name} for {decision.item_code}"
+            )
+            db.add(actual_outflow)
+    else:
+        # Single payment (cash)
+        actual_outflow = CashflowEvent(
+            related_decision_id=decision_id,
+            event_type='OUTFLOW',
+            forecast_type='ACTUAL',
+            event_date=payment_data.actual_payment_date,
+            amount=payment_data.actual_payment_amount,
+            description=f"Actual payment to {supplier_name} for {decision.item_code}"
+        )
+        db.add(actual_outflow)
     
     await db.commit()
     

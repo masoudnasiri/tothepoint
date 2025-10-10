@@ -18,6 +18,43 @@ class ProjectItemStatusEnum(str, Enum):
     CASH_RECEIVED = "CASH_RECEIVED"
 
 
+# Items Master Schemas
+class ItemMasterBase(BaseModel):
+    company: str = Field(..., min_length=1, max_length=100)
+    item_name: str = Field(..., min_length=1, max_length=200)
+    model: Optional[str] = Field(None, max_length=100)
+    specifications: Optional[Dict[str, Any]] = None
+    category: Optional[str] = Field(None, max_length=100)
+    unit: str = Field(default='piece', max_length=50)
+    description: Optional[str] = None
+
+
+class ItemMasterCreate(ItemMasterBase):
+    pass  # item_code will be auto-generated
+
+
+class ItemMasterUpdate(BaseModel):
+    company: Optional[str] = Field(None, min_length=1, max_length=100)
+    item_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    model: Optional[str] = Field(None, max_length=100)
+    specifications: Optional[Dict[str, Any]] = None
+    category: Optional[str] = Field(None, max_length=100)
+    unit: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class ItemMaster(ItemMasterBase):
+    id: int
+    item_code: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    is_active: bool
+    
+    model_config = {"from_attributes": True}
+
+
 # User Schemas
 class UserBase(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
@@ -125,12 +162,20 @@ class ProjectPhase(ProjectPhaseBase):
 
 # Project Item Schemas
 class ProjectItemBase(BaseModel):
-    item_code: str = Field(..., min_length=1, max_length=50)
-    item_name: Optional[str] = None
+    master_item_id: Optional[int] = None  # Reference to Items Master
+    item_code: str = Field(..., min_length=1, max_length=100)  # Denormalized from master
+    item_name: Optional[str] = None  # Denormalized from master
     quantity: int = Field(..., gt=0)
     delivery_options: List[str] = Field(..., min_items=1)
     status: ProjectItemStatusEnum = ProjectItemStatusEnum.PENDING
     external_purchase: bool = False
+    
+    # Project-specific description (context for this project's usage)
+    description: Optional[str] = None
+    
+    # File attachment (project-specific documents)
+    file_path: Optional[str] = None
+    file_name: Optional[str] = None
     
     # Lifecycle date tracking
     decision_date: Optional[date] = None
@@ -165,6 +210,11 @@ class ProjectItemUpdate(BaseModel):
     delivery_options: Optional[List[str]] = Field(None, min_items=1)
     status: Optional[ProjectItemStatusEnum] = None
     external_purchase: Optional[bool] = None
+    
+    # NEW: Description and file attachment
+    description: Optional[str] = None
+    file_path: Optional[str] = None
+    file_name: Optional[str] = None
     
     # Lifecycle date tracking
     decision_date: Optional[date] = None
@@ -396,6 +446,13 @@ class FinalizedDecisionBase(BaseModel):
     invoice_entered_by_id: Optional[int] = None
     invoice_entered_at: Optional[datetime] = None
     
+    # Actual Payment Data (entered by finance for payments to suppliers)
+    actual_payment_amount: Optional[Decimal] = Field(None, ge=0)
+    actual_payment_date: Optional[date] = None
+    actual_payment_installments: Optional[List[Dict[str, Any]]] = None
+    payment_entered_by_id: Optional[int] = None
+    payment_entered_at: Optional[datetime] = None
+    
     is_manual_edit: bool = False
     notes: Optional[str] = None
 
@@ -462,6 +519,14 @@ class ActualInvoiceDataRequest(BaseModel):
     actual_invoice_issue_date: date
     actual_invoice_amount: Decimal = Field(..., gt=0)
     actual_invoice_received_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+# Request for entering actual payment data
+class ActualPaymentDataRequest(BaseModel):
+    actual_payment_amount: Decimal = Field(..., gt=0)  # Total amount paid
+    actual_payment_date: date  # First/single payment date
+    actual_payment_installments: Optional[List[Dict[str, Any]]] = None  # [{"date": "2026-01-15", "amount": 10000}, ...]
     notes: Optional[str] = None
 
 
@@ -591,3 +656,4 @@ class ProjectSummary(BaseModel):
     item_count: int
     total_quantity: int
     estimated_cost: Optional[Decimal] = None
+    estimated_revenue: Optional[Decimal] = None

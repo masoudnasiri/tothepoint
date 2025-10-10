@@ -18,6 +18,33 @@ class ProjectItemStatus(enum.Enum):
     CASH_RECEIVED = "CASH_RECEIVED"
 
 
+class ItemMaster(Base):
+    """
+    Master catalog of all items (products, materials, equipment)
+    Items are defined once here, then referenced by project_items
+    """
+    __tablename__ = "items_master"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    item_code = Column(String(100), unique=True, nullable=False, index=True)  # Auto-generated: COMPANY-NAME-MODEL
+    company = Column(String(100), nullable=False, index=True)  # Manufacturer/Brand
+    item_name = Column(String(200), nullable=False)  # Product name
+    model = Column(String(100), nullable=True)  # Model number/variant
+    specifications = Column(JSON, nullable=True)  # Standard specs (length, weight, material, etc.)
+    category = Column(String(100), nullable=True, index=True)  # Construction, Electrical, etc.
+    unit = Column(String(50), default='piece')  # piece, meter, kg, etc.
+    description = Column(Text, nullable=True)  # General description of the item
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    project_items = relationship("ProjectItem", back_populates="master_item")
+
+
 class User(Base):
     __tablename__ = "users"
     
@@ -86,12 +113,26 @@ class ProjectItem(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    item_code = Column(String(50), nullable=False)
+    
+    # NEW: Reference to Items Master
+    master_item_id = Column(Integer, ForeignKey("items_master.id", ondelete="RESTRICT"), nullable=True, index=True)
+    
+    # Denormalized from master (for backward compatibility and performance)
+    item_code = Column(String(100), nullable=False, index=True)
     item_name = Column(Text)
+    
+    # Project-specific fields
     quantity = Column(Integer, nullable=False)
     delivery_options = Column(JSON, nullable=False, default=list)  # Array of possible delivery dates
     status = Column(SQLEnum(ProjectItemStatus), nullable=False, default=ProjectItemStatus.PENDING)
     external_purchase = Column(Boolean, default=False)
+    
+    # Project-specific description (context for THIS project's usage)
+    description = Column(Text, nullable=True)
+    
+    # File attachment (project-specific documents)
+    file_path = Column(String(500), nullable=True)
+    file_name = Column(String(255), nullable=True)
     
     # Lifecycle date tracking
     decision_date = Column(Date, nullable=True)
@@ -106,6 +147,7 @@ class ProjectItem(Base):
     
     # Relationships
     project = relationship("Project", back_populates="project_items")
+    master_item = relationship("ItemMaster", back_populates="project_items")
     delivery_options_rel = relationship("DeliveryOption", back_populates="project_item", cascade="all, delete-orphan")
     finalized_decisions = relationship("FinalizedDecision", back_populates="project_item", cascade="all, delete-orphan")
 
@@ -251,6 +293,13 @@ class FinalizedDecision(Base):
     actual_invoice_received_date = Column(Date, nullable=True)  # When payment actually received
     invoice_entered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     invoice_entered_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Actual Payment Data (entered by finance team for payments to suppliers)
+    actual_payment_amount = Column(Numeric(12, 2), nullable=True)  # Total amount paid
+    actual_payment_date = Column(Date, nullable=True)  # First/single payment date
+    actual_payment_installments = Column(JSON, nullable=True)  # For installment payments: [{"date": "2026-01-15", "amount": 10000}, ...]
+    payment_entered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    payment_entered_at = Column(DateTime(timezone=True), nullable=True)
     
     decision_maker_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     decision_date = Column(DateTime(timezone=True), nullable=False)

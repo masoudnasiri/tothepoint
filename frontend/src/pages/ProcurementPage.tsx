@@ -34,6 +34,7 @@ import {
   ExpandMore as ExpandMoreIcon,
   Download as DownloadIcon,
   Upload as UploadIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { procurementAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
@@ -46,9 +47,17 @@ interface DeliveryOption {
   invoice_amount_per_unit: number;
 }
 
+interface ItemWithDetails {
+  item_code: string;
+  item_name: string;
+  description: string;
+}
+
 export const ProcurementPage: React.FC = () => {
   const { user } = useAuth();
   const [itemCodes, setItemCodes] = useState<string[]>([]);
+  const [itemsWithDetails, setItemsWithDetails] = useState<ItemWithDetails[]>([]);
+  const [selectedItemDetails, setSelectedItemDetails] = useState<ItemWithDetails | null>(null);
   const [procurementOptions, setProcurementOptions] = useState<ProcurementOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -74,11 +83,12 @@ export const ProcurementPage: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const [itemCodesResponse, optionsResponse] = await Promise.all([
-        procurementAPI.getItemCodes(),
+      const [itemsResponse, optionsResponse] = await Promise.all([
+        procurementAPI.getItemsWithDetails(),
         procurementAPI.listOptions(),
       ]);
-      setItemCodes(itemCodesResponse.data);
+      setItemsWithDetails(itemsResponse.data);
+      setItemCodes(itemsResponse.data.map((item: ItemWithDetails) => item.item_code));
       setProcurementOptions(optionsResponse.data);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load procurement data');
@@ -110,11 +120,17 @@ export const ProcurementPage: React.FC = () => {
 
   const handleItemCodeChange = async (itemCode: string) => {
     setFormData({ ...formData, item_code: itemCode });
+    
+    // Find and set item details
+    const itemDetails = itemsWithDetails.find(item => item.item_code === itemCode);
+    setSelectedItemDetails(itemDetails || null);
+    
     if (itemCode) {
       await fetchDeliveryOptions(itemCode);
     } else {
       setAvailableDeliveryOptions([]);
       setSelectedDeliveryDate('');
+      setSelectedItemDetails(null);
     }
   };
 
@@ -197,6 +213,7 @@ export const ProcurementPage: React.FC = () => {
     });
     setAvailableDeliveryOptions([]);
     setSelectedDeliveryDate('');
+    setSelectedItemDetails(null);
   };
 
   const handleExportOptions = async () => {
@@ -278,6 +295,18 @@ export const ProcurementPage: React.FC = () => {
           <Box>
             <Button
               variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={() => {
+                setLoading(true);
+                fetchData();
+              }}
+              sx={{ mr: 1 }}
+              title="Refresh to see items after decisions are reverted"
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="outlined"
               startIcon={<DownloadIcon />}
               onClick={handleDownloadTemplate}
               sx={{ mr: 1 }}
@@ -306,13 +335,6 @@ export const ProcurementPage: React.FC = () => {
             >
               Export Options
             </Button>
-            <Button
-              variant="contained"
-              startIcon={<AddIcon />}
-              onClick={() => setCreateDialogOpen(true)}
-            >
-              Add Option
-            </Button>
           </Box>
         )}
       </Box>
@@ -323,14 +345,56 @@ export const ProcurementPage: React.FC = () => {
         </Alert>
       )}
 
-      {itemCodes.map((itemCode) => (
-        <Accordion key={itemCode} sx={{ mb: 2 }}>
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="h6">
-              {itemCode} ({procurementOptions.filter(opt => opt.item_code === itemCode).length} options)
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
+      <Alert severity="info" sx={{ mb: 3 }}>
+        <Typography variant="body2">
+          ℹ️ <strong>Item Lifecycle:</strong> Items with finalized (LOCKED) decisions are automatically removed from this list. 
+          They will reappear if the decision is reverted by Finance team.
+        </Typography>
+      </Alert>
+
+      {itemCodes.length === 0 ? (
+        <Paper sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="h6" color="text.secondary" gutterBottom>
+            No Items Available
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            All items have finalized decisions or no project items exist yet.
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Items will appear here when:
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            • PM creates new project items
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            • Finance reverts locked decisions
+          </Typography>
+        </Paper>
+      ) : (
+        itemCodes.map((itemCode) => {
+        const itemDetails = itemsWithDetails.find(item => item.item_code === itemCode);
+        const itemOptions = procurementOptions.filter(opt => opt.item_code === itemCode);
+        
+        return (
+          <Accordion key={itemCode} sx={{ mb: 2 }}>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 2 }}>
+                <Box>
+                  <Typography variant="h6">
+                    {itemCode} ({itemOptions.length} options)
+                  </Typography>
+                  {itemDetails && (itemDetails.item_name || itemDetails.description) && (
+                    <Typography variant="caption" color="text.secondary">
+                      {itemDetails.item_name}
+                      {itemDetails.item_name && itemDetails.description && ' - '}
+                      {itemDetails.description && itemDetails.description.substring(0, 80)}
+                      {itemDetails.description && itemDetails.description.length > 80 && '...'}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            </AccordionSummary>
+            <AccordionDetails>
             <TableContainer component={Paper}>
               <Table size="small">
                 <TableHead>
@@ -391,6 +455,9 @@ export const ProcurementPage: React.FC = () => {
                                     discount_bundle_percent: option.discount_bundle_percent,
                                     payment_terms: option.payment_terms,
                                   });
+                                  // Set item details for display
+                                  const itemDetails = itemsWithDetails.find(item => item.item_code === option.item_code);
+                                  setSelectedItemDetails(itemDetails || null);
                                   setEditDialogOpen(true);
                                 }}
                                 title="Edit Option"
@@ -413,27 +480,60 @@ export const ProcurementPage: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
+            
+            {/* Add Option Button for this item */}
+            {(user?.role === 'procurement' || user?.role === 'admin') && (
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+                <Button
+                  variant="contained"
+                  startIcon={<AddIcon />}
+                  onClick={() => {
+                    // Pre-fill item code and fetch details
+                    setFormData({
+                      item_code: itemCode,
+                      supplier_name: '',
+                      base_cost: 0,
+                      lomc_lead_time: 0,
+                      discount_bundle_threshold: undefined,
+                      discount_bundle_percent: undefined,
+                      payment_terms: { type: 'cash', discount_percent: 0 },
+                    });
+                    setSelectedItemDetails(itemDetails || null);
+                    fetchDeliveryOptions(itemCode);
+                    setCreateDialogOpen(true);
+                  }}
+                >
+                  Add Option for {itemCode}
+                </Button>
+              </Box>
+            )}
           </AccordionDetails>
         </Accordion>
-      ))}
+        );
+      })
+      )}
 
       {/* Create Option Dialog */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Add New Procurement Option</DialogTitle>
         <DialogContent>
-          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Item Code</InputLabel>
-            <Select
-              value={formData.item_code}
-              onChange={(e) => handleItemCodeChange(e.target.value)}
-            >
-              {itemCodes.map((code) => (
-                <MenuItem key={code} value={code}>
-                  {code}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          {/* Item Information - Pre-filled */}
+          <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: 'primary.lighter', border: '2px solid', borderColor: 'primary.main' }}>
+            <Typography variant="subtitle1" color="primary.dark" gutterBottom sx={{ fontWeight: 'bold' }}>
+              📦 {formData.item_code}
+            </Typography>
+            {selectedItemDetails && selectedItemDetails.item_name && (
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
+                <strong>Name:</strong> {selectedItemDetails.item_name}
+              </Typography>
+            )}
+            {selectedItemDetails && selectedItemDetails.description && (
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                <strong>Description:</strong> {selectedItemDetails.description}
+              </Typography>
+            )}
+          </Paper>
+
           <TextField
             margin="dense"
             label="Supplier Name"
@@ -657,7 +757,12 @@ export const ProcurementPage: React.FC = () => {
             <InputLabel>Item Code</InputLabel>
             <Select
               value={formData.item_code}
-              onChange={(e) => setFormData({ ...formData, item_code: e.target.value })}
+              onChange={(e) => {
+                const newItemCode = e.target.value;
+                setFormData({ ...formData, item_code: newItemCode });
+                const itemDetails = itemsWithDetails.find(item => item.item_code === newItemCode);
+                setSelectedItemDetails(itemDetails || null);
+              }}
             >
               {itemCodes.map((code) => (
                 <MenuItem key={code} value={code}>
@@ -666,6 +771,31 @@ export const ProcurementPage: React.FC = () => {
               ))}
             </Select>
           </FormControl>
+
+          {/* Item Details Display */}
+          {selectedItemDetails && (
+            <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: 'info.lighter', border: '1px solid', borderColor: 'info.light' }}>
+              <Typography variant="subtitle2" color="info.dark" gutterBottom>
+                📦 Item Information
+              </Typography>
+              {selectedItemDetails.item_name && (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Name:</strong> {selectedItemDetails.item_name}
+                </Typography>
+              )}
+              {selectedItemDetails.description && (
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  <strong>Description:</strong> {selectedItemDetails.description}
+                </Typography>
+              )}
+              {!selectedItemDetails.item_name && !selectedItemDetails.description && (
+                <Typography variant="body2" color="text.secondary">
+                  No additional details available for this item.
+                </Typography>
+              )}
+            </Paper>
+          )}
+
           <TextField
             margin="dense"
             label="Supplier Name"

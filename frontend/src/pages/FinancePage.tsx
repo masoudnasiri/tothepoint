@@ -210,7 +210,13 @@ export const FinancePage: React.FC = () => {
             <Button
               variant="contained"
               startIcon={<AddIcon />}
-              onClick={() => setCreateDialogOpen(true)}
+              onClick={() => {
+                setFormData({
+                  budget_date: new Date().toISOString().split('T')[0],
+                  available_budget: 0,
+                });
+                setCreateDialogOpen(true);
+              }}
             >
               Add Budget
             </Button>

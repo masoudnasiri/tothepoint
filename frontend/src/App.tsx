@@ -6,6 +6,7 @@ import { Layout } from './components/Layout.tsx';
 import { LoginPage } from './pages/LoginPage.tsx';
 import { DashboardPage } from './pages/DashboardPage.tsx';
 import { ProjectsPage } from './pages/ProjectsPage.tsx';
+import { ItemsMasterPage } from './pages/ItemsMasterPage.tsx';
 import { ProjectItemsPage } from './pages/ProjectItemsPage.tsx';
 import { FinalizedDecisionsPage } from './pages/FinalizedDecisionsPage.tsx';
 import { ProcurementPage } from './pages/ProcurementPage.tsx';
@@ -30,6 +31,7 @@ function App() {
                   <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/decisions" element={<FinalizedDecisionsPage />} />
                   <Route path="/projects" element={<ProjectsPage />} />
+                  <Route path="/items-master" element={<ItemsMasterPage />} />
                   <Route path="/projects/:projectId/items" element={<ProjectItemsPage />} />
                   <Route path="/procurement" element={<ProcurementPage />} />
                   <Route path="/finance" element={<FinancePage />} />

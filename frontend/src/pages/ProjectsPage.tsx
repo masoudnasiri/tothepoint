@@ -26,6 +26,9 @@ import {
   Checkbox,
   ListItemText,
   OutlinedInput,
+  Card,
+  CardContent,
+  Grid,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -33,6 +36,10 @@ import {
   Delete as DeleteIcon,
   Visibility as ViewIcon,
   CalendarMonth as CalendarIcon,
+  FolderOpen as FolderIcon,
+  Inventory as InventoryIcon,
+  LocalShipping as ShippingIcon,
+  AttachMoney as MoneyIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -212,6 +219,19 @@ export const ProjectsPage: React.FC = () => {
     );
   }
 
+  // Calculate totals for stat cards
+  const totalProjects = projects.length;
+  const totalItems = projects.reduce((sum, p) => sum + (p.item_count || 0), 0);
+  const totalQuantity = projects.reduce((sum, p) => sum + (p.total_quantity || 0), 0);
+  const totalEstimatedCost = projects.reduce((sum, p) => sum + (Number(p.estimated_cost) || 0), 0);
+  const totalEstimatedRevenue = projects.reduce((sum, p) => sum + (Number(p.estimated_revenue) || 0), 0);
+  // Assume all projects in the list are active (API filters for user)
+  const activeProjects = totalProjects;
+
+  const formatNumber = (value: number) => {
+    return new Intl.NumberFormat('en-US').format(value);
+  };
+
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -220,7 +240,16 @@ export const ProjectsPage: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<AddIcon />}
-            onClick={() => setCreateDialogOpen(true)}
+            onClick={() => {
+              setFormData({
+                project_code: '',
+                name: '',
+                priority_weight: 5,
+              });
+              setSelectedProject(null);
+              setAssignedPMs([]);
+              setCreateDialogOpen(true);
+            }}
           >
             Create Project
           </Button>
@@ -233,6 +262,129 @@ export const ProjectsPage: React.FC = () => {
         </Alert>
       )}
 
+      {/* Stat Cards */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography color="textSecondary" gutterBottom variant="subtitle2">
+                    Total Projects
+                  </Typography>
+                  <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
+                    {formatNumber(totalProjects)}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    {activeProjects} active
+                  </Typography>
+                </Box>
+                <Box sx={{ 
+                  bgcolor: 'rgba(25, 118, 210, 0.1)', 
+                  borderRadius: '50%', 
+                  p: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <FolderIcon sx={{ fontSize: 40, color: '#1976d2' }} />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography color="textSecondary" gutterBottom variant="subtitle2">
+                    Total Items
+                  </Typography>
+                  <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#2e7d32' }}>
+                    {formatNumber(totalItems)}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    Across all projects
+                  </Typography>
+                </Box>
+                <Box sx={{ 
+                  bgcolor: 'rgba(46, 125, 50, 0.1)', 
+                  borderRadius: '50%', 
+                  p: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <InventoryIcon sx={{ fontSize: 40, color: '#2e7d32' }} />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography color="textSecondary" gutterBottom variant="subtitle2">
+                    Total Quantity
+                  </Typography>
+                  <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#ed6c02' }}>
+                    {formatNumber(totalQuantity)}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    Units to procure
+                  </Typography>
+                </Box>
+                <Box sx={{ 
+                  bgcolor: 'rgba(237, 108, 2, 0.1)', 
+                  borderRadius: '50%', 
+                  p: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <ShippingIcon sx={{ fontSize: 40, color: '#ed6c02' }} />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography color="textSecondary" gutterBottom variant="subtitle2">
+                    Total Invoice Value
+                  </Typography>
+                  <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#9c27b0' }}>
+                    {formatCurrency(totalEstimatedRevenue || 0)}
+                  </Typography>
+                  <Typography variant="caption" color="textSecondary">
+                    Expected revenue
+                  </Typography>
+                </Box>
+                <Box sx={{ 
+                  bgcolor: 'rgba(156, 39, 176, 0.1)', 
+                  borderRadius: '50%', 
+                  p: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <MoneyIcon sx={{ fontSize: 40, color: '#9c27b0' }} />
+                </Box>
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -241,7 +393,10 @@ export const ProjectsPage: React.FC = () => {
               <TableCell>Name</TableCell>
               <TableCell align="right">Items</TableCell>
               <TableCell align="right">Total Quantity</TableCell>
-              <TableCell align="right">Estimated Cost</TableCell>
+              <TableCell align="right">Total Invoice Value</TableCell>
+              {(user?.role === 'admin' || user?.role === 'finance') && (
+                <TableCell align="right">Estimated Cost</TableCell>
+              )}
               <TableCell align="center">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -259,8 +414,17 @@ export const ProjectsPage: React.FC = () => {
                 </TableCell>
                 <TableCell align="right">{project.total_quantity}</TableCell>
                 <TableCell align="right">
-                  {formatCurrency(project.estimated_cost)}
+                  <Typography variant="body2" fontWeight="medium" color="primary">
+                    {formatCurrency(Number(project.estimated_revenue) || 0)}
+                  </Typography>
                 </TableCell>
+                {(user?.role === 'admin' || user?.role === 'finance') && (
+                  <TableCell align="right">
+                    <Typography variant="body2" color="text.secondary">
+                      {formatCurrency(Number(project.estimated_cost) || 0)}
+                    </Typography>
+                  </TableCell>
+                )}
                 <TableCell align="center">
                   <IconButton
                     size="small"

@@ -30,6 +30,7 @@ import {
   Tune,
   CheckCircle,
   Psychology,
+  Inventory,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -57,6 +58,7 @@ const navigationItems: NavigationItem[] = [
   { text: 'Finalized Decisions', icon: <CheckCircle />, path: '/decisions', roles: ['admin', 'finance'] },
   { text: 'Users', icon: <People />, path: '/users', roles: ['admin'] },
   { text: 'Decision Weights', icon: <Tune />, path: '/weights', roles: ['admin'] },
+  { text: 'Items Master', icon: <Inventory />, path: '/items-master', roles: ['admin', 'pmo', 'pm', 'finance'] },
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {

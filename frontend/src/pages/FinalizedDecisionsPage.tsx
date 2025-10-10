@@ -34,6 +34,7 @@ import {
   Info as InfoIcon,
   Assignment as AssignmentIcon,
   Lock as LockIcon,
+  AttachMoney as AttachMoneyIcon,
 } from '@mui/icons-material';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -93,8 +94,14 @@ export const FinalizedDecisionsPage: React.FC = () => {
   const [actualInvoiceAmount, setActualInvoiceAmount] = useState<number>(0);
   const [actualReceivedDate, setActualReceivedDate] = useState<Date | null>(null);
   const [actualInvoiceNotes, setActualInvoiceNotes] = useState<string>('');
+  const [actualPaymentDialogOpen, setActualPaymentDialogOpen] = useState(false);
+  const [actualPaymentAmount, setActualPaymentAmount] = useState<number>(0);
+  const [actualPaymentDate, setActualPaymentDate] = useState<Date | null>(null);
+  const [actualPaymentInstallments, setActualPaymentInstallments] = useState<Array<{ date: string; amount: number }>>([]);
+  const [actualPaymentNotes, setActualPaymentNotes] = useState<string>('');
   const [selectedDecisionIds, setSelectedDecisionIds] = useState<number[]>([]);
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
+  const [statusFilters, setStatusFilters] = useState<string[]>([]);
 
   // ✅ Prevent PM users from accessing this page
   useEffect(() => {
@@ -110,7 +117,9 @@ export const FinalizedDecisionsPage: React.FC = () => {
   const fetchDecisions = async () => {
     try {
       setLoading(true);
-      const params: any = {};
+      const params: any = {
+        limit: 1000  // Request up to 1000 decisions to avoid pagination issues
+      };
       if (selectedProjects.length > 0) {
         // Filter by selected projects
         params.project_id = selectedProjects[0]; // API currently supports single project
@@ -224,6 +233,28 @@ export const FinalizedDecisionsPage: React.FC = () => {
     setActualInvoiceDialogOpen(true);
   };
 
+  const openActualPaymentDialog = (decision: FinalizedDecision) => {
+    setSelectedDecision(decision);
+    setActualPaymentDate(new Date());
+    setActualPaymentAmount(decision.final_cost);
+    
+    // Initialize installments based on payment terms
+    const paymentTerms = decision.payment_terms as any;
+    if (paymentTerms && paymentTerms.type === 'installments' && paymentTerms.schedule) {
+      // Create installments array from payment terms
+      const installments = paymentTerms.schedule.map((inst: any) => ({
+        date: new Date(Date.now() + inst.due_offset * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        amount: Math.round((decision.final_cost * inst.percent / 100) * 100) / 100
+      }));
+      setActualPaymentInstallments(installments);
+    } else {
+      setActualPaymentInstallments([]);
+    }
+    
+    setActualPaymentNotes('');
+    setActualPaymentDialogOpen(true);
+  };
+
   const handleFinalizeSelected = async () => {
     const proposedDecisions = decisions.filter(d => d.status === 'PROPOSED');
     
@@ -262,6 +293,50 @@ export const FinalizedDecisionsPage: React.FC = () => {
       fetchDecisions();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to enter actual invoice data');
+    }
+  };
+
+  const handleSubmitActualPayment = async () => {
+    if (!selectedDecision) return;
+    
+    // Validate based on payment type
+    if (actualPaymentInstallments.length > 0) {
+      // Installment payment - check all installments are valid
+      if (actualPaymentInstallments.some(inst => !inst.date || inst.amount <= 0)) {
+        setError('All installments must have a date and amount greater than 0');
+        return;
+      }
+    } else {
+      // Cash payment - check single payment is valid
+      if (!actualPaymentDate || actualPaymentAmount <= 0) {
+        setError('Payment date and amount are required');
+        return;
+      }
+    }
+    
+    try {
+      // Calculate total amount
+      const totalAmount = actualPaymentInstallments.length > 0
+        ? actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0)
+        : actualPaymentAmount;
+      
+      const paymentDate = actualPaymentInstallments.length > 0
+        ? actualPaymentInstallments[0].date
+        : actualPaymentDate!.toISOString().split('T')[0];
+      
+      await decisionsAPI.enterActualPayment(selectedDecision.id, {
+        actual_payment_amount: totalAmount,
+        actual_payment_date: paymentDate,
+        actual_payment_installments: actualPaymentInstallments.length > 0 ? actualPaymentInstallments : undefined,
+        notes: actualPaymentNotes || undefined
+      });
+      
+      setActualPaymentDialogOpen(false);
+      setSelectedDecision(null);
+      setSuccess('✅ Actual payment data entered successfully! Cashflow events created.');
+      fetchDecisions();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to enter actual payment data');
     }
   };
 
@@ -309,6 +384,31 @@ export const FinalizedDecisionsPage: React.FC = () => {
       case 'PROPOSED': return 'warning';
       case 'REVERTED': return 'error';
       default: return 'default';
+    }
+  };
+
+  const getInvoiceStatus = (decision: FinalizedDecision) => {
+    if (decision.actual_invoice_amount && decision.actual_invoice_amount > 0) {
+      return { label: 'Invoiced', color: 'success' as const };
+    }
+    return { label: 'Not Invoiced', color: 'default' as const };
+  };
+
+  const getPaymentStatus = (decision: FinalizedDecision) => {
+    if (!decision.actual_payment_amount || decision.actual_payment_amount === 0) {
+      return { label: 'Not Paid', color: 'error' as const, percent: 0 };
+    }
+    
+    const expectedCost = decision.final_cost;
+    const actualPaid = decision.actual_payment_amount;
+    const percent = Math.round((actualPaid / expectedCost) * 100);
+    
+    if (percent >= 100) {
+      return { label: 'Fully Paid', color: 'success' as const, percent: 100 };
+    } else if (percent > 0) {
+      return { label: `Partially Paid (${percent}%)`, color: 'warning' as const, percent };
+    } else {
+      return { label: 'Not Paid', color: 'error' as const, percent: 0 };
     }
   };
 
@@ -371,41 +471,113 @@ export const FinalizedDecisionsPage: React.FC = () => {
         </Alert>
       )}
 
-      {/* Project Filter */}
+      {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
-        <ProjectFilter
-          selectedProjects={selectedProjects}
-          onChange={setSelectedProjects}
-          label="Filter by Project(s)"
-        />
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <ProjectFilter
+              selectedProjects={selectedProjects}
+              onChange={setSelectedProjects}
+              label="Filter by Project(s)"
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <FormControl fullWidth>
+              <InputLabel>Filter by Invoice/Payment Status</InputLabel>
+              <Select
+                multiple
+                value={statusFilters}
+                onChange={(e) => setStatusFilters(typeof e.target.value === 'string' ? [e.target.value] : e.target.value)}
+                label="Filter by Invoice/Payment Status"
+                renderValue={(selected) => (
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                    {selected.map((value) => (
+                      <Chip key={value} label={value} size="small" />
+                    ))}
+                  </Box>
+                )}
+              >
+                <MenuItem value="not-invoiced">Not Invoiced</MenuItem>
+                <MenuItem value="invoiced">Invoiced</MenuItem>
+                <MenuItem value="not-paid">Not Paid</MenuItem>
+                <MenuItem value="partially-paid">Partially Paid</MenuItem>
+                <MenuItem value="fully-paid">Fully Paid</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
       </Paper>
 
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
           Summary
         </Typography>
-        <Box display="flex" gap={2}>
-          <Chip
-            label={`Total: ${decisions.length}`}
-            color="primary"
-            variant="outlined"
-          />
-          <Chip
-            label={`Locked: ${decisions.filter(d => d.status === 'LOCKED').length}`}
-            color="success"
-            variant="outlined"
-          />
-          <Chip
-            label={`Proposed: ${decisions.filter(d => d.status === 'PROPOSED').length}`}
-            color="warning"
-            variant="outlined"
-          />
-          <Chip
-            label={`Reverted: ${decisions.filter(d => d.status === 'REVERTED').length}`}
-            color="error"
-            variant="outlined"
-          />
-        </Box>
+        <Grid container spacing={1}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Total: ${decisions.length}`}
+              color="primary"
+              variant="outlined"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Locked: ${decisions.filter(d => d.status === 'LOCKED').length}`}
+              color="success"
+              variant="outlined"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Proposed: ${decisions.filter(d => d.status === 'PROPOSED').length}`}
+              color="warning"
+              variant="outlined"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Reverted: ${decisions.filter(d => d.status === 'REVERTED').length}`}
+              color="error"
+              variant="outlined"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Invoiced: ${decisions.filter(d => d.actual_invoice_amount && d.actual_invoice_amount > 0).length}`}
+              color="success"
+              variant="filled"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Not Invoiced: ${decisions.filter(d => !d.actual_invoice_amount || d.actual_invoice_amount === 0).length}`}
+              color="default"
+              variant="filled"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Fully Paid: ${decisions.filter(d => d.actual_payment_amount && d.actual_payment_amount >= d.final_cost).length}`}
+              color="success"
+              variant="filled"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Chip
+              label={`Not Paid: ${decisions.filter(d => !d.actual_payment_amount || d.actual_payment_amount === 0).length}`}
+              color="error"
+              variant="filled"
+              sx={{ width: '100%' }}
+            />
+          </Grid>
+        </Grid>
       </Paper>
 
       {/* Bulk Actions Toolbar */}
@@ -450,7 +622,8 @@ export const FinalizedDecisionsPage: React.FC = () => {
               <TableCell>Purchase Date</TableCell>
               <TableCell>Delivery Date</TableCell>
               <TableCell align="right">Cost</TableCell>
-              <TableCell>Invoice Timing</TableCell>
+              <TableCell>Invoice Status</TableCell>
+              <TableCell>Payment Status</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Finalized</TableCell>
               <TableCell align="center">Actions</TableCell>
@@ -459,14 +632,31 @@ export const FinalizedDecisionsPage: React.FC = () => {
           <TableBody>
             {decisions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} align="center">
+                <TableCell colSpan={11} align="center">
                   <Typography variant="body2" color="textSecondary" sx={{ py: 4 }}>
                     No finalized decisions found. Run optimization and save decisions to see them here.
                   </Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              decisions.map((decision) => {
+              decisions
+                .filter((decision) => {
+                  // Apply status filters
+                  if (statusFilters.length === 0) return true;
+                  
+                  const invoiceStatus = getInvoiceStatus(decision);
+                  const paymentStatus = getPaymentStatus(decision);
+                  
+                  return statusFilters.some(filter => {
+                    if (filter === 'not-invoiced') return invoiceStatus.label === 'Not Invoiced';
+                    if (filter === 'invoiced') return invoiceStatus.label === 'Invoiced';
+                    if (filter === 'not-paid') return paymentStatus.label === 'Not Paid';
+                    if (filter === 'partially-paid') return paymentStatus.label.includes('Partially Paid');
+                    if (filter === 'fully-paid') return paymentStatus.label === 'Fully Paid';
+                    return false;
+                  });
+                })
+                .map((decision) => {
                 const isSelected = selectedDecisionIds.indexOf(decision.id) !== -1;
                 const isLocked = decision.status === 'LOCKED';
                 
@@ -508,9 +698,20 @@ export const FinalizedDecisionsPage: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Typography variant="caption">
-                      {getInvoiceDisplay(decision)}
-                    </Typography>
+                    <Chip
+                      label={getInvoiceStatus(decision).label}
+                      color={getInvoiceStatus(decision).color}
+                      size="small"
+                      variant="outlined"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={getPaymentStatus(decision).label}
+                      color={getPaymentStatus(decision).color}
+                      size="small"
+                      variant="outlined"
+                    />
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -535,15 +736,45 @@ export const FinalizedDecisionsPage: React.FC = () => {
                         <AssignmentIcon />
                       </IconButton>
                     )}
-                    {decision.status === 'LOCKED' && (user?.role === 'finance' || user?.role === 'admin') && (
+                    {decision.status === 'PROPOSED' && (user?.role === 'finance' || user?.role === 'admin') && (
                       <IconButton
                         size="small"
-                        color="success"
-                        onClick={() => openActualInvoiceDialog(decision)}
-                        title="Enter Actual Invoice Data"
+                        color="primary"
+                        onClick={async () => {
+                          if (window.confirm('Finalize this decision? This will lock it and create forecast cashflow events.')) {
+                            try {
+                              await decisionsAPI.finalize({ decision_ids: [decision.id] });
+                              setSuccess('Decision finalized successfully');
+                              fetchDecisions();
+                            } catch (err: any) {
+                              setError(err.response?.data?.detail || 'Failed to finalize decision');
+                            }
+                          }
+                        }}
+                        title="Finalize Decision (Lock)"
                       >
-                        <AssignmentIcon />
+                        <LockIcon />
                       </IconButton>
+                    )}
+                    {decision.status === 'LOCKED' && (user?.role === 'finance' || user?.role === 'admin') && (
+                      <>
+                        <IconButton
+                          size="small"
+                          color="success"
+                          onClick={() => openActualInvoiceDialog(decision)}
+                          title="Enter Actual Invoice Data (Revenue)"
+                        >
+                          <AssignmentIcon />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          color="warning"
+                          onClick={() => openActualPaymentDialog(decision)}
+                          title="Enter Actual Payment Data (Expense)"
+                        >
+                          <AttachMoneyIcon />
+                        </IconButton>
+                      </>
                     )}
                     {decision.status === 'LOCKED' && (user?.role === 'pm' || user?.role === 'admin') && (
                       <>
@@ -786,6 +1017,209 @@ export const FinalizedDecisionsPage: React.FC = () => {
             disabled={!actualInvoiceDate || actualInvoiceAmount <= 0}
           >
             Submit Actual Invoice Data
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Actual Payment Dialog */}
+      <Dialog open={actualPaymentDialogOpen} onClose={() => setActualPaymentDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AttachMoneyIcon color="warning" />
+            Enter Actual Payment Data
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 3, mt: 1 }}>
+            Enter the actual payment data made to the supplier. This will create ACTUAL cash flow events (Payment Outflow) for accurate financial tracking.
+          </Alert>
+
+          {selectedDecision && (
+            <>
+              <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: 'grey.50', border: '1px solid', borderColor: 'grey.200' }}>
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Item Code</Typography>
+                    <Typography variant="body2" fontWeight="medium">{selectedDecision.item_code}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Supplier</Typography>
+                    <Typography variant="body2" fontWeight="medium">{selectedDecision.supplier_name}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Payment Terms</Typography>
+                    <Chip 
+                      label={(selectedDecision.payment_terms as any)?.type || 'cash'} 
+                      size="small"
+                      color={(selectedDecision.payment_terms as any)?.type === 'cash' ? 'success' : 'warning'}
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="caption" color="text.secondary">Expected Cost</Typography>
+                    <Typography variant="body2" fontWeight="medium">{formatCurrency(selectedDecision.final_cost)}</Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              {/* Payment Details */}
+              {actualPaymentInstallments.length > 0 ? (
+                <>
+                  <Alert severity="info" sx={{ mb: 2 }}>
+                    <Typography variant="body2">
+                      <strong>Installment Payment:</strong> Enter actual payment details for each installment
+                    </Typography>
+                  </Alert>
+
+                  {actualPaymentInstallments.map((installment, index) => (
+                    <Paper key={index} elevation={1} sx={{ p: 2, mb: 2, border: '1px solid', borderColor: 'divider' }}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Installment {index + 1}
+                      </Typography>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <LocalizationProvider dateAdapter={AdapterDateFns}>
+                            <DatePicker
+                              label="Payment Date *"
+                              value={new Date(installment.date)}
+                              onChange={(newDate) => {
+                                if (newDate) {
+                                  const updated = [...actualPaymentInstallments];
+                                  updated[index].date = newDate.toISOString().split('T')[0];
+                                  setActualPaymentInstallments(updated);
+                                }
+                              }}
+                              slotProps={{
+                                textField: {
+                                  fullWidth: true,
+                                  size: 'small',
+                                },
+                              }}
+                            />
+                          </LocalizationProvider>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <TextField
+                            fullWidth
+                            type="number"
+                            size="small"
+                            label="Payment Amount *"
+                            value={installment.amount}
+                            onChange={(e) => {
+                              const updated = [...actualPaymentInstallments];
+                              updated[index].amount = parseFloat(e.target.value) || 0;
+                              setActualPaymentInstallments(updated);
+                            }}
+                            inputProps={{ min: 0, step: 0.01 }}
+                          />
+                        </Grid>
+                      </Grid>
+                    </Paper>
+                  ))}
+
+                  <Paper elevation={0} sx={{ p: 2, bgcolor: 'primary.lighter', border: '1px solid', borderColor: 'primary.main' }}>
+                    <Typography variant="body2" color="primary.dark" fontWeight="medium">
+                      Total Payment: {formatCurrency(actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0))}
+                    </Typography>
+                  </Paper>
+                </>
+              ) : (
+                <>
+                  <Alert severity="success" sx={{ mb: 2 }}>
+                    <Typography variant="body2">
+                      <strong>Cash Payment:</strong> Single payment to supplier
+                    </Typography>
+                  </Alert>
+
+                  <LocalizationProvider dateAdapter={AdapterDateFns}>
+                    <Box sx={{ mb: 2 }}>
+                      <DatePicker
+                        label="Payment Date *"
+                        value={actualPaymentDate}
+                        onChange={(newDate) => setActualPaymentDate(newDate)}
+                        slotProps={{
+                          textField: {
+                            fullWidth: true,
+                            helperText: "The actual date payment was made to the supplier",
+                          },
+                        }}
+                      />
+                    </Box>
+                  </LocalizationProvider>
+
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Actual Payment Amount *"
+                    value={actualPaymentAmount}
+                    onChange={(e) => setActualPaymentAmount(parseFloat(e.target.value) || 0)}
+                    helperText="The actual amount paid to the supplier"
+                    inputProps={{ min: 0, step: 0.01 }}
+                    sx={{ mb: 2 }}
+                  />
+                </>
+              )}
+
+              <TextField
+                fullWidth
+                multiline
+                rows={3}
+                label="Notes"
+                value={actualPaymentNotes}
+                onChange={(e) => setActualPaymentNotes(e.target.value)}
+                helperText="Payment reference, bank transaction ID, or other relevant information"
+                placeholder="e.g., Transfer Ref: TXN-2025-001, Bank: ABC Bank"
+              />
+
+              {/* Variance Display */}
+              {(actualPaymentInstallments.length > 0 ? 
+                actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0) : 
+                actualPaymentAmount) > 0 && (
+                <Alert 
+                  severity={
+                    Math.abs((actualPaymentInstallments.length > 0 ? 
+                      actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0) : 
+                      actualPaymentAmount) - selectedDecision.final_cost) < 100 
+                      ? 'success' 
+                      : 'warning'
+                  } 
+                  sx={{ mt: 2 }}
+                >
+                  <Typography variant="body2" fontWeight="medium">
+                    Variance: {formatCurrency(
+                      (actualPaymentInstallments.length > 0 ? 
+                        actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0) : 
+                        actualPaymentAmount) - selectedDecision.final_cost
+                    )}
+                  </Typography>
+                  <Typography variant="caption">
+                    {(actualPaymentInstallments.length > 0 ? 
+                      actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0) : 
+                      actualPaymentAmount) > selectedDecision.final_cost
+                      ? 'Higher than expected (unfavorable - cost overrun)'
+                      : (actualPaymentInstallments.length > 0 ? 
+                        actualPaymentInstallments.reduce((sum, inst) => sum + inst.amount, 0) : 
+                        actualPaymentAmount) < selectedDecision.final_cost
+                      ? 'Lower than expected (favorable - cost savings)'
+                      : 'Matches forecast exactly'}
+                  </Typography>
+                </Alert>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setActualPaymentDialogOpen(false)}>Cancel</Button>
+          <Button 
+            onClick={handleSubmitActualPayment} 
+            variant="contained" 
+            color="warning"
+            disabled={
+              actualPaymentInstallments.length > 0 
+                ? actualPaymentInstallments.some(inst => !inst.date || inst.amount <= 0)
+                : !actualPaymentDate || actualPaymentAmount <= 0
+            }
+          >
+            Submit Actual Payment Data
           </Button>
         </DialogActions>
       </Dialog>

@@ -154,6 +154,7 @@ export const OptimizationPage: React.FC = () => {
 
   const handleOpenAddItem = (runId: string) => {
     setSelectedRunId(runId);
+    setSelectedDecision(null);
     setAddDialogOpen(true);
   };
 

@@ -19,12 +19,16 @@ import {
   Alert,
   CircularProgress,
   FormControlLabel,
+  FormControl,
+  InputLabel,
+  Select,
   Checkbox,
   Chip,
   List,
   ListItem,
   ListItemText,
   ListItemSecondaryAction,
+  MenuItem,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -41,14 +45,16 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useParams, useNavigate } from 'react-router-dom';
-import { itemsAPI, excelAPI } from '../services/api.ts';
+import { itemsAPI, itemsMasterAPI, excelAPI } from '../services/api.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
-import { ProjectItem, ProjectItemCreate } from '../types/index.ts';
+import { ProjectItem, ProjectItemCreate, ItemMaster } from '../types/index.ts';
 
 export const ProjectItemsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [items, setItems] = useState<ProjectItem[]>([]);
+  const [masterItems, setMasterItems] = useState<ItemMaster[]>([]);
+  const [selectedMasterItem, setSelectedMasterItem] = useState<ItemMaster | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -59,11 +65,13 @@ export const ProjectItemsPage: React.FC = () => {
   // Form data with delivery_options array
   const [formData, setFormData] = useState<ProjectItemCreate>({
     project_id: parseInt(projectId || '0'),
+    master_item_id: undefined,
     item_code: '',
     item_name: '',
     quantity: 1,
     delivery_options: [new Date().toISOString().split('T')[0]],
     external_purchase: false,
+    description: '',
   });
 
   // Separate state for date picker input
@@ -72,6 +80,7 @@ export const ProjectItemsPage: React.FC = () => {
   useEffect(() => {
     if (projectId) {
       fetchItems();
+      fetchMasterItems();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -86,6 +95,15 @@ export const ProjectItemsPage: React.FC = () => {
       setError(formatApiError(err, 'Failed to load project items'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMasterItems = async () => {
+    try {
+      const response = await itemsMasterAPI.list({ active_only: true });
+      setMasterItems(response.data);
+    } catch (err: any) {
+      setError(formatApiError(err, 'Failed to load items catalog'));
     }
   };
 
@@ -130,15 +148,31 @@ export const ProjectItemsPage: React.FC = () => {
     setDeliveryOptionsDialogOpen(true);
   };
 
+  const handleMasterItemSelect = (masterItemId: number) => {
+    const masterItem = masterItems.find(m => m.id === masterItemId);
+    if (masterItem) {
+      setSelectedMasterItem(masterItem);
+      setFormData({
+        ...formData,
+        master_item_id: masterItem.id,
+        item_code: masterItem.item_code,
+        item_name: masterItem.item_name,
+      });
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       project_id: parseInt(projectId || '0'),
+      master_item_id: undefined,
       item_code: '',
       item_name: '',
       quantity: 1,
       delivery_options: [new Date().toISOString().split('T')[0]],
       external_purchase: false,
+      description: '',
     });
+    setSelectedMasterItem(null);
     setNewDeliveryDate(new Date());
   };
 
@@ -223,25 +257,64 @@ export const ProjectItemsPage: React.FC = () => {
   // Render form fields function for both create and edit dialogs
   const renderFormFields = () => (
     <>
-      <TextField
-        autoFocus
-        margin="dense"
-        label="Item Code"
-        fullWidth
-        variant="outlined"
-        value={formData.item_code}
-        onChange={(e) => setFormData({ ...formData, item_code: e.target.value })}
-        sx={{ mb: 2 }}
-      />
-      <TextField
-        margin="dense"
-        label="Item Name"
-        fullWidth
-        variant="outlined"
-        value={formData.item_name}
-        onChange={(e) => setFormData({ ...formData, item_name: e.target.value })}
-        sx={{ mb: 2 }}
-      />
+      {/* Select from Items Master */}
+      <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+        <InputLabel>Select Item from Catalog *</InputLabel>
+        <Select
+          value={formData.master_item_id || ''}
+          label="Select Item from Catalog *"
+          onChange={(e) => handleMasterItemSelect(e.target.value as number)}
+        >
+          {masterItems.length === 0 ? (
+            <MenuItem disabled>No items in catalog. Create items in Items Master page first.</MenuItem>
+          ) : (
+            masterItems.map((item) => (
+              <MenuItem key={item.id} value={item.id}>
+                <Box>
+                  <Typography variant="body2" fontWeight="medium">
+                    {item.item_code}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {item.company} - {item.item_name} {item.model && `(${item.model})`}
+                  </Typography>
+                </Box>
+              </MenuItem>
+            ))
+          )}
+        </Select>
+      </FormControl>
+
+      {/* Display selected master item details */}
+      {selectedMasterItem && (
+        <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: 'success.lighter', border: '2px solid', borderColor: 'success.main' }}>
+          <Typography variant="subtitle2" color="success.dark" gutterBottom>
+            📦 Selected Item
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 0.5 }}>
+            <strong>Code:</strong> {selectedMasterItem.item_code}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 0.5 }}>
+            <strong>Company:</strong> {selectedMasterItem.company}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 0.5 }}>
+            <strong>Name:</strong> {selectedMasterItem.item_name}
+          </Typography>
+          {selectedMasterItem.model && (
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              <strong>Model:</strong> {selectedMasterItem.model}
+            </Typography>
+          )}
+          {selectedMasterItem.category && (
+            <Typography variant="body2" sx={{ mb: 0.5 }}>
+              <strong>Category:</strong> {selectedMasterItem.category}
+            </Typography>
+          )}
+          <Typography variant="body2">
+            <strong>Unit:</strong> {selectedMasterItem.unit}
+          </Typography>
+        </Paper>
+      )}
+
       <TextField
         margin="dense"
         label="Quantity"
@@ -311,6 +384,21 @@ export const ProjectItemsPage: React.FC = () => {
           </Button>
         </Box>
       </Box>
+
+      {/* Project-Specific Description */}
+      <TextField
+        margin="dense"
+        label="Project-Specific Description (Optional)"
+        fullWidth
+        multiline
+        rows={4}
+        variant="outlined"
+        value={formData.description || ''}
+        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+        placeholder="Enter project-specific context: usage location, special requirements, installation notes..."
+        helperText="Use this for project-specific details. Master item specs are defined in Items Master catalog."
+        sx={{ mb: 2 }}
+      />
 
       <FormControlLabel
         control={
@@ -465,6 +553,7 @@ export const ProjectItemsPage: React.FC = () => {
                         quantity: item.quantity,
                         delivery_options: item.delivery_options || [],
                         external_purchase: item.external_purchase,
+                        description: item.description || '',
                       });
                       setEditDialogOpen(true);
                     }}
@@ -496,7 +585,16 @@ export const ProjectItemsPage: React.FC = () => {
       </TableContainer>
 
       {/* Create Item Dialog */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={createDialogOpen} 
+        onClose={() => {
+          setCreateDialogOpen(false);
+          resetForm();
+          setSelectedItem(null);
+        }} 
+        maxWidth="sm" 
+        fullWidth
+      >
         <DialogTitle>Add New Item</DialogTitle>
         <DialogContent>
           {renderFormFields()}
@@ -514,7 +612,16 @@ export const ProjectItemsPage: React.FC = () => {
       </Dialog>
 
       {/* Edit Item Dialog */}
-      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog 
+        open={editDialogOpen} 
+        onClose={() => {
+          setEditDialogOpen(false);
+          resetForm();
+          setSelectedItem(null);
+        }} 
+        maxWidth="sm" 
+        fullWidth
+      >
         <DialogTitle>Edit Item</DialogTitle>
         <DialogContent>
           {renderFormFields()}
