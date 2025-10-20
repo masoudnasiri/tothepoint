@@ -66,12 +66,18 @@ class Project(Base):
     project_code = Column(String(50), unique=True, index=True, nullable=False)
     name = Column(Text, nullable=False)
     priority_weight = Column(Integer, nullable=False, default=5)
+    
+    # Financial fields with proper currency support
+    budget_amount = Column(Numeric(15, 2), nullable=True)  # Project budget amount
+    budget_currency = Column(String(3), nullable=True, default='IRR')  # Currency of budget (e.g., 'IRR', 'USD')
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True)
     
-    # Add check constraint for priority_weight
+    # Add check constraints
     __table_args__ = (
         CheckConstraint('priority_weight >= 1 AND priority_weight <= 10', name='check_priority_weight_range'),
+        CheckConstraint('budget_amount IS NULL OR budget_amount >= 0', name='check_positive_budget'),
     )
     
     # Relationships
@@ -142,6 +148,11 @@ class ProjectItem(Base):
     expected_cash_in_date = Column(Date, nullable=True)
     actual_cash_in_date = Column(Date, nullable=True)
     
+    # Finalization tracking (PMO feature)
+    is_finalized = Column(Boolean, default=False, nullable=False)
+    finalized_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    finalized_at = Column(DateTime(timezone=True), nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -196,7 +207,16 @@ class ProcurementOption(Base):
     id = Column(Integer, primary_key=True, index=True)
     item_code = Column(String(50), nullable=False, index=True)
     supplier_name = Column(Text, nullable=False)
-    base_cost = Column(Numeric(12, 2), nullable=False)
+    
+    # Updated financial fields with proper currency support
+    cost_amount = Column(Numeric(15, 2), nullable=False)  # Cost amount in original currency
+    cost_currency = Column(String(3), nullable=False, default='IRR')  # Currency of cost (e.g., 'USD', 'IRR')
+    shipping_cost = Column(Numeric(15, 2), nullable=True, default=0)  # Shipping cost in same currency as cost_amount
+    
+    # Legacy field for backward compatibility (will be deprecated)
+    base_cost = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=True)  # Keep for migration
+    
     lomc_lead_time = Column(Integer, default=0)  # Lead time in time slots
     discount_bundle_threshold = Column(Integer)
     discount_bundle_percent = Column(Numeric(5, 2))
@@ -204,9 +224,16 @@ class ProcurementOption(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     is_active = Column(Boolean, default=True)
+    is_finalized = Column(Boolean, default=False)  # Whether procurement team has finalized this option for optimization
     
     # Relationships
+    currency = relationship("Currency")  # Keep for backward compatibility
     optimization_results = relationship("OptimizationResult", back_populates="procurement_option")
+    
+    # Add check constraints
+    __table_args__ = (
+        CheckConstraint('cost_amount > 0', name='check_positive_cost'),
+    )
 
 
 class BudgetData(Base):
@@ -214,7 +241,8 @@ class BudgetData(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     budget_date = Column(Date, unique=True, nullable=False, index=True)
-    available_budget = Column(Numeric(15, 2), nullable=False)
+    available_budget = Column(Numeric(15, 2), nullable=False)  # Kept for backward compatibility (in base currency IRR)
+    multi_currency_budget = Column(JSON, nullable=True)  # New: {"USD": 1000000, "IRR": 1000000000000, "AED": 12000000000}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -228,7 +256,14 @@ class CashflowEvent(Base):
     forecast_type = Column(String(10), nullable=False, default='FORECAST', index=True)
     # Values: 'FORECAST' (predicted), 'ACTUAL' (real data from finance)
     event_date = Column(Date, nullable=False, index=True)
-    amount = Column(Numeric(15, 2), nullable=False)
+    
+    # Updated financial fields with proper currency support
+    amount_value = Column(Numeric(15, 2), nullable=False)  # Amount in original currency
+    amount_currency = Column(String(3), nullable=False, default='IRR')  # Currency of amount
+    
+    # Legacy field for backward compatibility (will be deprecated)
+    amount = Column(Numeric(15, 2), nullable=True)  # Keep for migration
+    
     description = Column(Text, nullable=True)
     
     # Auditability Enhancement
@@ -269,7 +304,14 @@ class FinalizedDecision(Base):
     purchase_date = Column(Date, nullable=False)
     delivery_date = Column(Date, nullable=False)
     quantity = Column(Integer, nullable=False)
-    final_cost = Column(Numeric(12, 2), nullable=False)
+    
+    # Updated financial fields with proper currency support
+    final_cost_amount = Column(Numeric(15, 2), nullable=False)  # Final cost amount in original currency
+    final_cost_currency = Column(String(3), nullable=False, default='IRR')  # Currency of final cost
+    
+    # Legacy field for backward compatibility (will be deprecated)
+    final_cost = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=True)  # Keep for migration
     
     # Lifecycle Management
     status = Column(String(20), nullable=False, default='PROPOSED', index=True)
@@ -285,21 +327,49 @@ class FinalizedDecision(Base):
     # Values: 'ABSOLUTE', 'RELATIVE'
     forecast_invoice_issue_date = Column(Date, nullable=True)  # For ABSOLUTE timing
     forecast_invoice_days_after_delivery = Column(Integer, nullable=True)  # For RELATIVE timing
-    forecast_invoice_amount = Column(Numeric(12, 2), nullable=True)  # Expected invoice amount
+    # Forecast Invoice with currency support
+    forecast_invoice_amount_value = Column(Numeric(15, 2), nullable=True)  # Expected invoice amount
+    forecast_invoice_amount_currency = Column(String(3), nullable=True, default='IRR')  # Currency of forecast invoice
     
-    # Actual Invoice Data (entered by finance team)
+    # Actual Invoice Data (entered by finance team) with currency support
     actual_invoice_issue_date = Column(Date, nullable=True)
-    actual_invoice_amount = Column(Numeric(12, 2), nullable=True)
+    actual_invoice_amount_value = Column(Numeric(15, 2), nullable=True)  # Actual invoice amount
+    actual_invoice_amount_currency = Column(String(3), nullable=True, default='IRR')  # Currency of actual invoice
     actual_invoice_received_date = Column(Date, nullable=True)  # When payment actually received
     invoice_entered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     invoice_entered_at = Column(DateTime(timezone=True), nullable=True)
     
-    # Actual Payment Data (entered by finance team for payments to suppliers)
-    actual_payment_amount = Column(Numeric(12, 2), nullable=True)  # Total amount paid
+    # Actual Payment Data (entered by finance team for payments to suppliers) with currency support
+    actual_payment_amount_value = Column(Numeric(15, 2), nullable=True)  # Total amount paid
+    actual_payment_amount_currency = Column(String(3), nullable=True, default='IRR')  # Currency of payment
     actual_payment_date = Column(Date, nullable=True)  # First/single payment date
-    actual_payment_installments = Column(JSON, nullable=True)  # For installment payments: [{"date": "2026-01-15", "amount": 10000}, ...]
+    actual_payment_installments = Column(JSON, nullable=True)  # For installment payments: [{"date": "2026-01-15", "amount": 10000, "currency": "USD"}, ...]
     payment_entered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     payment_entered_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Legacy fields for backward compatibility (will be deprecated)
+    forecast_invoice_amount = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    actual_invoice_amount = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    actual_payment_amount = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    
+    # Delivery Tracking (Procurement Plan feature)
+    delivery_status = Column(String(50), nullable=False, default='AWAITING_DELIVERY', index=True)
+    # Values: 'AWAITING_DELIVERY', 'CONFIRMED_BY_PROCUREMENT', 'DELIVERY_COMPLETE'
+    
+    # Procurement Team Confirmation
+    actual_delivery_date = Column(Date, nullable=True)
+    procurement_confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    procurement_confirmed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    is_correct_item_confirmed = Column(Boolean, default=False)
+    serial_number = Column(String(200), nullable=True)
+    procurement_delivery_notes = Column(Text, nullable=True)
+    
+    # Project Manager Acceptance
+    pm_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    pm_accepted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    is_accepted_by_pm = Column(Boolean, default=False)
+    pm_acceptance_notes = Column(Text, nullable=True)
+    customer_delivery_date = Column(Date, nullable=True)
     
     decision_maker_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     decision_date = Column(DateTime(timezone=True), nullable=False)
@@ -319,6 +389,10 @@ class FinalizedDecision(Base):
     decision_maker = relationship("User", foreign_keys=[decision_maker_id])
     finalized_by = relationship("User", foreign_keys=[finalized_by_id])
     invoice_entered_by = relationship("User", foreign_keys=[invoice_entered_by_id])
+    payment_entered_by = relationship("User", foreign_keys=[payment_entered_by_id])
+    procurement_confirmed_by = relationship("User", foreign_keys=[procurement_confirmed_by_id])
+    pm_accepted_by = relationship("User", foreign_keys=[pm_accepted_by_id])
+    currency = relationship("Currency")
     cashflow_events = relationship("CashflowEvent", back_populates="related_decision", cascade="all, delete-orphan")
 
 
@@ -335,6 +409,51 @@ class DecisionFactorWeight(Base):
     # Add check constraint for weight
     __table_args__ = (
         CheckConstraint('weight >= 1 AND weight <= 10', name='check_weight_range'),
+    )
+
+
+class Currency(Base):
+    """Currency master table"""
+    __tablename__ = "currencies"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(3), unique=True, nullable=False, index=True)  # USD, EUR, IRR, etc.
+    name = Column(String(100), nullable=False)  # US Dollar, Euro, Iranian Rial, etc.
+    symbol = Column(String(10), nullable=False)  # $, €, ﷼, etc.
+    is_base_currency = Column(Boolean, default=False, index=True)  # Only one should be True
+    is_active = Column(Boolean, default=True, index=True)
+    decimal_places = Column(Integer, default=2)  # Number of decimal places for display
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+
+class ExchangeRate(Base):
+    """Historical daily exchange rates for currency conversion"""
+    __tablename__ = "exchange_rates"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)  # Date for which this rate is valid
+    from_currency = Column(String(3), nullable=False, index=True)  # Source currency (e.g., 'USD')
+    to_currency = Column(String(3), nullable=False, index=True)    # Target currency (e.g., 'IRR')
+    rate = Column(Numeric(15, 6), nullable=False)  # Exchange rate (from_currency to to_currency)
+    is_active = Column(Boolean, default=True, index=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    
+    # Composite index for efficient lookups
+    __table_args__ = (
+        CheckConstraint('from_currency != to_currency', name='check_different_currencies'),
+        CheckConstraint('rate > 0', name='check_positive_rate'),
     )
 
 

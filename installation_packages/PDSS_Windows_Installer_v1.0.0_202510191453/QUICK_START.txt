@@ -1,0 +1,38 @@
+========================================================================
+  QUICK START GUIDE
+========================================================================
+
+STEP 1: INSTALL DOCKER
+  Download and install Docker Desktop from:
+  https://www.docker.com/products/docker-desktop
+
+STEP 2: VERIFY PACKAGE
+  Run: VERIFY_PACKAGE.bat
+  This checks if all required files are present
+
+STEP 3: INSTALL PDSS
+  Right-click INSTALL.bat
+  Select "Run as Administrator"
+  Wait for installation to complete
+
+STEP 4: ACCESS SYSTEM
+  Open browser: http://localhost:3000
+  Login: admin / admin123
+
+STEP 5: POST-INSTALLATION
+  - Change default passwords
+  - Create desktop shortcuts: scripts\create_shortcuts.bat
+  - Review documentation in docs folder
+
+========================================================================
+  MANAGEMENT COMMANDS
+========================================================================
+
+  Start System:    scripts\start.bat
+  Stop System:     scripts\stop.bat
+  Check Status:    scripts\status.bat
+  View Logs:       scripts\logs.bat
+  Restart:         scripts\restart.bat
+  Uninstall:       scripts\uninstall.bat
+
+========================================================================

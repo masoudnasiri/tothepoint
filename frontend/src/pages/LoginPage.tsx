@@ -56,6 +56,16 @@ export const LoginPage: React.FC = () => {
             width: '100%',
           }}
         >
+          <Box
+            component="img"
+            src="/InoTech_b-F.png"
+            alt="InoTech Logo"
+            sx={{
+              width: 180,
+              height: 'auto',
+              mb: 3,
+            }}
+          />
           <Typography component="h1" variant="h4" gutterBottom>
             Procurement DSS
           </Typography>
@@ -107,15 +117,12 @@ export const LoginPage: React.FC = () => {
             </Button>
           </Box>
 
-          <Box sx={{ mt: 3, p: 2, bgcolor: 'grey.100', borderRadius: 1, width: '100%' }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              <strong>Default Login Credentials:</strong>
+          <Box sx={{ mt: 3, p: 2, bgcolor: 'warning.light', borderRadius: 1, width: '100%' }}>
+            <Typography variant="body2" color="error" gutterBottom>
+              <strong>⚠️ SECURITY NOTICE:</strong>
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Admin: admin / admin123<br />
-              PM: pm1 / pm123<br />
-              Procurement: proc1 / proc123<br />
-              Finance: finance1 / finance123
+              Change default passwords immediately after first login for security.
             </Typography>
           </Box>
         </Paper>

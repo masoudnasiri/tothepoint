@@ -1,0 +1,37 @@
+PDSS Windows Installation Package
+========================================================================
+Version: 1.0.0
+Build: 202510191453
+Created: 2025-10-19 14:53
+Platform: Windows
+Size: ~2 MB
+
+Package Contents:
+├── INSTALL.bat               Main installer
+├── README.txt                Package information
+├── QUICK_START.txt           Quick start guide
+├── VERIFY_PACKAGE.bat        Package verification
+├── PACKAGE_INFO.txt          Detailed package info
+├── version.json              Version metadata
+├── docker-compose.yml        Docker orchestration
+├── backend\                  Backend application
+├── frontend\                 Frontend application
+├── docs\                     Documentation
+├── scripts\                  Management scripts
+│   ├── start.bat
+│   ├── stop.bat
+│   ├── status.bat
+│   ├── logs.bat
+│   ├── restart.bat
+│   ├── uninstall.bat
+│   └── create_shortcuts.bat
+└── config\                   Configuration templates
+
+Installation:
+  1. Run VERIFY_PACKAGE.bat to check integrity
+  2. Run INSTALL.bat as Administrator
+  3. Access at http://localhost:3000
+
+Support:
+  See documentation in docs\ folder
+

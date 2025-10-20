@@ -73,11 +73,7 @@ echo   Backend API:      http://localhost:8000
 echo   API Docs:         http://localhost:8000/docs
 echo   Advanced Optim:   http://localhost:3000/optimization-enhanced
 echo.
-echo Login Credentials:
-echo   Admin:       admin / admin123        (Full Access)
-echo   Finance:     finance1 / finance123   (Full Access)
-echo   PM:          pm1 / pm123             (Revenue Only)
-echo   Procurement: proc1 / proc123         (Payments Only)
+echo ⚠️  IMPORTANT: Change default passwords after first login!
 echo.
 echo Useful Commands:
 echo   View logs:      docker-compose logs -f backend

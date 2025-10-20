@@ -6,6 +6,90 @@ import uuid
 from enum import Enum
 
 
+# Currency Schemas
+class CurrencyBase(BaseModel):
+    code: str = Field(..., min_length=3, max_length=3, description="Currency code (USD, EUR, IRR, etc.)")
+    name: str = Field(..., min_length=1, max_length=100, description="Currency name")
+    symbol: str = Field(..., min_length=1, max_length=10, description="Currency symbol")
+    is_base_currency: bool = Field(default=False, description="Is this the base currency?")
+    is_active: bool = Field(default=True, description="Is this currency active?")
+    decimal_places: int = Field(default=2, ge=0, le=6, description="Number of decimal places for display")
+
+
+class CurrencyCreate(CurrencyBase):
+    pass
+
+
+class CurrencyUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    symbol: Optional[str] = Field(None, min_length=1, max_length=10)
+    is_base_currency: Optional[bool] = None
+    is_active: Optional[bool] = None
+    decimal_places: Optional[int] = Field(None, ge=0, le=6)
+
+
+class Currency(CurrencyBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ExchangeRateBase(BaseModel):
+    date: date
+    from_currency: str
+    to_currency: str
+    rate: Decimal
+    is_active: bool = True
+
+
+class ExchangeRateCreate(ExchangeRateBase):
+    pass
+
+
+class ExchangeRateUpdate(BaseModel):
+    rate: Optional[Decimal] = Field(None, gt=0)
+    is_active: Optional[bool] = None
+
+
+class ExchangeRate(ExchangeRateBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ExchangeRateHistory(BaseModel):
+    """Schema for historical exchange rate data"""
+    date: date
+    rate: Decimal
+
+
+class CurrencyWithRates(BaseModel):
+    """Currency with latest exchange rate - standalone to avoid circular inheritance"""
+    id: int
+    code: str
+    name: str
+    symbol: str
+    is_base_currency: bool = False
+    is_active: bool = True
+    decimal_places: int = 2
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    latest_rate: Optional['ExchangeRate'] = None
+    rate_to_base: Optional[Decimal] = None
+    
+    class Config:
+        from_attributes = True
+
+
 # Enums
 class ProjectItemStatusEnum(str, Enum):
     """Status enum for project items lifecycle"""
@@ -67,6 +151,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, min_length=3, max_length=50)
+    password: Optional[str] = Field(None, min_length=6, description="New password (leave empty to keep current)")
     role: Optional[str] = Field(None, pattern="^(admin|pmo|pm|procurement|finance)$")
     is_active: Optional[bool] = None
 
@@ -185,6 +270,11 @@ class ProjectItemBase(BaseModel):
     expected_cash_in_date: Optional[date] = None
     actual_cash_in_date: Optional[date] = None
     
+    # Finalization tracking (PMO feature)
+    is_finalized: bool = False
+    finalized_by: Optional[int] = None
+    finalized_at: Optional[datetime] = None
+    
     @validator('delivery_options')
     def validate_delivery_options(cls, v):
         if not v or len(v) == 0:
@@ -223,6 +313,11 @@ class ProjectItemUpdate(BaseModel):
     invoice_submission_date: Optional[date] = None
     expected_cash_in_date: Optional[date] = None
     actual_cash_in_date: Optional[date] = None
+    
+    # Finalization tracking (PMO feature)
+    is_finalized: Optional[bool] = None
+    finalized_by: Optional[int] = None
+    finalized_at: Optional[datetime] = None
 
 
 class ProjectItem(ProjectItemBase):
@@ -232,6 +327,12 @@ class ProjectItem(ProjectItemBase):
     updated_at: Optional[datetime] = None
     
     model_config = {"from_attributes": True}
+
+
+class ProjectItemFinalize(BaseModel):
+    """Schema for finalizing a project item (PMO only)"""
+    is_finalized: bool = True
+    finalized_at: Optional[datetime] = None  # Will be set by backend
 
 
 # Procurement Option Schemas
@@ -265,6 +366,8 @@ class ProcurementOptionBase(BaseModel):
     item_code: str = Field(..., min_length=1, max_length=50)
     supplier_name: str = Field(..., min_length=1)
     base_cost: Decimal = Field(..., gt=0)
+    currency_id: int = Field(..., description="Currency ID for this procurement option")
+    shipping_cost: Optional[Decimal] = Field(0, ge=0, description="Shipping cost in same currency as base_cost")
     lomc_lead_time: int = Field(0, ge=0)
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
@@ -279,11 +382,13 @@ class ProcurementOptionUpdate(BaseModel):
     item_code: Optional[str] = Field(None, min_length=1, max_length=50)
     supplier_name: Optional[str] = Field(None, min_length=1)
     base_cost: Optional[Decimal] = Field(None, gt=0)
+    shipping_cost: Optional[Decimal] = Field(None, ge=0)
     lomc_lead_time: Optional[int] = Field(None, ge=0)
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
-    payment_terms: Optional[Union[PaymentTermsCash, PaymentTermsInstallments]]
+    payment_terms: Optional[Union[PaymentTermsCash, PaymentTermsInstallments]] = None
     is_active: Optional[bool] = None
+    is_finalized: Optional[bool] = None
 
 
 class ProcurementOption(ProcurementOptionBase):
@@ -291,6 +396,7 @@ class ProcurementOption(ProcurementOptionBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_active: bool
+    is_finalized: bool = False
     
     model_config = {"from_attributes": True}
 
@@ -298,7 +404,8 @@ class ProcurementOption(ProcurementOptionBase):
 # Budget Data Schemas
 class BudgetDataBase(BaseModel):
     budget_date: date
-    available_budget: Decimal = Field(..., ge=0)
+    available_budget: Decimal = Field(..., ge=0)  # Base currency (IRR) for backward compatibility
+    multi_currency_budget: Optional[Dict[str, Decimal]] = None  # e.g., {"USD": 1000000, "IRR": 1000000000000}
 
 
 class BudgetDataCreate(BudgetDataBase):
@@ -308,6 +415,7 @@ class BudgetDataCreate(BudgetDataBase):
 class BudgetDataUpdate(BaseModel):
     budget_date: Optional[date] = None
     available_budget: Optional[Decimal] = Field(None, ge=0)
+    multi_currency_budget: Optional[Dict[str, Decimal]] = None
 
 
 class BudgetData(BudgetDataBase):
@@ -453,6 +561,20 @@ class FinalizedDecisionBase(BaseModel):
     payment_entered_by_id: Optional[int] = None
     payment_entered_at: Optional[datetime] = None
     
+    # Delivery Tracking (Procurement Plan feature)
+    delivery_status: str = Field(default='AWAITING_DELIVERY')
+    actual_delivery_date: Optional[date] = None
+    procurement_confirmed_at: Optional[datetime] = None
+    procurement_confirmed_by_id: Optional[int] = None
+    is_correct_item_confirmed: bool = False
+    serial_number: Optional[str] = None
+    procurement_delivery_notes: Optional[str] = None
+    pm_accepted_at: Optional[datetime] = None
+    pm_accepted_by_id: Optional[int] = None
+    is_accepted_by_pm: bool = False
+    pm_acceptance_notes: Optional[str] = None
+    customer_delivery_date: Optional[date] = None
+    
     is_manual_edit: bool = False
     notes: Optional[str] = None
 
@@ -528,6 +650,21 @@ class ActualPaymentDataRequest(BaseModel):
     actual_payment_date: date  # First/single payment date
     actual_payment_installments: Optional[List[Dict[str, Any]]] = None  # [{"date": "2026-01-15", "amount": 10000}, ...]
     notes: Optional[str] = None
+
+
+# Request for procurement team to confirm delivery
+class ProcurementDeliveryConfirmationRequest(BaseModel):
+    actual_delivery_date: date
+    is_correct_item: bool = Field(..., description="Item matches order specification")
+    serial_number: Optional[str] = Field(None, max_length=200)
+    delivery_notes: Optional[str] = None
+
+
+# Request for PM to accept delivery
+class PMDeliveryAcceptanceRequest(BaseModel):
+    is_accepted_for_project: bool = Field(..., description="Accept this item for the project")
+    customer_delivery_date: Optional[date] = None
+    acceptance_notes: Optional[str] = None
 
 
 # Request for changing decision status
@@ -657,3 +794,10 @@ class ProjectSummary(BaseModel):
     total_quantity: int
     estimated_cost: Optional[Decimal] = None
     estimated_revenue: Optional[Decimal] = None
+
+
+# Resolve forward references for Pydantic v2
+# This fixes circular dependencies between Currency and ExchangeRate schemas
+Currency.model_rebuild()
+ExchangeRate.model_rebuild()
+CurrencyWithRates.model_rebuild()

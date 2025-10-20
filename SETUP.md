@@ -66,14 +66,14 @@ If you prefer to run the setup manually:
 
 ## Default Login Credentials
 
-The system comes with pre-configured users for testing:
+The system comes with pre-configured users:
 
-| Role | Username | Password | Access |
-|------|----------|----------|--------|
-| Admin | admin | admin123 | Full system access |
-| Project Manager | pm1 | pm123 | Project and item management |
-| Procurement Specialist | proc1 | proc123 | Procurement options management |
-| Finance User | finance1 | finance123 | Budget and optimization |
+| Role | Username | Initial Setup |
+|------|----------|---------------|
+| Admin | admin | ⚠️ Change password immediately after first login |
+| Project Manager | pm1 | ⚠️ Change password immediately after first login |
+| Procurement Specialist | proc1 | ⚠️ Change password immediately after first login |
+| Finance User | finance1 | ⚠️ Change password immediately after first login |
 
 ## System Architecture
 

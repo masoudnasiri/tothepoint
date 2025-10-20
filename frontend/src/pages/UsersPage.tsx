@@ -82,8 +82,8 @@ export const UsersPage: React.FC = () => {
     
     try {
       const updateData = { ...formData };
-      delete updateData.password; // Don't update password if empty
-      if (!updateData.password) {
+      // Only include password if it's not empty
+      if (!updateData.password || updateData.password.trim() === '') {
         delete updateData.password;
       }
       

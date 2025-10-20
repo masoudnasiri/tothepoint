@@ -61,6 +61,11 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -
     if not update_data:
         return await get_user(db, user_id)
     
+    # Hash password if it's being updated
+    if 'password' in update_data and update_data['password']:
+        update_data['password_hash'] = get_password_hash(update_data['password'])
+        del update_data['password']  # Remove plain password
+    
     await db.execute(
         update(User).where(User.id == user_id).values(**update_data)
     )
@@ -245,6 +250,28 @@ async def delete_project_item(db: AsyncSession, item_id: int) -> bool:
     return result.rowcount > 0
 
 
+async def finalize_project_item(db: AsyncSession, item_id: int, finalized_by: int, finalize_data: 'ProjectItemFinalize') -> Optional[ProjectItem]:
+    """Finalize a project item (PMO only) - makes it visible in procurement"""
+    from datetime import datetime
+    from app.schemas import ProjectItemFinalize
+    
+    # Get the current item
+    result = await db.execute(select(ProjectItem).where(ProjectItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        return None
+    
+    # Update finalization fields
+    item.is_finalized = finalize_data.is_finalized
+    item.finalized_by = finalized_by
+    item.finalized_at = datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
 # Procurement Option CRUD operations
 async def create_procurement_option(db: AsyncSession, option: ProcurementOptionCreate) -> ProcurementOption:
     """Create a new procurement option"""
@@ -281,7 +308,7 @@ async def get_procurement_options(db: AsyncSession, skip: int = 0, limit: int = 
         query = query.where(ProcurementOption.item_code == item_code)
     
     result = await db.execute(
-        query.offset(skip).limit(limit).order_by(ProcurementOption.created_at.desc())
+        query.offset(skip).limit(limit).order_by(ProcurementOption.item_code, ProcurementOption.created_at.desc())
     )
     return result.scalars().all()
 
@@ -329,7 +356,19 @@ async def delete_procurement_option(db: AsyncSession, option_id: int) -> bool:
 # Budget Data CRUD operations
 async def create_budget_data(db: AsyncSession, budget: BudgetDataCreate) -> BudgetData:
     """Create new budget data"""
-    db_budget = BudgetData(**budget.dict())
+    budget_data = budget.dict()
+    
+    # Convert Decimal values in multi_currency_budget to float for JSON serialization
+    if budget_data.get('multi_currency_budget'):
+        multi_currency_budget = {}
+        for currency_code, amount in budget_data['multi_currency_budget'].items():
+            if isinstance(amount, Decimal):
+                multi_currency_budget[currency_code] = float(amount)
+            else:
+                multi_currency_budget[currency_code] = amount
+        budget_data['multi_currency_budget'] = multi_currency_budget
+    
+    db_budget = BudgetData(**budget_data)
     db.add(db_budget)
     await db.commit()
     await db.refresh(db_budget)
@@ -361,6 +400,16 @@ async def update_budget_data(db: AsyncSession, budget_date: str,
     update_data = budget_update.dict(exclude_unset=True)
     if not update_data:
         return await get_budget_data(db, budget_date)
+    
+    # Convert Decimal values in multi_currency_budget to float for JSON serialization
+    if 'multi_currency_budget' in update_data and update_data['multi_currency_budget']:
+        multi_currency_budget = {}
+        for currency_code, amount in update_data['multi_currency_budget'].items():
+            if isinstance(amount, Decimal):
+                multi_currency_budget[currency_code] = float(amount)
+            else:
+                multi_currency_budget[currency_code] = amount
+        update_data['multi_currency_budget'] = multi_currency_budget
     
     await db.execute(
         update(BudgetData).where(BudgetData.budget_date == budget_date_obj).values(**update_data)
@@ -525,27 +574,35 @@ async def get_project_summaries(db: AsyncSession, user_projects: Optional[List[i
         )
         project_items = items_result.scalars().all()
         
+        # OPTIMIZED: Calculate average costs for all items in ONE query
+        avg_costs_query = await db.execute(
+            select(
+                ProcurementOption.item_code,
+                func.avg(ProcurementOption.base_cost).label('avg_cost')
+            )
+            .where(ProcurementOption.is_active == True)
+            .where(ProcurementOption.item_code.in_([item.item_code for item in project_items]))
+            .group_by(ProcurementOption.item_code)
+        )
+        avg_costs_dict = {row.item_code: row.avg_cost for row in avg_costs_query.fetchall()}
+        
         estimated_cost = Decimal('0')
         estimated_revenue = Decimal('0')
         
         for item in project_items:
-            # Get average cost for this item from procurement options
-            avg_cost_result = await db.scalar(
-                select(func.avg(ProcurementOption.base_cost))
-                .where(ProcurementOption.item_code == item.item_code)
-                .where(ProcurementOption.is_active == True)
-            )
-            if avg_cost_result:
-                estimated_cost += Decimal(str(avg_cost_result)) * item.quantity
+            # Use pre-calculated average cost
+            avg_cost = avg_costs_dict.get(item.item_code)
+            if avg_cost:
+                estimated_cost += Decimal(str(avg_cost)) * item.quantity
             
             # Get revenue from delivery options (invoice amounts)
             if hasattr(item, 'delivery_options_rel') and item.delivery_options_rel:
                 # Use first delivery option's invoice amount
                 first_delivery = item.delivery_options_rel[0]
                 estimated_revenue += first_delivery.invoice_amount_per_unit * item.quantity
-            elif avg_cost_result:
+            elif avg_cost:
                 # Fallback: Use 20% markup on cost
-                estimated_revenue += Decimal(str(avg_cost_result)) * item.quantity * Decimal('1.20')
+                estimated_revenue += Decimal(str(avg_cost)) * item.quantity * Decimal('1.20')
         
         summaries.append({
             "id": project.id,

@@ -100,6 +100,9 @@ export const itemsAPI = {
   create: (item: any) => api.post('/items/', item),
   update: (id: number, item: any) => api.put(`/items/${id}`, item),
   delete: (id: number) => api.delete(`/items/${id}`),
+  finalize: (id: number, data: any) => api.put(`/items/${id}/finalize`, data),
+  listFinalized: (params?: { skip?: number; limit?: number }) =>
+    api.get('/items/finalized', { params }),
 };
 
 // Project Phases API
@@ -125,8 +128,25 @@ export const weightsAPI = {
 
 // Finalized Decisions API
 export const decisionsAPI = {
-  list: (params?: { skip?: number; limit?: number; run_id?: string; project_id?: number }) =>
-    api.get('/decisions/', { params }),
+  list: (params?: { 
+    skip?: number; 
+    limit?: number; 
+    run_id?: string; 
+    project_id?: number;
+    search?: string;
+    status?: string;
+  }) => api.get('/decisions/', { params }),
+  count: (params?: { 
+    run_id?: string; 
+    project_id?: number;
+    search?: string;
+    status?: string;
+  }) => api.get('/decisions/count', { params }),
+  summary: (params?: { 
+    run_id?: string; 
+    project_id?: number;
+    search?: string;
+  }) => api.get('/decisions/summary', { params }),
   get: (id: number) => api.get(`/decisions/${id}`),
   save: (decisions: any[]) => api.post('/decisions/', decisions),
   saveBatch: (runId: string, itemIds: number[], optionIds: number[]) =>
@@ -158,6 +178,24 @@ export const decisionsAPI = {
     api.put(`/decisions/${id}/status`, statusUpdate),
   update: (id: number, decision: any) => api.put(`/decisions/${id}`, decision),
   delete: (id: number) => api.delete(`/decisions/${id}`),
+  getBudgetAnalysis: (params?: { 
+    project_ids?: string; 
+    start_date?: string; 
+    end_date?: string;
+  }) => api.get('/decisions/budget-analysis', { params }),
+};
+
+// Analytics API
+export const analyticsAPI = {
+  getEVA: (projectId: number | 'all', currencyView: string = 'unified') => 
+    projectId === 'all' ? api.get('/analytics/portfolio/eva', { params: { currency_view: currencyView } }) : api.get(`/analytics/eva/${projectId}`, { params: { currency_view: currencyView } }),
+  getCashflowForecast: (projectId: number | 'all', monthsAhead: number = 12, currencyView: string = 'unified') => 
+    projectId === 'all' 
+      ? api.get('/analytics/portfolio/cashflow-forecast', { params: { months_ahead: monthsAhead, currency_view: currencyView } })
+      : api.get(`/analytics/cashflow-forecast/${projectId}`, { params: { months_ahead: monthsAhead, currency_view: currencyView } }),
+  getRisk: (projectId: number | 'all') => 
+    projectId === 'all' ? api.get('/analytics/portfolio/risk') : api.get(`/analytics/risk/${projectId}`),
+  getAllProjectsSummary: () => api.get('/analytics/all-projects-summary'),
 };
 
 // Procurement API
@@ -246,12 +284,13 @@ export const excelAPI = {
 
 // Dashboard API
 export const dashboardAPI = {
-  getCashflow: (options?: { startDate?: string; endDate?: string; forecast_type?: string; project_ids?: string }) => {
+  getCashflow: (options?: { startDate?: string; endDate?: string; forecast_type?: string; project_ids?: string; currency_view?: string }) => {
     const params = new URLSearchParams();
     if (options?.startDate) params.append('start_date', options.startDate);
     if (options?.endDate) params.append('end_date', options.endDate);
     if (options?.forecast_type) params.append('forecast_type', options.forecast_type);
     if (options?.project_ids) params.append('project_ids', options.project_ids);
+    if (options?.currency_view) params.append('currency_view', options.currency_view);
     return api.get(`/dashboard/cashflow${params.toString() ? `?${params.toString()}` : ''}`);
   },
   getSummary: () => api.get('/dashboard/summary'),
@@ -274,6 +313,88 @@ export const deliveryOptionsAPI = {
   update: (id: number, option: any) => api.put(`/delivery-options/${id}`, option),
   delete: (id: number) => api.delete(`/delivery-options/${id}`),
   getByItemCode: (itemCode: string) => api.get(`/delivery-options/by-item-code/${itemCode}`),
+};
+
+// Procurement Plan & Delivery Tracking API
+export const procurementPlanAPI = {
+  list: (params?: { status_filter?: string; project_id?: number }) =>
+    api.get('/procurement-plan/', { params }),
+  get: (decisionId: number) => api.get(`/procurement-plan/${decisionId}`),
+  confirmDelivery: (decisionId: number, data: any) =>
+    api.post(`/procurement-plan/${decisionId}/confirm-delivery`, data),
+  acceptDelivery: (decisionId: number, data: any) =>
+    api.post(`/procurement-plan/${decisionId}/accept-delivery`, data),
+  enterInvoice: (decisionId: number, data: any) =>
+    api.post(`/procurement-plan/${decisionId}/enter-invoice`, data),
+  export: () =>
+    api.get('/procurement-plan/export/excel', { responseType: 'blob' }),
+};
+
+// Reports & Analytics API
+export const reportsAPI = {
+  getData: (params?: {
+    start_date?: string;
+    end_date?: string;
+    project_ids?: string;
+    supplier_names?: string;
+  }) => api.get('/reports/', { params: { ...params, currency_view: 'unified' } }),
+  export: (params?: {
+    start_date?: string;
+    end_date?: string;
+    project_ids?: string;
+    supplier_names?: string;
+  }) => api.get('/reports/export/excel', { params: { ...params, currency_view: 'unified' }, responseType: 'blob' }),
+  getProjects: () => api.get('/reports/filters/projects'),
+  getSuppliers: () => api.get('/reports/filters/suppliers'),
+  getDataSummary: () => api.get('/reports/data-summary'),
+};
+
+// Currency Management API
+export const currencyAPI = {
+  // Currency management
+  list: (includeInactive = false) => api.get('/currencies/', { params: { include_inactive: includeInactive } }),
+  create: (currency: any) => api.post('/currencies/', currency),
+  get: (id: number) => api.get(`/currencies/${id}`),
+  update: (id: number, currency: any) => api.put(`/currencies/${id}`, currency),
+  delete: (id: number) => api.delete(`/currencies/${id}`),
+  getBaseCurrency: () => api.get('/currencies/base-currency'),
+  
+  // Exchange rate management (NEW structure)
+  listExchangeRates: (fromCurrency?: string, toCurrency?: string, startDate?: string, endDate?: string) =>
+    api.get('/currencies/rates/list', {
+      params: { from_currency: fromCurrency, to_currency: toCurrency, start_date: startDate, end_date: endDate }
+    }),
+  addExchangeRate: (date: string, fromCurrency: string, toCurrency: string, rate: number) =>
+    api.post('/currencies/rates/add', null, {
+      params: { date_str: date, from_currency: fromCurrency, to_currency: toCurrency, rate }
+    }),
+  updateExchangeRateValue: (rateId: number, rate: number) =>
+    api.put(`/currencies/rates/${rateId}`, null, {
+      params: { rate }
+    }),
+  deleteExchangeRate: (rateId: number) =>
+    api.delete(`/currencies/rates/${rateId}`),
+  
+  // OLD Exchange rate management (kept for backward compatibility)
+  getExchangeRates: (currencyId: number, startDate?: string, endDate?: string) => 
+    api.get(`/currencies/${currencyId}/exchange-rates`, { 
+      params: { start_date: startDate, end_date: endDate } 
+    }),
+  createExchangeRate: (currencyId: number, rate: any) => 
+    api.post(`/currencies/${currencyId}/exchange-rates`, rate),
+  updateExchangeRate: (rateId: number, rate: any) => 
+    api.put(`/currencies/exchange-rates/${rateId}`, rate),
+  
+  // Currency conversion
+  convert: (amount: number, fromCurrencyId: number, toCurrencyId: number, conversionDate?: string) =>
+    api.post('/currencies/convert', null, {
+      params: {
+        amount,
+        from_currency_id: fromCurrencyId,
+        to_currency_id: toCurrencyId,
+        conversion_date: conversionDate
+      }
+    }),
 };
 
 export default api;

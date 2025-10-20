@@ -1,0 +1,19 @@
+Package: Procurement Decision Support System (PDSS)
+Version: 1.0.0
+Build Date: 2025-10-19 14:53
+Platform: Windows
+
+Components:
+- Backend: FastAPI + PostgreSQL
+- Frontend: React + TypeScript
+- Deployment: Docker + Docker Compose
+
+System Requirements:
+- Windows 10/11 or Windows Server 2019+
+- Docker Desktop for Windows
+- 4GB RAM minimum (8GB recommended)
+- 10GB free disk space
+
+Build Information:
+- Build ID: 202510191453
+- Package Size: (calculated after build)

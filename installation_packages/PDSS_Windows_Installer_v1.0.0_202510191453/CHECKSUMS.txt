@@ -1,0 +1,12 @@
+PDSS Package Checksum - Build 202510191453
+========================================================================
+
+Critical Files:
+INSTALL.bat 
+VERIFY_PACKAGE.bat 
+docker-compose.yml 
+CHECKSUMS.txt 
+MANIFEST.txt 
+PACKAGE_INFO.txt 
+QUICK_START.txt 
+README.txt 

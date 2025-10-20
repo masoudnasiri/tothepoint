@@ -26,6 +26,10 @@ import {
   AccordionSummary,
   AccordionDetails,
   Chip,
+  Checkbox,
+  FormControlLabel,
+  Pagination,
+  Grid,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -35,10 +39,15 @@ import {
   Download as DownloadIcon,
   Upload as UploadIcon,
   Refresh as RefreshIcon,
+  CheckCircle as CheckCircleIcon,
+  DoneAll as DoneAllIcon,
+  RemoveDone as RemoveDoneIcon,
+  Search as SearchIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { procurementAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
+import api, { procurementAPI, excelAPI, deliveryOptionsAPI, itemsAPI } from '../services/api.ts';
 import { ProcurementOption, ProcurementOptionCreate } from '../types/index.ts';
+import { CurrencySelector } from '../components/CurrencySelector.tsx';
 
 interface DeliveryOption {
   id: number;
@@ -51,6 +60,8 @@ interface ItemWithDetails {
   item_code: string;
   item_name: string;
   description: string;
+  project_id: number;
+  project_item_id: number;
 }
 
 export const ProcurementPage: React.FC = () => {
@@ -67,15 +78,31 @@ export const ProcurementPage: React.FC = () => {
   const [selectedItemCode, setSelectedItemCode] = useState<string>('');
   const [availableDeliveryOptions, setAvailableDeliveryOptions] = useState<DeliveryOption[]>([]);
   const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string>('');
-  const [formData, setFormData] = useState<ProcurementOptionCreate>({
+  const [formData, setFormData] = useState<any>({
     item_code: '',
     supplier_name: '',
     base_cost: 0,
+    currency_id: '',
+    shipping_cost: 0,
     lomc_lead_time: 0,
     discount_bundle_threshold: undefined,
     discount_bundle_percent: undefined,
     payment_terms: { type: 'cash', discount_percent: 0 },
+    is_finalized: false,
   });
+  const [bulkUpdating, setBulkUpdating] = useState<string | null>(null);
+  const [loadedItemOptions, setLoadedItemOptions] = useState<Record<string, ProcurementOption[]>>({});
+  const [expandedAccordion, setExpandedAccordion] = useState<string | false>(false);
+  const [page, setPage] = useState(0);
+  const ITEMS_PER_PAGE = 50;
+  
+  // New state for filters and search
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
+  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
+  const [selectedCurrencies, setSelectedCurrencies] = useState<string[]>([]);
+  const [finalizedFilter, setFinalizedFilter] = useState<string>('all'); // 'all', 'finalized', 'not_finalized'
+  const [summaryStats, setSummaryStats] = useState<any>(null);
 
   useEffect(() => {
     fetchData();
@@ -83,17 +110,96 @@ export const ProcurementPage: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const [itemsResponse, optionsResponse] = await Promise.all([
-        procurementAPI.getItemsWithDetails(),
-        procurementAPI.listOptions(),
-      ]);
-      setItemsWithDetails(itemsResponse.data);
-      setItemCodes(itemsResponse.data.map((item: ItemWithDetails) => item.item_code));
-      setProcurementOptions(optionsResponse.data);
+      // Fetch only finalized items (PMO finalized items)
+      const itemsResponse = await itemsAPI.listFinalized();
+      
+      // Convert finalized items to the format expected by the procurement page
+      const itemsWithDetails = itemsResponse.data.map((item: any) => ({
+        item_code: item.item_code,
+        item_name: item.item_name,
+        description: item.description || '',
+        project_id: item.project_id,
+        project_item_id: item.id
+      }));
+      
+      setItemsWithDetails(itemsWithDetails);
+      setItemCodes(itemsWithDetails.map((item: ItemWithDetails) => item.item_code));
+      // Don't load all options at once - will fetch per item when needed
+      setProcurementOptions([]);
+      
+      // Calculate summary statistics
+      calculateSummaryStats();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load procurement data');
+      console.error('Error loading finalized items:', err);
+      // Handle validation errors
+      if (err.response?.data?.detail) {
+        if (Array.isArray(err.response.data.detail)) {
+          // Pydantic validation errors
+          const errorMessages = err.response.data.detail.map((e: any) => e.msg).join(', ');
+          setError(`Validation error: ${errorMessages}`);
+        } else if (typeof err.response.data.detail === 'string') {
+          setError(err.response.data.detail);
+        } else {
+          setError('Failed to load finalized items');
+        }
+      } else {
+        setError('Failed to load procurement data');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const calculateSummaryStats = async () => {
+    try {
+      // Since we're only showing finalized items, calculate stats based on those items
+      const totalItems = itemsWithDetails.length;
+      
+      // Get procurement options for the finalized items only
+      let totalOptions = 0;
+      let finalizedOptions = 0;
+      let uniqueSuppliers: string[] = [];
+      let uniqueCurrencies: string[] = [];
+      let totalCost = 0;
+      
+      // For each finalized item, get its procurement options
+      for (const item of itemsWithDetails) {
+        try {
+          const optionsResponse = await procurementAPI.listByItemCode(item.item_code);
+          const options = optionsResponse.data;
+          
+          totalOptions += options.length;
+          finalizedOptions += options.filter((opt: any) => opt.is_finalized).length;
+          
+          // Collect suppliers and currencies
+          options.forEach((opt: any) => {
+            if (opt.supplier_name) uniqueSuppliers.push(opt.supplier_name);
+            if (opt.currency_code) uniqueCurrencies.push(opt.currency_code);
+            if (opt.base_cost) totalCost += opt.base_cost;
+          });
+        } catch (err) {
+          console.warn(`Failed to load options for item ${item.item_code}:`, err);
+        }
+      }
+      
+      // Remove duplicates
+      uniqueSuppliers = [...new Set(uniqueSuppliers)];
+      uniqueCurrencies = [...new Set(uniqueCurrencies)];
+      
+      setSummaryStats({
+        totalItems,
+        totalOptions,
+        finalizedOptions,
+        notFinalizedOptions: totalOptions - finalizedOptions,
+        uniqueSuppliers: uniqueSuppliers.length,
+        uniqueCurrencies: uniqueCurrencies.length,
+        totalCost,
+        finalizedCost: totalCost, // All options are for finalized items
+        suppliers: uniqueSuppliers,
+        currencies: uniqueCurrencies
+      });
+    } catch (err) {
+      console.error('Failed to calculate summary stats:', err);
     }
   };
 
@@ -107,9 +213,76 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const fetchDeliveryOptions = async (itemCode: string) => {
+  const handleAccordionChange = (itemCode: string) => async (event: React.SyntheticEvent, isExpanded: boolean) => {
+    setExpandedAccordion(isExpanded ? itemCode : false);
+    
+    // If expanding and options not loaded yet, fetch them
+    if (isExpanded && !loadedItemOptions[itemCode]) {
+      try {
+        const options = await fetchOptionsByItemCode(itemCode);
+        setLoadedItemOptions(prev => ({
+          ...prev,
+          [itemCode]: options
+        }));
+      } catch (err) {
+        console.error('Failed to load options for', itemCode, err);
+      }
+    }
+  };
+
+  // Filter and search logic
+  const getFilteredItems = () => {
+    let filtered = itemsWithDetails;
+
+    // Search filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = filtered.filter(item => 
+        item.item_code.toLowerCase().includes(searchLower) ||
+        item.item_name?.toLowerCase().includes(searchLower) ||
+        item.description?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Project filter
+    if (selectedProjects.length > 0) {
+      filtered = filtered.filter(item => selectedProjects.includes(item.project_id));
+    }
+
+    return filtered;
+  };
+
+  const getFilteredOptions = (itemCode: string) => {
+    const options = loadedItemOptions[itemCode] || [];
+    let filtered = options;
+
+    // Supplier filter
+    if (selectedSuppliers.length > 0) {
+      filtered = filtered.filter(opt => selectedSuppliers.includes(opt.supplier_name));
+    }
+
+    // Currency filter
+    if (selectedCurrencies.length > 0) {
+      filtered = filtered.filter(opt => selectedCurrencies.includes(opt.currency_code));
+    }
+
+    // Finalized filter
+    if (finalizedFilter === 'finalized') {
+      filtered = filtered.filter(opt => opt.is_finalized);
+    } else if (finalizedFilter === 'not_finalized') {
+      filtered = filtered.filter(opt => !opt.is_finalized);
+    }
+
+    return filtered;
+  };
+
+  const fetchDeliveryOptions = async (itemCode: string, projectId?: number) => {
     try {
-      const response = await deliveryOptionsAPI.getByItemCode(itemCode);
+      // If project_id is available, pass it to get project-specific delivery options
+      const url = projectId 
+        ? `/delivery-options/by-item-code/${itemCode}?project_id=${projectId}`
+        : `/delivery-options/by-item-code/${itemCode}`;
+      const response = await api.get(url);
       setAvailableDeliveryOptions(response.data);
       setSelectedDeliveryDate(''); // Reset selection
     } catch (err: any) {
@@ -125,8 +298,9 @@ export const ProcurementPage: React.FC = () => {
     const itemDetails = itemsWithDetails.find(item => item.item_code === itemCode);
     setSelectedItemDetails(itemDetails || null);
     
-    if (itemCode) {
-      await fetchDeliveryOptions(itemCode);
+    if (itemCode && itemDetails) {
+      // Pass the project_id to get project-specific delivery options
+      await fetchDeliveryOptions(itemCode, itemDetails.project_id);
     } else {
       setAvailableDeliveryOptions([]);
       setSelectedDeliveryDate('');
@@ -135,6 +309,12 @@ export const ProcurementPage: React.FC = () => {
   };
 
   const handleCreateOption = async () => {
+    // Validate currency_id is selected
+    if (!formData.currency_id || formData.currency_id === '' || formData.currency_id === 0) {
+      setError('Please select a currency');
+      return;
+    }
+    
     try {
       await procurementAPI.create(formData);
       setCreateDialogOpen(false);
@@ -201,6 +381,147 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
+  const handleFinalizeAllItemsOnPage = async () => {
+    if (bulkUpdating) {
+      return; // Prevent if already updating
+    }
+    
+    const currentPageItems = itemCodes.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
+    
+    if (!window.confirm(`Are you sure you want to finalize ALL options for all ${currentPageItems.length} items on this page?\n\nThis will mark all procurement options as ready for optimization.`)) {
+      return;
+    }
+    
+    setBulkUpdating('PAGE_BULK_UPDATE');
+    setError('');
+    
+    let totalSuccess = 0;
+    let totalFailed = 0;
+    let itemsProcessed = 0;
+    
+    try {
+      for (const itemCode of currentPageItems) {
+        itemsProcessed++;
+        
+        try {
+          // Load options if not already loaded
+          let itemOptions = loadedItemOptions[itemCode] || [];
+          
+          if (itemOptions.length === 0) {
+            itemOptions = await fetchOptionsByItemCode(itemCode);
+          }
+          
+          // Finalize all options for this item
+          for (const option of itemOptions) {
+            try {
+              await procurementAPI.update(option.id, { is_finalized: true });
+              totalSuccess++;
+            } catch {
+              totalFailed++;
+            }
+          }
+          
+          // Reload and cache the updated options
+          const updatedOptions = await fetchOptionsByItemCode(itemCode);
+          setLoadedItemOptions(prev => ({
+            ...prev,
+            [itemCode]: updatedOptions
+          }));
+          
+        } catch (err) {
+          console.error(`Failed to process item ${itemCode}:`, err);
+        }
+      }
+      
+      if (totalFailed > 0) {
+        setError(`Processed ${itemsProcessed} items: ${totalSuccess} options finalized, ${totalFailed} failed.`);
+      } else {
+        setError(''); // Clear any previous errors
+        alert(`✅ Success! Finalized ${totalSuccess} options across ${itemsProcessed} items.`);
+      }
+      
+    } catch (err: any) {
+      setError('Failed to finalize items on page');
+    } finally {
+      setBulkUpdating(null);
+    }
+  };
+
+  const handleBulkFinalizeToggle = async (itemCode: string, shouldFinalize: boolean) => {
+    if (bulkUpdating === itemCode) {
+      return; // Prevent double-click
+    }
+    
+    setBulkUpdating(itemCode);
+    setError('');
+    
+    try {
+      // Auto-load options if not already loaded
+      let itemOptions = loadedItemOptions[itemCode] || [];
+      
+      if (itemOptions.length === 0) {
+        // Load options first
+        itemOptions = await fetchOptionsByItemCode(itemCode);
+        setLoadedItemOptions(prev => ({
+          ...prev,
+          [itemCode]: itemOptions
+        }));
+      }
+      
+      if (itemOptions.length === 0) {
+        setError(`No options found for ${itemCode}`);
+        setBulkUpdating(null);
+        return;
+      }
+      
+      const action = shouldFinalize ? 'finalize' : 'unfinalize';
+      if (!window.confirm(`Are you sure you want to ${action} all ${itemOptions.length} options for ${itemCode}?`)) {
+        setBulkUpdating(null);
+        return;
+      }
+      
+      // Update options one by one to better handle errors
+      let successCount = 0;
+      let failedCount = 0;
+      
+      for (const option of itemOptions) {
+        try {
+          await procurementAPI.update(option.id, { is_finalized: shouldFinalize });
+          successCount++;
+        } catch (optErr: any) {
+          failedCount++;
+        }
+      }
+      
+      // Reload options for this specific item
+      const updatedOptions = await fetchOptionsByItemCode(itemCode);
+      setLoadedItemOptions(prev => ({
+        ...prev,
+        [itemCode]: updatedOptions
+      }));
+      
+      if (failedCount > 0) {
+        setError(`Updated ${successCount} options, but ${failedCount} failed.`);
+      }
+    } catch (err: any) {
+      
+      // Handle validation errors
+      const detail = err.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        const errorMessages = detail.map((error: any) => 
+          typeof error === 'string' ? error : `${error.loc?.join('.')}: ${error.msg}`
+        ).join('; ');
+        setError(errorMessages);
+      } else if (typeof detail === 'string') {
+        setError(detail);
+      } else {
+        setError(`Failed to ${action} options`);
+      }
+    } finally {
+      setBulkUpdating(null);
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       item_code: selectedItemCode,
@@ -210,6 +531,7 @@ export const ProcurementPage: React.FC = () => {
       discount_bundle_threshold: undefined,
       discount_bundle_percent: undefined,
       payment_terms: { type: 'cash', discount_percent: 0 },
+      is_finalized: false,
     });
     setAvailableDeliveryOptions([]);
     setSelectedDeliveryDate('');
@@ -335,6 +657,16 @@ export const ProcurementPage: React.FC = () => {
             >
               Export Options
             </Button>
+            <Button
+              variant="contained"
+              color="success"
+              startIcon={<DoneAllIcon />}
+              onClick={handleFinalizeAllItemsOnPage}
+              disabled={bulkUpdating !== null || itemCodes.length === 0}
+              sx={{ mr: 1 }}
+            >
+              {bulkUpdating === 'PAGE_BULK_UPDATE' ? 'Finalizing...' : 'Finalize All Items on Page'}
+            </Button>
           </Box>
         )}
       </Box>
@@ -344,6 +676,167 @@ export const ProcurementPage: React.FC = () => {
           {error}
         </Alert>
       )}
+
+      {/* Summary Cards */}
+      {summaryStats && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            📊 Procurement Summary
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'primary.light', color: 'white' }}>
+                <Typography variant="h4" fontWeight="bold">
+                  {summaryStats.totalItems}
+                </Typography>
+                <Typography variant="body2">Total Items</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'success.light', color: 'white' }}>
+                <Typography variant="h4" fontWeight="bold">
+                  {summaryStats.finalizedOptions}
+                </Typography>
+                <Typography variant="body2">Finalized Options</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'warning.light', color: 'white' }}>
+                <Typography variant="h4" fontWeight="bold">
+                  {summaryStats.notFinalizedOptions}
+                </Typography>
+                <Typography variant="body2">Not Finalized</Typography>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'info.light', color: 'white' }}>
+                <Typography variant="h4" fontWeight="bold">
+                  {summaryStats.uniqueSuppliers}
+                </Typography>
+                <Typography variant="body2">Suppliers</Typography>
+              </Paper>
+            </Grid>
+          </Grid>
+        </Box>
+      )}
+
+      {/* Filters and Search */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          🔍 Filters & Search
+        </Typography>
+        <Grid container spacing={2}>
+          {/* Search */}
+          <Grid item xs={12} md={4}>
+            <TextField
+              fullWidth
+              label="Search Items"
+              placeholder="Search by item code, name, or description..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              InputProps={{
+                startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
+              }}
+            />
+          </Grid>
+
+          {/* Project Filter */}
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth>
+              <InputLabel>Projects</InputLabel>
+              <Select
+                multiple
+                value={selectedProjects}
+                onChange={(e) => setSelectedProjects(e.target.value as number[])}
+                renderValue={(selected) => `${selected.length} selected`}
+              >
+                {itemsWithDetails.map((item) => (
+                  <MenuItem key={item.project_id} value={item.project_id}>
+                    Project {item.project_id}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {/* Supplier Filter */}
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth>
+              <InputLabel>Suppliers</InputLabel>
+              <Select
+                multiple
+                value={selectedSuppliers}
+                onChange={(e) => setSelectedSuppliers(e.target.value as string[])}
+                renderValue={(selected) => `${selected.length} selected`}
+              >
+                {summaryStats?.suppliers.map((supplier: string) => (
+                  <MenuItem key={supplier} value={supplier}>
+                    {supplier}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {/* Currency Filter */}
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth>
+              <InputLabel>Currencies</InputLabel>
+              <Select
+                multiple
+                value={selectedCurrencies}
+                onChange={(e) => setSelectedCurrencies(e.target.value as string[])}
+                renderValue={(selected) => `${selected.length} selected`}
+              >
+                {summaryStats?.currencies.map((currency: string) => (
+                  <MenuItem key={currency} value={currency}>
+                    {currency}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {/* Finalized Filter */}
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={finalizedFilter}
+                onChange={(e) => setFinalizedFilter(e.target.value)}
+              >
+                <MenuItem value="all">All Options</MenuItem>
+                <MenuItem value="finalized">Finalized Only</MenuItem>
+                <MenuItem value="not_finalized">Not Finalized</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+        </Grid>
+
+        {/* Clear Filters */}
+        <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => {
+              setSearchTerm('');
+              setSelectedProjects([]);
+              setSelectedSuppliers([]);
+              setSelectedCurrencies([]);
+              setFinalizedFilter('all');
+            }}
+          >
+            Clear All Filters
+          </Button>
+          {(searchTerm || selectedProjects.length > 0 || selectedSuppliers.length > 0 || selectedCurrencies.length > 0 || finalizedFilter !== 'all') && (
+            <Chip
+              label={`${getFilteredItems().length} items match filters`}
+              color="primary"
+              variant="outlined"
+            />
+          )}
+        </Box>
+      </Paper>
 
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2">
@@ -371,17 +864,27 @@ export const ProcurementPage: React.FC = () => {
           </Typography>
         </Paper>
       ) : (
-        itemCodes.map((itemCode) => {
-        const itemDetails = itemsWithDetails.find(item => item.item_code === itemCode);
-        const itemOptions = procurementOptions.filter(opt => opt.item_code === itemCode);
+        <>
+        {getFilteredItems()
+          .slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE)
+          .map((item) => {
+        const itemCode = item.item_code;
+        const itemDetails = item;
+        const itemOptions = getFilteredOptions(itemCode);
+        
         
         return (
-          <Accordion key={itemCode} sx={{ mb: 2 }}>
+          <Accordion 
+            key={itemCode} 
+            sx={{ mb: 2 }}
+            expanded={expandedAccordion === itemCode}
+            onChange={handleAccordionChange(itemCode)}
+          >
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 2 }}>
                 <Box>
                   <Typography variant="h6">
-                    {itemCode} ({itemOptions.length} options)
+                    {itemCode} {loadedItemOptions[itemCode] ? `(${itemOptions.length} options)` : '(click to load options)'}
                   </Typography>
                   {itemDetails && (itemDetails.item_name || itemDetails.description) && (
                     <Typography variant="caption" color="text.secondary">
@@ -404,13 +907,19 @@ export const ProcurementPage: React.FC = () => {
                     <TableCell align="center">Lead Time</TableCell>
                     <TableCell align="center">Bundle Discount</TableCell>
                     <TableCell>Payment Terms</TableCell>
+                    <TableCell align="center">Status</TableCell>
                     <TableCell align="center">Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {procurementOptions
-                    .filter(opt => opt.item_code === itemCode)
-                    .map((option) => (
+                  {itemOptions.length === 0 && expandedAccordion === itemCode ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center">
+                        <CircularProgress size={24} /> Loading options...
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    itemOptions.map((option) => (
                       <TableRow key={option.id}>
                         <TableCell>
                           <Typography variant="body2" fontWeight="medium">
@@ -440,6 +949,23 @@ export const ProcurementPage: React.FC = () => {
                           </Typography>
                         </TableCell>
                         <TableCell align="center">
+                          {option.is_finalized ? (
+                            <Chip 
+                              icon={<CheckCircleIcon />}
+                              label="Finalized" 
+                              color="success" 
+                              size="small"
+                            />
+                          ) : (
+                            <Chip 
+                              label="Draft" 
+                              color="default" 
+                              size="small"
+                              variant="outlined"
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell align="center">
                           {(user?.role === 'procurement' || user?.role === 'admin') && (
                             <>
                               <IconButton
@@ -450,10 +976,13 @@ export const ProcurementPage: React.FC = () => {
                                     item_code: option.item_code,
                                     supplier_name: option.supplier_name,
                                     base_cost: option.base_cost,
+                                    currency_id: option.currency_id || 0,
+                                    shipping_cost: (option as any).shipping_cost || 0,
                                     lomc_lead_time: option.lomc_lead_time,
                                     discount_bundle_threshold: option.discount_bundle_threshold,
                                     discount_bundle_percent: option.discount_bundle_percent,
                                     payment_terms: option.payment_terms,
+                                    is_finalized: option.is_finalized || false,
                                   });
                                   // Set item details for display
                                   const itemDetails = itemsWithDetails.find(item => item.item_code === option.item_code);
@@ -476,14 +1005,15 @@ export const ProcurementPage: React.FC = () => {
                           )}
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>
             
-            {/* Add Option Button for this item */}
+            {/* Add Option Button and Bulk Finalize for this item */}
             {(user?.role === 'procurement' || user?.role === 'admin') && (
-              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', gap: 2 }}>
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
@@ -493,24 +1023,66 @@ export const ProcurementPage: React.FC = () => {
                       item_code: itemCode,
                       supplier_name: '',
                       base_cost: 0,
+                      currency_id: '',
+                      shipping_cost: 0,
                       lomc_lead_time: 0,
                       discount_bundle_threshold: undefined,
                       discount_bundle_percent: undefined,
                       payment_terms: { type: 'cash', discount_percent: 0 },
+                      is_finalized: false,
                     });
                     setSelectedItemDetails(itemDetails || null);
-                    fetchDeliveryOptions(itemCode);
+                    // Pass project_id to get project-specific delivery options
+                    if (itemDetails) {
+                      fetchDeliveryOptions(itemCode, itemDetails.project_id);
+                    } else {
+                      fetchDeliveryOptions(itemCode);
+                    }
                     setCreateDialogOpen(true);
                   }}
                 >
                   Add Option for {itemCode}
                 </Button>
+                
+                {/* Bulk Finalize/Unfinalize Button */}
+                {itemOptions.length > 0 && (() => {
+                  const allFinalized = itemOptions.every((opt) => opt.is_finalized);
+                  const isUpdating = bulkUpdating === itemCode;
+                  return (
+                    <Button
+                      variant={allFinalized ? "outlined" : "contained"}
+                      color={allFinalized ? "warning" : "success"}
+                      startIcon={allFinalized ? <RemoveDoneIcon /> : <DoneAllIcon />}
+                      onClick={() => handleBulkFinalizeToggle(itemCode, !allFinalized)}
+                      disabled={isUpdating}
+                    >
+                      {isUpdating ? 'Updating...' : (allFinalized ? 'Unfinalize All' : 'Finalize All')}
+                    </Button>
+                  );
+                })()}
               </Box>
             )}
           </AccordionDetails>
         </Accordion>
         );
-      })
+      })}
+      
+      {/* Pagination */}
+      <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center' }}>
+        <Pagination
+          count={Math.ceil(getFilteredItems().length / ITEMS_PER_PAGE)}
+          page={page + 1}
+          onChange={(e, newPage) => setPage(newPage - 1)}
+          color="primary"
+          size="large"
+          showFirstButton
+          showLastButton
+        />
+        <Typography variant="body2" sx={{ ml: 2, alignSelf: 'center', color: 'text.secondary' }}>
+          Showing {page * ITEMS_PER_PAGE + 1}-{Math.min((page + 1) * ITEMS_PER_PAGE, getFilteredItems().length)} of {getFilteredItems().length} items
+        </Typography>
+      </Box>
+      </>
       )}
 
       {/* Create Option Dialog */}
@@ -551,6 +1123,25 @@ export const ProcurementPage: React.FC = () => {
             variant="outlined"
             value={formData.base_cost}
             onChange={(e) => setFormData({ ...formData, base_cost: parseFloat(e.target.value) || 0 })}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Shipping Cost (Optional)"
+            type="number"
+            fullWidth
+            variant="outlined"
+            value={formData.shipping_cost}
+            onChange={(e) => setFormData({ ...formData, shipping_cost: parseFloat(e.target.value) || 0 })}
+            helperText="Shipping cost in the same currency as base cost"
+            sx={{ mb: 2 }}
+          />
+          <CurrencySelector
+            value={formData.currency_id}
+            onChange={(currencyId) => setFormData({ ...formData, currency_id: currencyId as number })}
+            label="Currency"
+            required
+            showRate
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
@@ -740,6 +1331,28 @@ export const ProcurementPage: React.FC = () => {
               </Typography>
             </Box>
           )}
+
+          {/* Finalized Checkbox */}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={formData.is_finalized || false}
+                onChange={(e) => setFormData({ ...formData, is_finalized: e.target.checked })}
+                color="success"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2" fontWeight="medium">
+                  ✅ Mark as Finalized
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Only finalized options will be used in procurement optimization
+                </Typography>
+              </Box>
+            }
+            sx={{ mt: 2, mb: 1 }}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
@@ -813,6 +1426,25 @@ export const ProcurementPage: React.FC = () => {
             variant="outlined"
             value={formData.base_cost}
             onChange={(e) => setFormData({ ...formData, base_cost: parseFloat(e.target.value) || 0 })}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Shipping Cost (Optional)"
+            type="number"
+            fullWidth
+            variant="outlined"
+            value={formData.shipping_cost}
+            onChange={(e) => setFormData({ ...formData, shipping_cost: parseFloat(e.target.value) || 0 })}
+            helperText="Shipping cost in the same currency as base cost"
+            sx={{ mb: 2 }}
+          />
+          <CurrencySelector
+            value={formData.currency_id}
+            onChange={(currencyId) => setFormData({ ...formData, currency_id: currencyId as number })}
+            label="Currency"
+            required
+            showRate
             sx={{ mb: 2 }}
           />
           <TextField
@@ -980,6 +1612,28 @@ export const ProcurementPage: React.FC = () => {
               </Typography>
             </Box>
           )}
+
+          {/* Finalized Checkbox */}
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={formData.is_finalized || false}
+                onChange={(e) => setFormData({ ...formData, is_finalized: e.target.checked })}
+                color="success"
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2" fontWeight="medium">
+                  ✅ Mark as Finalized
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Only finalized options will be used in procurement optimization
+                </Typography>
+              </Box>
+            }
+            sx={{ mt: 2, mb: 1 }}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>

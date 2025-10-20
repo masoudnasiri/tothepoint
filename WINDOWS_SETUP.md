@@ -71,12 +71,16 @@ The system will:
 
 ## Default Login Credentials
 
-| Role | Username | Password | Access |
-|------|----------|----------|--------|
-| Admin | admin | admin123 | Full system access |
-| Project Manager | pm1 | pm123 | Project and item management |
-| Procurement Specialist | proc1 | proc123 | Procurement options management |
-| Finance User | finance1 | finance123 | Budget and optimization |
+**⚠️  IMPORTANT SECURITY NOTICE:**
+
+The system includes pre-configured users. You **MUST** change all passwords immediately after first login.
+
+| Role | Username | Action Required |
+|------|----------|-----------------|
+| Admin | admin | ⚠️ Change password immediately |
+| Project Manager | pm1 | ⚠️ Change password immediately |
+| Procurement Specialist | proc1 | ⚠️ Change password immediately |
+| Finance User | finance1 | ⚠️ Change password immediately |
 
 ## Troubleshooting
 

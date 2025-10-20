@@ -22,6 +22,7 @@ import {
   Dashboard,
   Business,
   ShoppingCart,
+  LocalShipping,
   AccountBalance,
   Analytics,
   People,
@@ -31,6 +32,7 @@ import {
   CheckCircle,
   Psychology,
   Inventory,
+  Assessment,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -50,10 +52,13 @@ interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'] },
+  { text: 'Analytics & Forecast', icon: <Analytics />, path: '/analytics', roles: ['admin', 'pmo', 'pm', 'finance'] },
+  { text: 'Reports & Analytics', icon: <Assessment />, path: '/reports', roles: ['admin', 'pmo', 'pm', 'finance'] },
   { text: 'Projects', icon: <Business />, path: '/projects', roles: ['admin', 'pmo', 'pm', 'finance'] },
   { text: 'Procurement', icon: <ShoppingCart />, path: '/procurement', roles: ['admin', 'procurement', 'finance'] },
+  { text: 'Procurement Plan', icon: <LocalShipping />, path: '/procurement-plan', roles: ['admin', 'procurement', 'pm', 'pmo', 'finance'] },
   { text: 'Finance', icon: <AccountBalance />, path: '/finance', roles: ['admin', 'finance'] },
-  { text: 'Optimization', icon: <Analytics />, path: '/optimization', roles: ['admin', 'finance'] },
+  // { text: 'Optimization', icon: <Analytics />, path: '/optimization', roles: ['admin', 'finance'] },  // Removed - use Advanced Optimization instead
   { text: 'Advanced Optimization', icon: <Psychology />, path: '/optimization-enhanced', roles: ['admin', 'finance'] },
   { text: 'Finalized Decisions', icon: <CheckCircle />, path: '/decisions', roles: ['admin', 'finance'] },
   { text: 'Users', icon: <People />, path: '/users', roles: ['admin'] },
@@ -97,8 +102,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const drawer = (
     <div>
-      <Toolbar>
-        <Typography variant="h6" noWrap component="div">
+      <Toolbar sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2 }}>
+        <Box
+          component="img"
+          src="/InoTech_b-F.png"
+          alt="InoTech Logo"
+          sx={{
+            width: 140,
+            height: 'auto',
+            mb: 1,
+          }}
+        />
+        <Typography variant="h6" noWrap component="div" sx={{ textAlign: 'center' }}>
           Procurement DSS
         </Typography>
       </Toolbar>

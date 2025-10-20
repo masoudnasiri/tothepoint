@@ -39,19 +39,23 @@ import {
   Upload as UploadIcon,
   Close as CloseIcon,
   LocalShipping as DeliveryIcon,
+  Visibility as VisibilityIcon,
+  CheckCircle as FinalizeIcon,
 } from '@mui/icons-material';
 import { DeliveryOptionsManager } from '../components/DeliveryOptionsManager.tsx';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { useParams, useNavigate } from 'react-router-dom';
-import { itemsAPI, itemsMasterAPI, excelAPI } from '../services/api.ts';
+import { itemsAPI, itemsMasterAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { ProjectItem, ProjectItemCreate, ItemMaster } from '../types/index.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 
 export const ProjectItemsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [masterItems, setMasterItems] = useState<ItemMaster[]>([]);
   const [selectedMasterItem, setSelectedMasterItem] = useState<ItemMaster | null>(null);
@@ -59,8 +63,10 @@ export const ProjectItemsPage: React.FC = () => {
   const [error, setError] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [deliveryOptionsDialogOpen, setDeliveryOptionsDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ProjectItem | null>(null);
+  const [viewItemDeliveryOptions, setViewItemDeliveryOptions] = useState<any[]>([]);
   
   // Form data with delivery_options array
   const [formData, setFormData] = useState<ProjectItemCreate>({
@@ -140,6 +146,17 @@ export const ProjectItemsPage: React.FC = () => {
       fetchItems();
     } catch (err: any) {
       setError(formatApiError(err, 'Failed to delete item'));
+    }
+  };
+
+  const handleFinalizeItem = async (itemId: number) => {
+    if (!window.confirm('Are you sure you want to finalize this item? It will be visible in procurement.')) return;
+    
+    try {
+      await itemsAPI.finalize(itemId, { is_finalized: true });
+      fetchItems();
+    } catch (err: any) {
+      setError(formatApiError(err, 'Failed to finalize item'));
     }
   };
 
@@ -521,18 +538,29 @@ export const ProjectItemsPage: React.FC = () => {
                   </Box>
                 </TableCell>
                 <TableCell align="center">
-                  <Chip 
-                    label={item.status} 
-                    size="small"
-                    color={
-                      item.status === 'PENDING' ? 'default' :
-                      item.status === 'SUGGESTED' ? 'info' :
-                      item.status === 'DECIDED' ? 'primary' :
-                      item.status === 'PROCURED' ? 'secondary' :
-                      item.status === 'FULFILLED' ? 'warning' :
-                      item.status === 'PAID' ? 'success' : 'default'
-                    }
-                  />
+                  <Box display="flex" flexDirection="column" gap={0.5} alignItems="center">
+                    <Chip 
+                      label={item.status} 
+                      size="small"
+                      color={
+                        item.status === 'PENDING' ? 'default' :
+                        item.status === 'SUGGESTED' ? 'info' :
+                        item.status === 'DECIDED' ? 'primary' :
+                        item.status === 'PROCURED' ? 'secondary' :
+                        item.status === 'FULFILLED' ? 'warning' :
+                        item.status === 'PAID' ? 'success' : 'default'
+                      }
+                    />
+                    {item.is_finalized && (
+                      <Chip
+                        label="FINALIZED"
+                        size="small"
+                        color="success"
+                        variant="filled"
+                        icon={<FinalizeIcon />}
+                      />
+                    )}
+                  </Box>
                 </TableCell>
                 <TableCell align="center">
                   <Chip
@@ -544,10 +572,30 @@ export const ProjectItemsPage: React.FC = () => {
                 <TableCell align="center">
                   <IconButton
                     size="small"
+                    onClick={async () => {
+                      setSelectedItem(item);
+                      // Fetch delivery options for this item
+                      try {
+                        const response = await deliveryOptionsAPI.listByItem(item.id);
+                        setViewItemDeliveryOptions(response.data);
+                      } catch (err) {
+                        console.error('Failed to load delivery options', err);
+                        setViewItemDeliveryOptions([]);
+                      }
+                      setViewDialogOpen(true);
+                    }}
+                    title="View Item Details"
+                    color="primary"
+                  >
+                    <VisibilityIcon />
+                  </IconButton>
+                  <IconButton
+                    size="small"
                     onClick={() => {
                       setSelectedItem(item);
                       setFormData({
                         project_id: item.project_id,
+                        master_item_id: item.master_item_id,
                         item_code: item.item_code,
                         item_name: item.item_name || '',
                         quantity: item.quantity,
@@ -555,6 +603,14 @@ export const ProjectItemsPage: React.FC = () => {
                         external_purchase: item.external_purchase,
                         description: item.description || '',
                       });
+                      
+                      // Load the master item for display
+                      if (item.master_item_id) {
+                        itemsMasterAPI.get(item.master_item_id).then(response => {
+                          setSelectedMasterItem(response.data);
+                        }).catch(err => console.error('Failed to load master item'));
+                      }
+                      
                       setEditDialogOpen(true);
                     }}
                     title="Edit Item"
@@ -577,6 +633,16 @@ export const ProjectItemsPage: React.FC = () => {
                   >
                     <DeliveryIcon />
                   </IconButton>
+                  {(user?.role === 'pmo' || user?.role === 'admin') && !item.is_finalized && (
+                    <IconButton
+                      size="small"
+                      onClick={() => handleFinalizeItem(item.id)}
+                      title="Finalize Item (PMO/Admin only)"
+                      color="success"
+                    >
+                      <FinalizeIcon />
+                    </IconButton>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -616,8 +682,6 @@ export const ProjectItemsPage: React.FC = () => {
         open={editDialogOpen} 
         onClose={() => {
           setEditDialogOpen(false);
-          resetForm();
-          setSelectedItem(null);
         }} 
         maxWidth="sm" 
         fullWidth
@@ -627,7 +691,11 @@ export const ProjectItemsPage: React.FC = () => {
           {renderFormFields()}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => {
+            setEditDialogOpen(false);
+            resetForm();
+            setSelectedItem(null);
+          }}>Cancel</Button>
           <Button 
             onClick={handleEditItem} 
             variant="contained"
@@ -659,6 +727,133 @@ export const ProjectItemsPage: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeliveryOptionsDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Item Dialog */}
+      <Dialog 
+        open={viewDialogOpen} 
+        onClose={() => {
+          setViewDialogOpen(false);
+          setSelectedItem(null);
+        }} 
+        maxWidth="md" 
+        fullWidth
+      >
+        <DialogTitle>Item Details</DialogTitle>
+        <DialogContent>
+          {selectedItem && (
+            <Box sx={{ pt: 2 }}>
+              <Paper elevation={0} sx={{ p: 3, mb: 2, bgcolor: 'primary.lighter' }}>
+                <Typography variant="h6" gutterBottom color="primary.dark">
+                  📦 {selectedItem.item_code}
+                </Typography>
+                <Typography variant="subtitle1" gutterBottom>
+                  {selectedItem.item_name}
+                </Typography>
+              </Paper>
+
+              <Box sx={{ display: 'grid', gap: 2 }}>
+                <Paper elevation={1} sx={{ p: 2 }}>
+                  <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                    Quantity
+                  </Typography>
+                  <Typography variant="h6">{selectedItem.quantity}</Typography>
+                </Paper>
+
+                {selectedItem.description && (
+                  <Paper elevation={1} sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                      Description
+                    </Typography>
+                    <Typography variant="body1">{selectedItem.description}</Typography>
+                  </Paper>
+                )}
+
+                <Paper elevation={1} sx={{ p: 2 }}>
+                  <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                    Delivery & Invoice Options
+                  </Typography>
+                  {viewItemDeliveryOptions && viewItemDeliveryOptions.length > 0 ? (
+                    <Box sx={{ mt: 2 }}>
+                      {viewItemDeliveryOptions.map((option, index) => (
+                        <Paper key={option.id} elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'grey.50' }}>
+                          <Typography variant="body2" fontWeight="medium" gutterBottom>
+                            Option {index + 1} - Slot {option.slot_number}
+                          </Typography>
+                          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1 }}>
+                            <Box>
+                              <Typography variant="caption" color="textSecondary">Delivery Date:</Typography>
+                              <Typography variant="body2">{option.delivery_date}</Typography>
+                            </Box>
+                            <Box>
+                              <Typography variant="caption" color="textSecondary">Invoice Amount/Unit:</Typography>
+                              <Typography variant="body2">${option.invoice_amount_per_unit}</Typography>
+                            </Box>
+                            <Box>
+                              <Typography variant="caption" color="textSecondary">Invoice Timing:</Typography>
+                              <Typography variant="body2">
+                                {option.invoice_timing_type === 'ABSOLUTE' 
+                                  ? `Absolute: ${option.invoice_issue_date}`
+                                  : `Relative: ${option.invoice_days_after_delivery} days after delivery`
+                                }
+                              </Typography>
+                            </Box>
+                            <Box>
+                              <Typography variant="caption" color="textSecondary">Total Invoice:</Typography>
+                              <Typography variant="body2" fontWeight="medium">
+                                ${(option.invoice_amount_per_unit * selectedItem.quantity).toFixed(2)}
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </Paper>
+                      ))}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                      No delivery & invoice options configured
+                    </Typography>
+                  )}
+                </Paper>
+
+                <Paper elevation={1} sx={{ p: 2 }}>
+                  <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                    External Purchase
+                  </Typography>
+                  <Chip 
+                    label={selectedItem.external_purchase ? 'Yes' : 'No'} 
+                    color={selectedItem.external_purchase ? 'warning' : 'default'}
+                  />
+                </Paper>
+
+                {selectedItem.file_name && (
+                  <Paper elevation={1} sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                      Attached File
+                    </Typography>
+                    <Typography variant="body2">📎 {selectedItem.file_name}</Typography>
+                  </Paper>
+                )}
+
+                <Paper elevation={1} sx={{ p: 2, bgcolor: 'grey.50' }}>
+                  <Typography variant="caption" color="textSecondary">
+                    Created: {new Date(selectedItem.created_at).toLocaleString()}
+                  </Typography>
+                  {selectedItem.updated_at && (
+                    <>
+                      <br />
+                      <Typography variant="caption" color="textSecondary">
+                        Updated: {new Date(selectedItem.updated_at).toLocaleString()}
+                      </Typography>
+                    </>
+                  )}
+                </Paper>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>
