@@ -146,8 +146,8 @@ def require_finance():
 
 
 def require_analytics_access():
-    """Require analytics access (admin, finance, pm, pmo)"""
-    return require_role(["admin", "finance", "pm", "pmo"])
+    """Require analytics access (admin, finance, pmo) - PM excluded"""
+    return require_role(["admin", "finance", "pmo", "procurement"])
 
 
 async def get_user_projects(db: AsyncSession, user: User) -> list[int]:

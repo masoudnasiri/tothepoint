@@ -61,6 +61,11 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -
     if not update_data:
         return await get_user(db, user_id)
     
+    # Hash password if it's being updated
+    if 'password' in update_data and update_data['password']:
+        update_data['password_hash'] = get_password_hash(update_data['password'])
+        del update_data['password']  # Remove plain password
+    
     await db.execute(
         update(User).where(User.id == user_id).values(**update_data)
     )
@@ -243,6 +248,28 @@ async def delete_project_item(db: AsyncSession, item_id: int) -> bool:
     result = await db.execute(delete(ProjectItem).where(ProjectItem.id == item_id))
     await db.commit()
     return result.rowcount > 0
+
+
+async def finalize_project_item(db: AsyncSession, item_id: int, finalized_by: int, finalize_data: 'ProjectItemFinalize') -> Optional[ProjectItem]:
+    """Finalize a project item (PMO only) - makes it visible in procurement"""
+    from datetime import datetime
+    from app.schemas import ProjectItemFinalize
+    
+    # Get the current item
+    result = await db.execute(select(ProjectItem).where(ProjectItem.id == item_id))
+    item = result.scalar_one_or_none()
+    
+    if not item:
+        return None
+    
+    # Update finalization fields
+    item.is_finalized = finalize_data.is_finalized
+    item.finalized_by = finalized_by
+    item.finalized_at = datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(item)
+    return item
 
 
 # Procurement Option CRUD operations

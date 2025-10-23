@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple, Optional
 from decimal import Decimal
 from ortools.sat.python import cp_model
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models import (
@@ -52,7 +52,7 @@ class ProcurementOptimizer:
             # Step 4: Process results
             if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
                 await self._save_results(solver)
-                total_cost = self._calculate_total_cost(solver)
+                total_cost = await self._calculate_total_cost(solver)
                 execution_time = (datetime.now() - self.start_time).total_seconds()
                 
                 return OptimizationRunResponse(
@@ -165,6 +165,10 @@ class ProcurementOptimizer:
             if (item.project_id, item.item_code) not in decided_items
         ]
         
+        logger.info(f"Total items loaded: {len(all_items)}")
+        logger.info(f"Items after filtering decided items: {len(self.project_items)}")
+        logger.info(f"Decided items to exclude: {len(decided_items)}")
+        
         if not self.project_items:
             if all_items:
                 raise ValueError(
@@ -276,25 +280,44 @@ class ProcurementOptimizer:
             project_id = item.project_id
             item_code = item.item_code
             
-            # Get delivery options (list of ISO date strings)
-            delivery_options = item.delivery_options if item.delivery_options else []
+            # Get delivery options from the relationship
+            delivery_options = item.delivery_options_rel if item.delivery_options_rel else []
+            
+            logger.info(f"Item {item_code}: delivery_options_rel = {delivery_options}")
+            logger.info(f"Item {item_code}: type = {type(delivery_options)}, len = {len(delivery_options) if delivery_options else 0}")
             
             if not delivery_options:
                 logger.warning(f"Item {item_code} has no delivery options, skipping")
                 continue
             
             # Convert delivery dates to time slots
-            # Use a more flexible range to accommodate lead times
-            # Map each delivery option to a time slot starting from a higher number
-            # to ensure purchase_time (delivery_time - lead_time) remains positive
-            # Allow more time slots to accommodate more items
-            min_time = 5
-            # Use a more generous time range to accommodate more items
-            # Remove the max_time_slots constraint to allow more items
-            max_time = max(len(delivery_options) + 10, 20)  # At least 20 time slots, no max constraint
-            valid_times = list(range(min_time, max_time + 1))
+            # Use actual delivery dates from delivery options
+            from datetime import datetime, timedelta
+            
+            # Get delivery dates from delivery options
+            delivery_dates = []
+            for delivery_option in delivery_options:
+                if hasattr(delivery_option, 'delivery_date'):
+                    delivery_dates.append(delivery_option.delivery_date)
+                elif hasattr(delivery_option, 'delivery_date_str'):
+                    delivery_dates.append(delivery_option.delivery_date_str)
+            
+            if not delivery_dates:
+                logger.warning(f"Item {item_code} has delivery options but no valid delivery dates, skipping")
+                continue
+            
+            # Convert dates to time slots (days from today)
+            today = date.today()
+            valid_times = []
+            for delivery_date in delivery_dates:
+                if isinstance(delivery_date, str):
+                    delivery_date = datetime.strptime(delivery_date, '%Y-%m-%d').date()
+                days_from_today = (delivery_date - today).days
+                if days_from_today >= 1:  # Only future dates
+                    valid_times.append(days_from_today)
             
             if not valid_times:
+                logger.warning(f"Item {item_code} has no valid future delivery dates, skipping")
                 continue
                 
             # Find procurement options for this item
@@ -405,8 +428,9 @@ class ProcurementOptimizer:
             cash_flow_coeffs = []
             
             for var, option, item in time_groups[time_slot]:
-                # Calculate purchase date (simplified - in real implementation, you'd map time slots to actual dates)
-                purchase_date = date.today()  # This should be calculated from time_slot
+                # Calculate purchase date from time slot
+                # Time slot represents days from today
+                purchase_date = date.today() + timedelta(days=time_slot - 1)
                 cost_per_unit = await self._calculate_effective_cost(option, item, purchase_date)
                 total_cost = cost_per_unit * item.quantity
                 
@@ -504,8 +528,11 @@ class ProcurementOptimizer:
                         if i.project_id == project_id and i.item_code == item_code), None)
             
             if item:
-                # Calculate procurement cost (simplified date calculation)
-                purchase_date = date.today()  # This should be calculated from time slots
+                # Calculate procurement cost using actual purchase date
+                # Extract delivery time from variable name to calculate purchase date
+                delivery_time = int(parts[4])
+                purchase_time = delivery_time - option.lomc_lead_time
+                purchase_date = date.today() + timedelta(days=purchase_time - 1)
                 cost_per_unit = await self._calculate_effective_cost(option, item, purchase_date)
                 total_cost = cost_per_unit * item.quantity
                 
@@ -573,7 +600,7 @@ class ProcurementOptimizer:
                 
                 if item:
                     purchase_time = delivery_time - option.lomc_lead_time
-                    purchase_date = date.today()  # This should be calculated from time slots
+                    purchase_date = date.today() + timedelta(days=purchase_time - 1)
                     final_cost = await self._calculate_effective_cost(option, item, purchase_date) * item.quantity
                     
                     result = OptimizationResult(
@@ -594,7 +621,7 @@ class ProcurementOptimizer:
         
         logger.info(f"Saved {len(results)} optimization results")
     
-    def _calculate_total_cost(self, solver) -> Decimal:
+    async def _calculate_total_cost(self, solver) -> Decimal:
         """Calculate total cost of the optimized solution"""
         total_cost = Decimal('0')
         
@@ -604,13 +631,17 @@ class ProcurementOptimizer:
                 option_id = int(parts[3])
                 project_id = int(parts[1])
                 item_code = parts[2]
+                delivery_time = int(parts[4])  # Extract delivery time from variable name
                 
                 option = self.procurement_options[option_id]
                 item = next((i for i in self.project_items 
                             if i.project_id == project_id and i.item_code == item_code), None)
                 
                 if item:
-                    cost_per_unit = self._calculate_effective_cost(option, item)
+                    # Calculate purchase date from delivery time and lead time
+                    purchase_time = delivery_time - option.lomc_lead_time
+                    purchase_date = date.today() + timedelta(days=purchase_time - 1)
+                    cost_per_unit = await self._calculate_effective_cost(option, item, purchase_date)
                     total_cost += cost_per_unit * item.quantity
         
         return total_cost

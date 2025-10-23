@@ -35,9 +35,11 @@ import {
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { usersAPI } from '../services/api.ts';
 import { User } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
 
 export const UsersPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -73,7 +75,23 @@ export const UsersPage: React.FC = () => {
       resetForm();
       fetchUsers();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create user');
+      // Handle validation errors (Pydantic returns array of error objects)
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          // Pydantic validation errors
+          const errorMessages = detail.map((e: any) => 
+            `${e.loc?.join(' -> ') || 'Field'}: ${e.msg}`
+          ).join('; ');
+          setError(errorMessages);
+        } else if (typeof detail === 'string') {
+          setError(detail);
+        } else {
+          setError('Failed to create user - invalid data');
+        }
+      } else {
+        setError('Failed to create user');
+      }
     }
   };
 
@@ -93,7 +111,23 @@ export const UsersPage: React.FC = () => {
       resetForm();
       fetchUsers();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update user');
+      // Handle validation errors (Pydantic returns array of error objects)
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          // Pydantic validation errors
+          const errorMessages = detail.map((e: any) => 
+            `${e.loc?.join(' -> ') || 'Field'}: ${e.msg}`
+          ).join('; ');
+          setError(errorMessages);
+        } else if (typeof detail === 'string') {
+          setError(detail);
+        } else {
+          setError('Failed to update user - invalid data');
+        }
+      } else {
+        setError('Failed to update user');
+      }
     }
   };
 
@@ -149,7 +183,7 @@ export const UsersPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">User Management</Typography>
+        <Typography variant="h4">{t('navigation.users')}</Typography>
         <Box>
           <Button
             variant="outlined"
@@ -211,7 +245,7 @@ export const UsersPage: React.FC = () => {
                 </TableCell>
                 <TableCell align="center">
                   <Chip 
-                    label={userItem.is_active ? 'Active' : 'Inactive'}
+                    label={userItem.is_active ? t('users.active') : t('users.inactive')}
                     color={userItem.is_active ? 'success' : 'default'}
                     size="small"
                   />
@@ -261,7 +295,7 @@ export const UsersPage: React.FC = () => {
           <TextField
             autoFocus
             margin="dense"
-            label="Username"
+            label={t('users.username')}
             fullWidth
             variant="outlined"
             value={formData.username}
@@ -270,7 +304,7 @@ export const UsersPage: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Password"
+            label={t('users.password')}
             type="password"
             fullWidth
             variant="outlined"
@@ -298,7 +332,7 @@ export const UsersPage: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
               />
             }
-            label="Active"
+            label={t('users.active')}
           />
         </DialogContent>
         <DialogActions>
@@ -316,7 +350,7 @@ export const UsersPage: React.FC = () => {
           <TextField
             autoFocus
             margin="dense"
-            label="Username"
+            label={t('users.username')}
             fullWidth
             variant="outlined"
             value={formData.username}
@@ -325,7 +359,7 @@ export const UsersPage: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Password (leave blank to keep current)"
+            label={t('users.passwordLeaveBlank')}
             type="password"
             fullWidth
             variant="outlined"
@@ -353,7 +387,7 @@ export const UsersPage: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
               />
             }
-            label="Active"
+            label={t('users.active')}
           />
         </DialogContent>
         <DialogActions>

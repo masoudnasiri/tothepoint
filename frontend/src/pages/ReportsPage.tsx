@@ -57,6 +57,7 @@ import {
   RiskItem,
   SupplierScorecard,
 } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -80,6 +81,7 @@ function TabPanel(props: TabPanelProps) {
 }
 
 export const ReportsPage: React.FC = () => {
+  const { t } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -205,7 +207,7 @@ export const ReportsPage: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box display="flex" alignItems="center" gap={2}>
           <ReportIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-          <Typography variant="h4">Reports & Analytics</Typography>
+          <Typography variant="h4">{t('reports.title')}</Typography>
         </Box>
         <Button
           variant="contained"
@@ -213,7 +215,7 @@ export const ReportsPage: React.FC = () => {
           onClick={handleExport}
           disabled={loading || !reportsData}
         >
-          Export to Excel
+          {t('reports.exportToExcel')}
         </Button>
       </Box>
 
@@ -226,13 +228,13 @@ export const ReportsPage: React.FC = () => {
       {/* Global Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Global Filters
+          {t('reports.globalFilters')}
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={3}>
             <TextField
               fullWidth
-              label="Start Date"
+              label={t('reports.startDate')}
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
@@ -242,7 +244,7 @@ export const ReportsPage: React.FC = () => {
           <Grid item xs={12} md={3}>
             <TextField
               fullWidth
-              label="End Date"
+              label={t('reports.endDate')}
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
@@ -256,7 +258,7 @@ export const ReportsPage: React.FC = () => {
                 multiple
                 value={selectedProjects}
                 onChange={handleProjectChange}
-                label="Projects"
+                label={t('reports.projects')}
                 renderValue={(selected) => (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {selected.map((value) => {
@@ -276,12 +278,12 @@ export const ReportsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>
-              <InputLabel>Suppliers</InputLabel>
+              <InputLabel>{t('reports.suppliers')}</InputLabel>
               <Select
                 multiple
                 value={selectedSuppliers}
                 onChange={handleSupplierChange}
-                label="Suppliers"
+                label={t('reports.suppliers')}
                 renderValue={(selected) => (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {selected.map((value) => (
@@ -309,11 +311,11 @@ export const ReportsPage: React.FC = () => {
           variant="fullWidth"
           sx={{ borderBottom: 1, borderColor: 'divider' }}
         >
-          <Tab label="Data Summary" />
-          <Tab label="Financial Summary" />
-          <Tab label="EVM Analytics" />
-          <Tab label="Risk & Forecasts" />
-          <Tab label="Operational Performance" />
+          <Tab label={t('reports.dataSummary')} />
+          <Tab label={t('reports.financialSummary')} />
+          <Tab label={t('reports.evmAnalytics')} />
+          <Tab label={t('reports.riskForecasts')} />
+          <Tab label={t('reports.operationalPerformance')} />
         </Tabs>
 
         {/* Tab 0: Data Summary */}
@@ -326,11 +328,11 @@ export const ReportsPage: React.FC = () => {
                   <Card>
                     <CardContent>
                       <Typography color="textSecondary" gutterBottom>
-                        Total Locked Items
+                        {t('reports.totalLockedItems')}
                       </Typography>
                       <Typography variant="h3">{dataSummary.overall.total_locked_items}</Typography>
                       <Typography variant="body2" color="textSecondary">
-                        Finalized decisions
+                        {t('reports.finalizedDecisions')}
                       </Typography>
                     </CardContent>
                   </Card>
@@ -339,11 +341,11 @@ export const ReportsPage: React.FC = () => {
                   <Card>
                     <CardContent>
                       <Typography color="textSecondary" gutterBottom>
-                        Projects
+                        {t('reports.projects')}
                       </Typography>
                       <Typography variant="h3">{dataSummary.overall.total_projects}</Typography>
                       <Typography variant="body2" color="textSecondary">
-                        Active projects
+                        {t('reports.activeProjects')}
                       </Typography>
                     </CardContent>
                   </Card>
@@ -352,11 +354,11 @@ export const ReportsPage: React.FC = () => {
                   <Card>
                     <CardContent>
                       <Typography color="textSecondary" gutterBottom>
-                        Suppliers
+                        {t('reports.suppliers')}
                       </Typography>
                       <Typography variant="h3">{dataSummary.overall.total_suppliers}</Typography>
                       <Typography variant="body2" color="textSecondary">
-                        Unique suppliers
+                        {t('reports.activeSuppliers')}
                       </Typography>
                     </CardContent>
                   </Card>
@@ -368,7 +370,7 @@ export const ReportsPage: React.FC = () => {
                   }}>
                     <CardContent>
                       <Typography color="textSecondary" gutterBottom>
-                        Data Quality Score
+                        {t('reports.dataQualityScore')}
                       </Typography>
                       <Typography variant="h3">{dataSummary.overall.data_quality_score}%</Typography>
                       <Typography variant="body2" color="textSecondary" sx={{ textTransform: 'capitalize' }}>
@@ -381,74 +383,74 @@ export const ReportsPage: React.FC = () => {
 
               {/* Actuals Data Progress */}
               <Typography variant="h6" gutterBottom>
-                Actuals Data Completeness
+                {t('reports.actualsDataCompleteness')}
               </Typography>
               <TableContainer component={Paper} sx={{ mb: 3 }}>
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Data Type</TableCell>
-                      <TableCell align="right">Count</TableCell>
-                      <TableCell align="right">Percentage</TableCell>
-                      <TableCell align="right">Status</TableCell>
+                      <TableCell>{t('reports.dataType')}</TableCell>
+                      <TableCell align="right">{t('reports.count')}</TableCell>
+                      <TableCell align="right">{t('reports.percentage')}</TableCell>
+                      <TableCell align="right">{t('reports.status')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     <TableRow>
-                      <TableCell>Items with Payment Data</TableCell>
+                      <TableCell>{t('reports.itemsWithPaymentData')}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_payment.count}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_payment.percent}%</TableCell>
                       <TableCell align="right">
                         <Chip 
-                          label={dataSummary.actuals_data.with_payment.percent >= 20 ? 'Good' : dataSummary.actuals_data.with_payment.percent >= 10 ? 'Fair' : 'Limited'} 
+                          label={dataSummary.actuals_data.with_payment.percent >= 20 ? t('reports.good') : dataSummary.actuals_data.with_payment.percent >= 10 ? t('reports.fair') : t('reports.limited')} 
                           color={dataSummary.actuals_data.with_payment.percent >= 20 ? 'success' : dataSummary.actuals_data.with_payment.percent >= 10 ? 'warning' : 'default'}
                           size="small"
                         />
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>Items with PM Acceptance</TableCell>
+                      <TableCell>{t('reports.itemsWithPMAcceptance')}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_pm_acceptance.count}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_pm_acceptance.percent}%</TableCell>
                       <TableCell align="right">
                         <Chip 
-                          label={dataSummary.actuals_data.with_pm_acceptance.percent >= 20 ? 'Good' : dataSummary.actuals_data.with_pm_acceptance.percent >= 10 ? 'Fair' : 'Limited'} 
+                          label={dataSummary.actuals_data.with_pm_acceptance.percent >= 20 ? t('reports.good') : dataSummary.actuals_data.with_pm_acceptance.percent >= 10 ? t('reports.fair') : t('reports.limited')} 
                           color={dataSummary.actuals_data.with_pm_acceptance.percent >= 20 ? 'success' : dataSummary.actuals_data.with_pm_acceptance.percent >= 10 ? 'warning' : 'default'}
                           size="small"
                         />
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>Items with Invoice Data</TableCell>
+                      <TableCell>{t('reports.itemsWithInvoiceData')}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_invoice.count}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_invoice.percent}%</TableCell>
                       <TableCell align="right">
                         <Chip 
-                          label={dataSummary.actuals_data.with_invoice.percent >= 20 ? 'Good' : dataSummary.actuals_data.with_invoice.percent >= 10 ? 'Fair' : 'Limited'} 
+                          label={dataSummary.actuals_data.with_invoice.percent >= 20 ? t('reports.good') : dataSummary.actuals_data.with_invoice.percent >= 10 ? t('reports.fair') : t('reports.limited')} 
                           color={dataSummary.actuals_data.with_invoice.percent >= 20 ? 'success' : dataSummary.actuals_data.with_invoice.percent >= 10 ? 'warning' : 'default'}
                           size="small"
                         />
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>Items with Delivery Complete</TableCell>
+                      <TableCell>{t('reports.itemsWithDeliveryComplete')}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_delivery_complete.count}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.with_delivery_complete.percent}%</TableCell>
                       <TableCell align="right">
                         <Chip 
-                          label={dataSummary.actuals_data.with_delivery_complete.percent >= 20 ? 'Good' : dataSummary.actuals_data.with_delivery_complete.percent >= 10 ? 'Fair' : 'Limited'} 
+                          label={dataSummary.actuals_data.with_delivery_complete.percent >= 20 ? t('reports.good') : dataSummary.actuals_data.with_delivery_complete.percent >= 10 ? t('reports.fair') : t('reports.limited')} 
                           color={dataSummary.actuals_data.with_delivery_complete.percent >= 20 ? 'success' : dataSummary.actuals_data.with_delivery_complete.percent >= 10 ? 'warning' : 'default'}
                           size="small"
                         />
                       </TableCell>
                     </TableRow>
                     <TableRow>
-                      <TableCell>Cashflow Inflow Events</TableCell>
+                      <TableCell>{t('reports.cashflowInflowEvents')}</TableCell>
                       <TableCell align="right">{dataSummary.actuals_data.cashflow_inflow_events}</TableCell>
                       <TableCell align="right">-</TableCell>
                       <TableCell align="right">
                         <Chip 
-                          label={dataSummary.actuals_data.cashflow_inflow_events >= 10 ? 'Good' : 'Limited'} 
+                          label={dataSummary.actuals_data.cashflow_inflow_events >= 10 ? t('reports.good') : t('reports.limited')} 
                           color={dataSummary.actuals_data.cashflow_inflow_events >= 10 ? 'success' : 'default'}
                           size="small"
                         />
@@ -460,15 +462,15 @@ export const ReportsPage: React.FC = () => {
 
               {/* Report Readiness */}
               <Typography variant="h6" gutterBottom>
-                Report Readiness Status
+                {t('reports.reportReadinessStatus')}
               </Typography>
               <Grid container spacing={2} sx={{ mb: 3 }}>
                 <Grid item xs={12} md={3}>
                   <Card>
                     <CardContent>
-                      <Typography variant="subtitle2" gutterBottom>Financial Summary</Typography>
+                      <Typography variant="subtitle2" gutterBottom>{t('reports.financialSummary')}</Typography>
                       <Chip 
-                        label={dataSummary.report_readiness.financial_summary} 
+                        label={t(`reports.${dataSummary.report_readiness.financial_summary.toLowerCase()}`)} 
                         color={dataSummary.report_readiness.financial_summary === 'good' ? 'success' : 'warning'}
                         sx={{ textTransform: 'capitalize' }}
                       />
@@ -478,9 +480,9 @@ export const ReportsPage: React.FC = () => {
                 <Grid item xs={12} md={3}>
                   <Card>
                     <CardContent>
-                      <Typography variant="subtitle2" gutterBottom>EVM Analytics</Typography>
+                      <Typography variant="subtitle2" gutterBottom>{t('reports.evmAnalytics')}</Typography>
                       <Chip 
-                        label={dataSummary.report_readiness.evm_analytics} 
+                        label={t(`reports.${dataSummary.report_readiness.evm_analytics.toLowerCase()}`)} 
                         color={dataSummary.report_readiness.evm_analytics === 'good' ? 'success' : 'warning'}
                         sx={{ textTransform: 'capitalize' }}
                       />
@@ -490,9 +492,9 @@ export const ReportsPage: React.FC = () => {
                 <Grid item xs={12} md={3}>
                   <Card>
                     <CardContent>
-                      <Typography variant="subtitle2" gutterBottom>Risk & Forecasts</Typography>
+                      <Typography variant="subtitle2" gutterBottom>{t('reports.riskForecasts')}</Typography>
                       <Chip 
-                        label={dataSummary.report_readiness.risk_forecasts} 
+                        label={t(`reports.${dataSummary.report_readiness.risk_forecasts.toLowerCase()}`)} 
                         color={dataSummary.report_readiness.risk_forecasts === 'good' ? 'success' : 'warning'}
                         sx={{ textTransform: 'capitalize' }}
                       />
@@ -502,7 +504,7 @@ export const ReportsPage: React.FC = () => {
                 <Grid item xs={12} md={3}>
                   <Card>
                     <CardContent>
-                      <Typography variant="subtitle2" gutterBottom>Operational Performance</Typography>
+                      <Typography variant="subtitle2" gutterBottom>{t('reports.operationalPerformance')}</Typography>
                       <Chip 
                         label={dataSummary.report_readiness.operational_performance} 
                         color={dataSummary.report_readiness.operational_performance === 'good' ? 'success' : 'warning'}
@@ -517,7 +519,7 @@ export const ReportsPage: React.FC = () => {
               {dataSummary.recommendations.filter((r: any) => r !== null).length > 0 && (
                 <>
                   <Typography variant="h6" gutterBottom>
-                    Recommendations to Improve Analytics
+                    {t('reports.recommendationsToImproveAnalytics')}
                   </Typography>
                   <Grid container spacing={2}>
                     {dataSummary.recommendations.filter((r: any) => r !== null).map((rec: any, index: number) => (
@@ -542,10 +544,10 @@ export const ReportsPage: React.FC = () => {
                             </Typography>
                             <Box display="flex" justifyContent="space-between" alignItems="center">
                               <Typography variant="body2">
-                                Current: <strong>{rec.current}</strong>
+                                {t('reports.current')}: <strong>{rec.current}</strong>
                               </Typography>
                               <Typography variant="body2">
-                                Target: <strong>{rec.target}</strong>
+                                {t('reports.target')}: <strong>{rec.target}</strong>
                               </Typography>
                             </Box>
                           </CardContent>
@@ -565,7 +567,7 @@ export const ReportsPage: React.FC = () => {
             <Box>
               {/* Cash Flow Analysis Chart */}
               <Typography variant="h6" gutterBottom>
-                Cash Flow Analysis
+                {t('reports.cashFlowAnalysis')}
               </Typography>
               <Paper sx={{ p: 2, mb: 3 }}>
                 <ResponsiveContainer width="100%" height={400}>
@@ -583,14 +585,14 @@ export const ReportsPage: React.FC = () => {
                     <YAxis />
                     <Tooltip formatter={(value: any) => formatCurrency(value)} />
                     <Legend />
-                    <Bar dataKey="inflow" fill="#4caf50" name="Cash Inflow" />
-                    <Bar dataKey="outflow" fill="#f44336" name="Cash Outflow" />
+                    <Bar dataKey="inflow" fill="#4caf50" name={t('reports.cashInflow')} />
+                    <Bar dataKey="outflow" fill="#f44336" name={t('reports.cashOutflow')} />
                     <Line
                       type="monotone"
                       dataKey="cumulative"
                       stroke="#2196f3"
                       strokeWidth={3}
-                      name="Cumulative Balance"
+                      name={t('reports.cumulativeBalance')}
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -598,17 +600,17 @@ export const ReportsPage: React.FC = () => {
 
               {/* Budget vs Actuals Table */}
               <Typography variant="h6" gutterBottom>
-                Budget vs Actuals Summary
+                {t('reports.budgetVsActualsSummary')}
               </Typography>
               <TableContainer component={Paper}>
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Project Name</TableCell>
-                      <TableCell align="right">Planned Cost</TableCell>
-                      <TableCell align="right">Actual Cost</TableCell>
-                      <TableCell align="right">Variance ($)</TableCell>
-                      <TableCell align="right">Variance (%)</TableCell>
+                      <TableCell>{t('reports.projectName')}</TableCell>
+                      <TableCell align="right">{t('reports.plannedCost')}</TableCell>
+                      <TableCell align="right">{t('reports.actualCost')}</TableCell>
+                      <TableCell align="right">{t('reports.varianceDollar')}</TableCell>
+                      <TableCell align="right">{t('reports.variancePercent')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -655,7 +657,7 @@ export const ReportsPage: React.FC = () => {
             <Box>
               {/* EVM Performance Chart */}
               <Typography variant="h6" gutterBottom>
-                Core EVM Performance
+                {t('reports.coreEVMPerformance')}
               </Typography>
               <Paper sx={{ p: 2, mb: 3 }}>
                 <ResponsiveContainer width="100%" height={400}>
@@ -677,21 +679,21 @@ export const ReportsPage: React.FC = () => {
                       dataKey="pv"
                       stroke="#8884d8"
                       strokeWidth={2}
-                      name="Planned Value (PV)"
+                      name={t('reports.plannedValuePV')}
                     />
                     <Line
                       type="monotone"
                       dataKey="ev"
                       stroke="#82ca9d"
                       strokeWidth={2}
-                      name="Earned Value (EV)"
+                      name={t('reports.earnedValueEV')}
                     />
                     <Line
                       type="monotone"
                       dataKey="ac"
                       stroke="#ff7300"
                       strokeWidth={2}
-                      name="Actual Cost (AC)"
+                      name={t('reports.actualCostAC')}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -699,7 +701,7 @@ export const ReportsPage: React.FC = () => {
 
               {/* KPI Trends Chart */}
               <Typography variant="h6" gutterBottom>
-                KPI Trends (CPI & SPI)
+                {t('reports.kpiTrendsCPISPI')}
               </Typography>
               <Paper sx={{ p: 2, mb: 3 }}>
                 <ResponsiveContainer width="100%" height={300}>
@@ -715,20 +717,20 @@ export const ReportsPage: React.FC = () => {
                     <YAxis domain={[0, 2]} />
                     <Tooltip formatter={(value: any) => formatNumber(value, 3)} />
                     <Legend />
-                    <ReferenceLine y={1.0} stroke="#666" strokeDasharray="3 3" label="Target (1.0)" />
+                    <ReferenceLine y={1.0} stroke="#666" strokeDasharray="3 3" label={t('reports.target10')} />
                     <Line
                       type="monotone"
                       dataKey="cpi"
                       stroke="#4caf50"
                       strokeWidth={2}
-                      name="Cost Performance Index (CPI)"
+                      name={t('reports.costPerformanceIndexCPI')}
                     />
                     <Line
                       type="monotone"
                       dataKey="spi"
                       stroke="#2196f3"
                       strokeWidth={2}
-                      name="Schedule Performance Index (SPI)"
+                      name={t('reports.schedulePerformanceIndexSPI')}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -736,15 +738,15 @@ export const ReportsPage: React.FC = () => {
 
               {/* Project KPI Breakdown Table */}
               <Typography variant="h6" gutterBottom>
-                Project KPI Breakdown
+                {t('reports.projectKPIBreakdown')}
               </Typography>
               <TableContainer component={Paper}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Project</TableCell>
-                      <TableCell align="right">PV</TableCell>
-                      <TableCell align="right">EV</TableCell>
+                      <TableCell>{t('reports.project')}</TableCell>
+                      <TableCell align="right">{t('reports.pv')}</TableCell>
+                      <TableCell align="right">{t('reports.ev')}</TableCell>
                       <TableCell align="right">AC</TableCell>
                       <TableCell align="right">SV ($)</TableCell>
                       <TableCell align="right">CV ($)</TableCell>
@@ -802,20 +804,20 @@ export const ReportsPage: React.FC = () => {
             <Box>
               {/* Delay Forecast Cards */}
               <Typography variant="h6" gutterBottom>
-                Completion Delay Forecast
+                {t('reports.completionDelayForecast')}
               </Typography>
               <Grid container spacing={2} sx={{ mb: 3 }}>
                 <Grid item xs={12} md={6}>
                   <Card>
                     <CardContent>
                       <Typography color="textSecondary" gutterBottom>
-                        P50 (Median) Delay
+                        {t('reports.p50MedianDelay')}
                       </Typography>
                       <Typography variant="h3" component="div">
-                        {formatNumber(reportsData.risk_forecasts.delay_forecast.p50, 1)} days
+                        {formatNumber(reportsData.risk_forecasts.delay_forecast.p50, 1)} {t('reports.days')}
                       </Typography>
                       <Typography variant="body2" color="textSecondary">
-                        50% of items are delivered within this delay
+                        {t('reports.p50Description')}
                       </Typography>
                     </CardContent>
                   </Card>
@@ -824,13 +826,13 @@ export const ReportsPage: React.FC = () => {
                   <Card>
                     <CardContent>
                       <Typography color="textSecondary" gutterBottom>
-                        P90 (90th Percentile) Delay
+                        {t('reports.p90Delay')}
                       </Typography>
                       <Typography variant="h3" component="div">
-                        {formatNumber(reportsData.risk_forecasts.delay_forecast.p90, 1)} days
+                        {formatNumber(reportsData.risk_forecasts.delay_forecast.p90, 1)} {t('reports.days')}
                       </Typography>
                       <Typography variant="body2" color="textSecondary">
-                        90% of items are delivered within this delay
+                        {t('reports.p90Description')}
                       </Typography>
                     </CardContent>
                   </Card>
@@ -839,7 +841,7 @@ export const ReportsPage: React.FC = () => {
 
               {/* Payment Delay Distribution */}
               <Typography variant="h6" gutterBottom>
-                Payment Delay Distribution
+                {t('reports.timeDelayDistribution')}
               </Typography>
               <Paper sx={{ p: 2, mb: 3 }}>
                 <ResponsiveContainer width="100%" height={300}>
@@ -847,34 +849,34 @@ export const ReportsPage: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
                       dataKey="delay_bucket"
-                      label={{ value: 'Delay (Days)', position: 'insideBottom', offset: -5 }}
+                      label={{ value: t('reports.delayDays'), position: 'insideBottom', offset: -5 }}
                     />
-                    <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft' }} />
+                    <YAxis label={{ value: t('reports.count'), angle: -90, position: 'insideLeft' }} />
                     <Tooltip />
-                    <Bar dataKey="count" fill="#8884d8" name="Number of Items" />
+                    <Bar dataKey="count" fill="#8884d8" name={t('reports.numberOfItems')} />
                   </BarChart>
                 </ResponsiveContainer>
               </Paper>
 
               {/* Top 5 Risk Items */}
               <Typography variant="h6" gutterBottom>
-                Top 5 Highest Risk Items
+                {t('reports.top5HighestRiskItems')}
               </Typography>
               <TableContainer component={Paper}>
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Item Name</TableCell>
-                      <TableCell>Project</TableCell>
-                      <TableCell align="right">Cost Variance ($)</TableCell>
-                      <TableCell align="right">Schedule Delay (Days)</TableCell>
+                      <TableCell>{t('reports.itemName')}</TableCell>
+                      <TableCell>{t('reports.project')}</TableCell>
+                      <TableCell align="right">{t('reports.costVarianceDollar')}</TableCell>
+                      <TableCell align="right">{t('reports.scheduleDelayDays')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {reportsData.risk_forecasts.top_risk_items.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={4} align="center">
-                          <Typography color="textSecondary">No risk items found</Typography>
+                          <Typography color="textSecondary">{t('reports.noRiskItemsFound')}</Typography>
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -919,23 +921,23 @@ export const ReportsPage: React.FC = () => {
             <Box>
               {/* Supplier Scorecard */}
               <Typography variant="h6" gutterBottom>
-                Supplier Scorecard
+                {t('reports.supplierScorecard')}
               </Typography>
               <TableContainer component={Paper} sx={{ mb: 3 }}>
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>Supplier Name</TableCell>
-                      <TableCell align="right">Total Orders</TableCell>
-                      <TableCell align="right">On-Time Delivery Rate (%)</TableCell>
-                      <TableCell align="right">Avg Cost Variance (%)</TableCell>
+                      <TableCell>{t('reports.supplierName')}</TableCell>
+                      <TableCell align="right">{t('reports.totalOrders')}</TableCell>
+                      <TableCell align="right">{t('reports.onTimeDeliveryRate')}</TableCell>
+                      <TableCell align="right">{t('reports.avgCostVariance')}</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {reportsData.operational_performance.supplier_scorecard.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={4} align="center">
-                          <Typography color="textSecondary">No supplier data available</Typography>
+                          <Typography color="textSecondary">{t('reports.noSuppliersFound')}</Typography>
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -976,7 +978,7 @@ export const ReportsPage: React.FC = () => {
 
               {/* Procurement Cycle Time */}
               <Typography variant="h6" gutterBottom>
-                Procurement Cycle Time Distribution
+                {t('reports.procurementCycleTimeDistribution')}
               </Typography>
               <Paper sx={{ p: 2 }}>
                 <ResponsiveContainer width="100%" height={300}>
@@ -984,15 +986,15 @@ export const ReportsPage: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis
                       dataKey="cycle_time_bucket"
-                      label={{ value: 'Cycle Time (Days)', position: 'insideBottom', offset: -5 }}
+                      label={{ value: t('reports.cycleTimeDays'), position: 'insideBottom', offset: -5 }}
                     />
-                    <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft' }} />
+                    <YAxis label={{ value: t('reports.count'), angle: -90, position: 'insideLeft' }} />
                     <Tooltip />
-                    <Bar dataKey="count" fill="#82ca9d" name="Number of Items" />
+                    <Bar dataKey="count" fill="#82ca9d" name={t('reports.numberOfItems')} />
                   </BarChart>
                 </ResponsiveContainer>
                 <Typography variant="body2" color="textSecondary" sx={{ mt: 2, textAlign: 'center' }}>
-                  Time elapsed between decision finalization and PM acceptance
+                  {t('reports.timeElapsedBetween')}
                 </Typography>
               </Paper>
             </Box>

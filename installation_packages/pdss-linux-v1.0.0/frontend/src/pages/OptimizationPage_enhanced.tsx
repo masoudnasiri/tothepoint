@@ -136,7 +136,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
   const [procurementOptions, setProcurementOptions] = useState<any[]>([]);
   
   const [optimizationConfig, setOptimizationConfig] = useState({
-    max_time_slots: 12,
+    max_time_slots: 60,  // Increased from 12 to 60 to accommodate all delivery dates (up to 60 days)
     time_limit_seconds: 300,
     solver_type: 'CP_SAT',
     generate_multiple_proposals: true,
@@ -238,6 +238,8 @@ export const OptimizationPageEnhanced: React.FC = () => {
     setSuccess('');
 
     try {
+      console.log('[ENHANCED OPTIMIZATION] Starting optimization with config:', optimizationConfig);
+      
       const params = new URLSearchParams({
         solver_type: optimizationConfig.solver_type,
         generate_multiple_proposals: String(optimizationConfig.generate_multiple_proposals),
@@ -247,6 +249,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
         optimizationConfig.strategies.forEach(s => params.append('strategies', s));
       }
 
+      console.log('[ENHANCED OPTIMIZATION] Request params:', params.toString());
+      console.log('[ENHANCED OPTIMIZATION] Request body:', {
+        max_time_slots: optimizationConfig.max_time_slots,
+        time_limit_seconds: optimizationConfig.time_limit_seconds,
+      });
+
       const response = await financeAPI.runEnhancedOptimization(
         {
           max_time_slots: optimizationConfig.max_time_slots,
@@ -255,19 +263,29 @@ export const OptimizationPageEnhanced: React.FC = () => {
         params.toString()
       );
       
+      console.log('[ENHANCED OPTIMIZATION] Response:', response.data);
+      console.log('[ENHANCED OPTIMIZATION] Response status:', response.data.status);
+      console.log('[ENHANCED OPTIMIZATION] Proposals count:', response.data.proposals?.length || 0);
+      console.log('[ENHANCED OPTIMIZATION] Run ID:', response.data.run_id);
+      console.log('[ENHANCED OPTIMIZATION] Run ID type:', typeof response.data.run_id);
+      
       setLastRun(response.data);
       setRunDialogOpen(false);
       setSelectedProposalIndex(0);
       
       if (response.data.status === 'OPTIMAL' || response.data.status === 'FEASIBLE') {
+        console.log('[ENHANCED OPTIMIZATION] SUCCESS! Setting success message');
         setSuccess(
           `Optimization completed! Generated ${response.data.proposals.length} proposal(s). ` +
           `Best cost: $${response.data.total_cost.toLocaleString()}`
         );
       } else {
+        console.log('[ENHANCED OPTIMIZATION] FAILED! Setting error message');
         setError(`Optimization failed: ${response.data.message}`);
       }
     } catch (err: any) {
+      console.error('[ENHANCED OPTIMIZATION] ERROR:', err);
+      console.error('[ENHANCED OPTIMIZATION] Error response:', err.response?.data);
       setError(formatApiError(err, 'Optimization failed'));
     } finally {
       setOptimizing(false);
@@ -416,6 +434,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
       };
 
       console.log('Saving proposal data:', proposalData);
+      console.log('LastRun object:', lastRun);
+      console.log('LastRun run_id:', lastRun?.run_id);
+      console.log('LastRun run_id type:', typeof lastRun?.run_id);
 
       // Call the save-proposal endpoint
       const response = await decisionsAPI.saveProposal(proposalData);

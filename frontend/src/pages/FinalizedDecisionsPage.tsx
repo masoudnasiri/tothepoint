@@ -46,6 +46,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { decisionsAPI } from '../services/api.ts';
 import { useNavigate } from 'react-router-dom';
 import { ProjectFilter } from '../components/ProjectFilter.tsx';
+import { useTranslation } from 'react-i18next';
 
 interface FinalizedDecision {
   id: number;
@@ -80,6 +81,7 @@ interface FinalizedDecision {
 
 export const FinalizedDecisionsPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [decisions, setDecisions] = useState<FinalizedDecision[]>([]);
   const [loading, setLoading] = useState(true);
@@ -471,9 +473,9 @@ export const FinalizedDecisionsPage: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4">Finalized Decisions</Typography>
+          <Typography variant="h4">{t('decisions.title')}</Typography>
           <Typography variant="subtitle2" color="textSecondary">
-            View and manage all procurement decisions across their lifecycle
+            {t('decisions.subtitle')}
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
@@ -516,16 +518,16 @@ export const FinalizedDecisionsPage: React.FC = () => {
             <ProjectFilter
               selectedProjects={selectedProjects}
               onChange={setSelectedProjects}
-              label="Filter by Project(s)"
+              label={t('decisions.filterByProjects')}
             />
           </Grid>
           <Grid item xs={12} md={4}>
             <TextField
               fullWidth
-              label="Search Items & Suppliers"
+              label={t('decisions.searchItemsSuppliers')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by item code, supplier name, or notes..."
+              placeholder={t('decisions.searchPlaceholder')}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -542,7 +544,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
                 multiple
                 value={statusFilters}
                 onChange={(e) => setStatusFilters(typeof e.target.value === 'string' ? [e.target.value] : e.target.value)}
-                label="Filter by Invoice/Payment Status"
+                label={t('decisions.filterByInvoicePaymentStatus')}
                 renderValue={(selected) => (
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                     {selected.map((value) => (
@@ -569,7 +571,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
         <Grid container spacing={1}>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Total: ${totalCount} (Page ${currentPage} of ${totalPages})`}
+              label={`${t('decisions.total')}: ${totalCount} (${t('decisions.page')} ${currentPage} ${t('decisions.of')} ${totalPages})`}
               color="primary"
               variant="outlined"
               sx={{ width: '100%' }}
@@ -577,7 +579,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Locked: ${summaryStats?.locked || 0}`}
+              label={`${t('decisions.locked')}: ${summaryStats?.locked || 0}`}
               color="success"
               variant="outlined"
               sx={{ width: '100%' }}
@@ -585,7 +587,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Proposed: ${summaryStats?.proposed || 0}`}
+              label={`${t('decisions.proposed')}: ${summaryStats?.proposed || 0}`}
               color="warning"
               variant="outlined"
               sx={{ width: '100%' }}
@@ -593,7 +595,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Reverted: ${summaryStats?.reverted || 0}`}
+              label={`${t('decisions.reverted')}: ${summaryStats?.reverted || 0}`}
               color="error"
               variant="outlined"
               sx={{ width: '100%' }}
@@ -601,7 +603,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Invoiced: ${summaryStats?.invoiced || 0}`}
+              label={`${t('decisions.invoiced')}: ${summaryStats?.invoiced || 0}`}
               color="success"
               variant="filled"
               sx={{ width: '100%' }}
@@ -609,7 +611,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Not Invoiced: ${summaryStats?.not_invoiced || 0}`}
+              label={`${t('decisions.notInvoiced')}: ${summaryStats?.not_invoiced || 0}`}
               color="default"
               variant="filled"
               sx={{ width: '100%' }}
@@ -617,7 +619,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Fully Paid: ${summaryStats?.fully_paid || 0}`}
+              label={`${t('decisions.fullyPaid')}: ${summaryStats?.fully_paid || 0}`}
               color="success"
               variant="filled"
               sx={{ width: '100%' }}
@@ -625,7 +627,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
             <Chip
-              label={`Not Paid: ${summaryStats?.not_paid || 0}`}
+              label={`${t('decisions.notPaid')}: ${summaryStats?.not_paid || 0}`}
               color="error"
               variant="filled"
               sx={{ width: '100%' }}
@@ -753,7 +755,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={getInvoiceStatus(decision).label}
+                      label={t(`decisions.${getInvoiceStatus(decision).label.toLowerCase()}`)}
                       color={getInvoiceStatus(decision).color}
                       size="small"
                       variant="outlined"
@@ -761,7 +763,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={getPaymentStatus(decision).label}
+                      label={t(`decisions.${getPaymentStatus(decision).label.toLowerCase()}`)}
                       color={getPaymentStatus(decision).color}
                       size="small"
                       variant="outlined"
@@ -769,7 +771,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={decision.status}
+                      label={t(`decisions.${decision.status.toLowerCase()}`)}
                       color={getStatusColor(decision.status)}
                       size="small"
                     />
@@ -899,7 +901,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
             <InputLabel>Invoice Timing Type</InputLabel>
             <Select
               value={invoiceTimingType}
-              label="Invoice Timing Type"
+              label={t('decisions.invoiceTimingType')}
               onChange={(e) => setInvoiceTimingType(e.target.value)}
             >
               <MenuItem value="ABSOLUTE">Absolute Date (Specific Date)</MenuItem>
@@ -910,7 +912,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           {invoiceTimingType === 'ABSOLUTE' ? (
             <LocalizationProvider dateAdapter={AdapterDateFns}>
               <DatePicker
-                label="Invoice Issue Date"
+                label={t('decisions.invoiceIssueDate')}
                 value={invoiceDate}
                 onChange={(newValue) => setInvoiceDate(newValue)}
                 slotProps={{ 
@@ -925,7 +927,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
             <TextField
               fullWidth
               type="number"
-              label="Days After Delivery"
+              label={t('decisions.daysAfterDelivery')}
               value={invoiceDays}
               onChange={(e) => setInvoiceDays(parseInt(e.target.value) || 30)}
               helperText="Number of days after delivery to issue invoice (e.g., 30 for Net 30)"
@@ -1003,7 +1005,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
               <LocalizationProvider dateAdapter={AdapterDateFns}>
                 <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 2 }}>
                   <DatePicker
-                    label="Actual Invoice Issue Date *"
+                    label={t('decisions.actualInvoiceIssueDate')}
                     value={actualInvoiceDate}
                     onChange={(newValue) => setActualInvoiceDate(newValue)}
                     slotProps={{ 

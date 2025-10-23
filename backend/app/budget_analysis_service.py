@@ -195,23 +195,23 @@ class BudgetAnalysisService:
             # Get currency for procurement
             procurement_currency = cheapest_option.cost_currency or 'IRR'
             
-            # Determine procurement period (use first delivery date)
-            if item.delivery_options and len(item.delivery_options) > 0:
-                delivery_date_str = item.delivery_options[0]
-                delivery_date = date.fromisoformat(delivery_date_str)
-                procurement_period = delivery_date.strftime("%Y-%m")
-            else:
-                # Use current month if no delivery date
-                procurement_period = datetime.now().strftime("%Y-%m")
-            
-            # Add procurement cost as OUTFLOW
-            cash_flow_by_period[procurement_period][procurement_currency]['outflow'] += total_procurement_cost
-            
-            # Load delivery options for this item to get invoice data (INFLOW)
+            # Load delivery options for this item to get delivery and invoice data
             delivery_options_result = await self.db.execute(
                 select(DeliveryOption).where(DeliveryOption.project_item_id == item.id)
             )
             delivery_options = delivery_options_result.scalars().all()
+            
+            # Determine procurement period (use first delivery date)
+            if delivery_options:
+                delivery_date = delivery_options[0].delivery_date
+                procurement_period = delivery_date.strftime("%Y-%m")
+            else:
+                # Use current month if no delivery date
+                delivery_date = date.today()
+                procurement_period = datetime.now().strftime("%Y-%m")
+            
+            # Add procurement cost as OUTFLOW
+            cash_flow_by_period[procurement_period][procurement_currency]['outflow'] += total_procurement_cost
             
             if delivery_options:
                 # Use the first delivery option's invoice data

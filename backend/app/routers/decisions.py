@@ -1018,6 +1018,18 @@ async def update_decision_status(
             detail="Decision not found"
         )
     
+    # Prevent reverting if item is fully delivered and paid
+    if status_update.status == 'REVERTED':
+        is_delivered = decision.delivery_status == 'DELIVERY_COMPLETE'
+        has_invoice = decision.actual_invoice_issue_date is not None
+        has_payment = decision.actual_payment_date is not None
+        
+        if is_delivered and has_invoice and has_payment:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot revert: Item is fully delivered, invoiced, and paid. This is a completed transaction."
+            )
+    
     # Update status
     update_data = {'status': status_update.status}
     

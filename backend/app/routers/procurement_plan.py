@@ -49,7 +49,8 @@ def _filter_decision_for_role(decision: FinalizedDecision, user_role: str) -> Di
     if user_role in ['procurement', 'admin', 'finance']:
         # Full access
         base_data.update({
-            "final_cost": float(decision.final_cost) if decision.final_cost else None,
+            "final_cost": float(decision.final_cost_amount) if decision.final_cost_amount else None,
+            "final_cost_currency": decision.final_cost_currency or 'IRR',
             "purchase_date": decision.purchase_date,
             "supplier_name": decision.procurement_option.supplier_name if decision.procurement_option else None,
             "procurement_option_id": decision.procurement_option_id,
@@ -57,12 +58,19 @@ def _filter_decision_for_role(decision: FinalizedDecision, user_role: str) -> Di
             "procurement_delivery_notes": decision.procurement_delivery_notes,
             "procurement_confirmed_at": decision.procurement_confirmed_at,
             "procurement_confirmed_by_id": decision.procurement_confirmed_by_id,
-            # Invoice data
+            # Invoice data (with currency support)
             "actual_invoice_issue_date": decision.actual_invoice_issue_date,
-            "actual_invoice_amount": float(decision.actual_invoice_amount) if decision.actual_invoice_amount else None,
+            "actual_invoice_amount": float(decision.actual_invoice_amount_value) if decision.actual_invoice_amount_value else (float(decision.actual_invoice_amount) if decision.actual_invoice_amount else None),
+            "actual_invoice_currency": decision.actual_invoice_amount_currency or decision.final_cost_currency or 'IRR',
             "actual_invoice_received_date": decision.actual_invoice_received_date,
             "invoice_entered_by_id": decision.invoice_entered_by_id,
             "invoice_entered_at": decision.invoice_entered_at,
+            # Payment data
+            "actual_payment_amount": float(decision.actual_payment_amount_value) if decision.actual_payment_amount_value else (float(decision.actual_payment_amount) if decision.actual_payment_amount else None),
+            "actual_payment_currency": decision.actual_payment_amount_currency or decision.final_cost_currency or 'IRR',
+            "actual_payment_date": decision.actual_payment_date,
+            "payment_entered_by_id": decision.payment_entered_by_id,
+            "payment_entered_at": decision.payment_entered_at,
         })
     
     if user_role in ['pm', 'pmo', 'admin']:

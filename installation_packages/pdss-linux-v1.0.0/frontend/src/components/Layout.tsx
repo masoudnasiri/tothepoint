@@ -53,7 +53,7 @@ interface NavigationItem {
 const navigationItems: NavigationItem[] = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'] },
   { text: 'Analytics & Forecast', icon: <Analytics />, path: '/analytics', roles: ['admin', 'pmo', 'pm', 'finance'] },
-  { text: 'Reports & Analytics', icon: <Assessment />, path: '/reports', roles: ['admin', 'pmo', 'pm', 'finance'] },
+  { text: 'Reports & Analytics', icon: <Assessment />, path: '/reports', roles: ['admin', 'pmo', 'procurement', 'finance'] },
   { text: 'Projects', icon: <Business />, path: '/projects', roles: ['admin', 'pmo', 'pm', 'finance'] },
   { text: 'Procurement', icon: <ShoppingCart />, path: '/procurement', roles: ['admin', 'procurement', 'finance'] },
   { text: 'Procurement Plan', icon: <LocalShipping />, path: '/procurement-plan', roles: ['admin', 'procurement', 'pm', 'pmo', 'finance'] },
@@ -102,8 +102,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const drawer = (
     <div>
-      <Toolbar>
-        <Typography variant="h6" noWrap component="div">
+      <Toolbar sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2 }}>
+        <Box
+          component="img"
+          src="/InoTech_b-F.png"
+          alt="InoTech Logo"
+          sx={{
+            width: 140,
+            height: 'auto',
+            mb: 1,
+          }}
+        />
+        <Typography variant="h6" noWrap component="div" sx={{ textAlign: 'center' }}>
           Procurement DSS
         </Typography>
       </Toolbar>
@@ -223,8 +233,10 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
+          p: { xs: 1, sm: 2, md: 3 },
           width: { sm: `calc(100% - ${drawerWidth}px)` },
+          minHeight: '100vh',
+          overflow: 'auto',
         }}
       >
         <Toolbar />

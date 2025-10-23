@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Frontend Optimization</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <h1>Test Frontend Optimization</h1>
+    <div id="results"></div>
+    
+    <script>
+        const BASE_URL = "http://localhost:8000";
+        
+        async function testOptimization() {
+            const resultsDiv = document.getElementById('results');
+            
+            try {
+                // Login
+                console.log('Logging in...');
+                const loginResponse = await axios.post(`${BASE_URL}/auth/login`, {
+                    username: 'finance1',
+                    password: 'finance123'
+                });
+                const token = loginResponse.data.access_token;
+                const headers = { Authorization: `Bearer ${token}` };
+                
+                // Run Optimization
+                console.log('Running optimization...');
+                const optimizationResponse = await axios.post(`${BASE_URL}/finance/optimize`, {
+                    max_time_slots: 5,
+                    include_budget_constraints: true,
+                    include_priority_weights: true
+                }, { headers });
+                
+                resultsDiv.innerHTML += `
+                    <h2>Optimization Response:</h2>
+                    <p>Status: ${optimizationResponse.data.status}</p>
+                    <p>Total Cost: ${optimizationResponse.data.total_cost}</p>
+                    <p>Items Optimized: ${optimizationResponse.data.items_optimized}</p>
+                    <p>Message: ${optimizationResponse.data.message}</p>
+                `;
+                
+                // Get Results
+                console.log('Getting results...');
+                const resultsResponse = await axios.get(`${BASE_URL}/finance/optimization-results`, { headers });
+                
+                resultsDiv.innerHTML += `
+                    <h2>Optimization Results:</h2>
+                    <p>Results Count: ${resultsResponse.data.length}</p>
+                    <p>First Result: ${JSON.stringify(resultsResponse.data[0], null, 2)}</p>
+                `;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultsDiv.innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Run test when page loads
+        testOptimization();
+    </script>
+</body>
+</html>

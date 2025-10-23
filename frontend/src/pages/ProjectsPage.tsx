@@ -46,10 +46,12 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { projectsAPI, usersAPI } from '../services/api.ts';
 import { Project, ProjectSummary, User } from '../types/index.ts';
 import { ProjectPhases } from '../components/ProjectPhases.tsx';
+import { useTranslation } from 'react-i18next';
 
 export const ProjectsPage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -77,7 +79,7 @@ export const ProjectsPage: React.FC = () => {
       const response = await projectsAPI.list();
       setProjects(response.data);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load projects');
+      setError(err.response?.data?.detail || t('projects.failedToLoadProjects'));
     } finally {
       setLoading(false);
     }
@@ -89,7 +91,7 @@ export const ProjectsPage: React.FC = () => {
       const response = await usersAPI.listPMs();
       setPmUsers(response.data);
     } catch (err: any) {
-      console.error('Failed to load PM users:', err);
+      console.error(t('projects.failedToLoadPMUsers'), err);
       // Fallback: Try to get current user's info at least
       setPmUsers([]);
     }
@@ -130,7 +132,7 @@ export const ProjectsPage: React.FC = () => {
       setCurrentAssignments(assignedUserIds);
       setSelectedPMs(assignedUserIds);
     } catch (err: any) {
-      console.error('Failed to load assignments:', err);
+      console.error(t('projects.failedToLoadAssignments'), err);
       setCurrentAssignments([]);
       setSelectedPMs([]);
     }
@@ -237,7 +239,7 @@ export const ProjectsPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Projects</Typography>
+        <Typography variant="h4">{t('projects.title')}</Typography>
         {(user?.role === 'admin' || user?.role === 'pmo') && (
           <Button
             variant="contained"
@@ -253,7 +255,7 @@ export const ProjectsPage: React.FC = () => {
               setCreateDialogOpen(true);
             }}
           >
-            Create Project
+            {t('projects.createProject')}
           </Button>
         )}
       </Box>
@@ -391,15 +393,15 @@ export const ProjectsPage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Project Code</TableCell>
-              <TableCell>Name</TableCell>
-              <TableCell align="right">Items</TableCell>
-              <TableCell align="right">Total Quantity</TableCell>
-              <TableCell align="right">Total Invoice Value</TableCell>
+              <TableCell>{t('projects.projectCode')}</TableCell>
+              <TableCell>{t('projects.projectName')}</TableCell>
+              <TableCell align="right">{t('projects.items')}</TableCell>
+              <TableCell align="right">{t('projects.totalQuantity')}</TableCell>
+              <TableCell align="right">{t('projects.totalInvoiceValue')}</TableCell>
               {(user?.role === 'admin' || user?.role === 'finance') && (
-                <TableCell align="right">Estimated Cost</TableCell>
+                <TableCell align="right">{t('projects.estimatedCost')}</TableCell>
               )}
-              <TableCell align="center">Actions</TableCell>
+              <TableCell align="center">{t('projects.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -431,14 +433,14 @@ export const ProjectsPage: React.FC = () => {
                   <IconButton
                     size="small"
                     onClick={() => handleViewItems(project.id)}
-                    title="View Items"
+                    title={t('projects.viewItems')}
                   >
                     <ViewIcon />
                   </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleViewPhases(project.id, project.name)}
-                    title="View Phases"
+                    title={t('projects.viewPhases')}
                     color="primary"
                   >
                     <CalendarIcon />
@@ -461,14 +463,14 @@ export const ProjectsPage: React.FC = () => {
                           await fetchProjectAssignments(fullProject.id);
                           setEditDialogOpen(true);
                         }}
-                        title="Edit Project"
+                        title={t('projects.editProject')}
                       >
                         <EditIcon />
                       </IconButton>
                       <IconButton
                         size="small"
                         onClick={() => handleDeleteProject(project.id)}
-                        title="Delete Project"
+                        title={t('projects.deleteProject')}
                         color="error"
                       >
                         <DeleteIcon />
@@ -489,7 +491,7 @@ export const ProjectsPage: React.FC = () => {
           <TextField
             autoFocus
             margin="dense"
-            label="Project Code"
+            label={t('projects.projectCode')}
             fullWidth
             variant="outlined"
             value={formData.project_code}
@@ -498,7 +500,7 @@ export const ProjectsPage: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Project Name"
+            label={t('projects.projectName')}
             fullWidth
             variant="outlined"
             value={formData.name}
@@ -507,14 +509,14 @@ export const ProjectsPage: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Priority Weight"
+            label={t('projects.priority')}
             type="number"
             fullWidth
             variant="outlined"
             value={formData.priority_weight}
             onChange={(e) => setFormData({ ...formData, priority_weight: parseInt(e.target.value) || 5 })}
             inputProps={{ min: 1, max: 10 }}
-            helperText="Priority weight for multi-project optimization (1-10)"
+            helperText={t('projects.priorityWeightHelper')}
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth sx={{ mt: 2 }}>
@@ -523,7 +525,7 @@ export const ProjectsPage: React.FC = () => {
               multiple
               value={selectedPMs}
               onChange={(e) => setSelectedPMs(typeof e.target.value === 'string' ? [] : e.target.value)}
-              input={<OutlinedInput label="Assign Project Managers" />}
+              input={<OutlinedInput label={t('projects.assignProjectManagers')} />}
               renderValue={(selected) => (
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                   {selected.map((pmId) => {
@@ -574,7 +576,7 @@ export const ProjectsPage: React.FC = () => {
           <TextField
             autoFocus
             margin="dense"
-            label="Project Code"
+            label={t('projects.projectCode')}
             fullWidth
             variant="outlined"
             value={formData.project_code}
@@ -583,7 +585,7 @@ export const ProjectsPage: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Project Name"
+            label={t('projects.projectName')}
             fullWidth
             variant="outlined"
             value={formData.name}
@@ -592,14 +594,14 @@ export const ProjectsPage: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Priority Weight"
+            label={t('projects.priority')}
             type="number"
             fullWidth
             variant="outlined"
             value={formData.priority_weight}
             onChange={(e) => setFormData({ ...formData, priority_weight: parseInt(e.target.value) || 5 })}
             inputProps={{ min: 1, max: 10 }}
-            helperText="Priority weight for multi-project optimization (1-10)"
+            helperText={t('projects.priorityWeightHelper')}
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth sx={{ mt: 2 }}>
@@ -608,7 +610,7 @@ export const ProjectsPage: React.FC = () => {
               multiple
               value={selectedPMs}
               onChange={(e) => setSelectedPMs(typeof e.target.value === 'string' ? [] : e.target.value)}
-              input={<OutlinedInput label="Assigned Project Managers" />}
+              input={<OutlinedInput label={t('projects.assignedProjectManagers')} />}
               renderValue={(selected) => (
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                   {selected.map((pmId) => {
@@ -635,7 +637,7 @@ export const ProjectsPage: React.FC = () => {
               )}
             </Select>
             <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-              Add or remove Project Managers. Changes are applied when you click "Update & Save Assignments".
+              {t('projects.addRemoveProjectManagers')}
             </Typography>
           </FormControl>
         </DialogContent>

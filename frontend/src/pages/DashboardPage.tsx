@@ -48,6 +48,7 @@ import {
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { dashboardAPI } from '../services/api.ts';
 import { ProjectFilter } from '../components/ProjectFilter.tsx';
+import { useTranslation } from 'react-i18next';
 
 interface CashflowDataPoint {
   month: string;
@@ -108,6 +109,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, subtitle, icon, color
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [forecastData, setForecastData] = useState<CashflowResponse | null>(null);
   const [actualData, setActualData] = useState<CashflowResponse | null>(null);
   const [forecastByCurrency, setForecastByCurrency] = useState<{[key: string]: CashflowResponse}>({});
@@ -277,20 +279,11 @@ export const DashboardPage: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
           <Typography variant="h4" gutterBottom>
-            {isPM ? 'Revenue Dashboard' : 
-             isProcurement ? 'Payment Dashboard' :
-             isPMO ? 'PMO Dashboard - Complete Overview' :
-             'Cash Flow Analysis Dashboard'}
+            {t('dashboard.title')}
           </Typography>
           <Typography variant="subtitle1" color="text.secondary">
-            {isPM 
-              ? 'Revenue inflow tracking and forecasting' 
-              : isProcurement
-              ? 'Payment outflow tracking and management'
-              : isPMO
-              ? 'Full project portfolio and financial overview for project management office'
-              : 'Comprehensive financial overview across all projects and decisions'}
-      </Typography>
+            {t('dashboard.subtitle')}
+          </Typography>
         </Box>
       </Box>
 
@@ -299,14 +292,14 @@ export const DashboardPage: React.FC = () => {
         <ProjectFilter
           selectedProjects={selectedProjects}
           onChange={setSelectedProjects}
-          label="Filter by Project(s)"
+          label={t('dashboard.filterByProjects')}
         />
       </Paper>
 
       {/* View Mode Selector */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-          <Typography variant="h6">View Mode</Typography>
+          <Typography variant="h6">{t('dashboard.viewMode')}</Typography>
           <ToggleButtonGroup
             value={viewMode}
             exclusive
@@ -315,20 +308,20 @@ export const DashboardPage: React.FC = () => {
           >
             <ToggleButton value="forecast" aria-label="forecast view">
               <ForecastIcon sx={{ mr: 1 }} />
-              Forecasted
+              {t('dashboard.forecasted')}
             </ToggleButton>
             <ToggleButton value="actual" aria-label="actual view">
               <ActualIcon sx={{ mr: 1 }} />
-              Actual
+              {t('dashboard.actual')}
             </ToggleButton>
             <ToggleButton value="comparison" aria-label="comparison view">
               <CompareIcon sx={{ mr: 1 }} />
-              Comparison
+              {t('dashboard.comparison')}
             </ToggleButton>
           </ToggleButtonGroup>
         </Box>
         <Box display="flex" justifyContent="space-between" alignItems="center">
-          <Typography variant="h6">Currency Display</Typography>
+          <Typography variant="h6">{t('dashboard.currencyDisplay')}</Typography>
           <ToggleButtonGroup
             value={currencyDisplayMode}
             exclusive
@@ -337,18 +330,18 @@ export const DashboardPage: React.FC = () => {
           >
             <ToggleButton value="unified" aria-label="unified currency">
               <AccountBalanceIcon sx={{ mr: 1 }} />
-              Unified (IRR)
+              {t('dashboard.unified')}
             </ToggleButton>
             <ToggleButton value="original" aria-label="original currencies">
               <CompareIcon sx={{ mr: 1 }} />
-              Original Currencies
+              {t('dashboard.originalCurrencies')}
             </ToggleButton>
           </ToggleButtonGroup>
         </Box>
         <Box mt={2}>
           {viewMode === 'forecast' && (
             <Alert severity="info" icon={<ForecastIcon />}>
-              Showing <strong>forecasted</strong> cash flow based on planned delivery and invoice timing from project configuration.
+              {t('dashboard.showingForecasted')}
             </Alert>
           )}
           {viewMode === 'actual' && (
@@ -363,7 +356,7 @@ export const DashboardPage: React.FC = () => {
           )}
           {currencyDisplayMode === 'unified' && (
             <Alert severity="info" icon={<AccountBalanceIcon />} sx={{ mt: 1 }}>
-              All amounts converted to <strong>Iranian Rials (IRR)</strong> for unified comparison.
+              {t('dashboard.allAmountsConverted')}
             </Alert>
           )}
           {currencyDisplayMode === 'original' && (
@@ -378,7 +371,7 @@ export const DashboardPage: React.FC = () => {
       {currencyDisplayMode === 'original' && Object.keys(forecastByCurrency).length > 0 && (
         <Paper sx={{ p: 3, mb: 4 }}>
           <Typography variant="h6" gutterBottom>
-            Cash Flow by Currency
+            {t('dashboard.cashFlowByCurrency')}
           </Typography>
           <Grid container spacing={2}>
             {Object.entries(forecastByCurrency).map(([currencyCode, currencyData]) => (
@@ -389,13 +382,13 @@ export const DashboardPage: React.FC = () => {
                       {currencyCode}
                     </Typography>
                     <Typography variant="h6" color="primary" gutterBottom>
-                      Inflow: {currencyData.summary?.total_inflow?.toLocaleString() || 0}
+                      {t('dashboard.inflow')}: {currencyData.summary?.total_inflow?.toLocaleString() || 0}
                     </Typography>
                     <Typography variant="h6" color="error" gutterBottom>
-                      Outflow: {currencyData.summary?.total_outflow?.toLocaleString() || 0}
+                      {t('dashboard.outflow')}: {currencyData.summary?.total_outflow?.toLocaleString() || 0}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Net: {currencyData.summary?.net_position?.toLocaleString() || 0}
+                      {t('dashboard.net')}: {currencyData.summary?.net_position?.toLocaleString() || 0}
                     </Typography>
                   </CardContent>
                 </Card>
@@ -412,18 +405,18 @@ export const DashboardPage: React.FC = () => {
           <>
             <Grid item xs={12} sm={6} md={4}>
               <StatCard
-                title="Total Revenue Inflow"
+                title={t('dashboard.totalRevenueInflow')}
                 value={formatCurrency(summary.total_inflow)}
-                subtitle="Expected revenue from clients"
+                subtitle={t('dashboard.expectedRevenueFromClients')}
                 icon={<TrendingUpIcon />}
                 color="#4caf50"
               />
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
               <StatCard
-                title="Inflow Events"
+                title={t('dashboard.inflowEvents')}
                 value={currentData?.period_count?.toString() || '0'}
-                subtitle="Revenue transactions"
+                subtitle={t('dashboard.revenueTransactions')}
                 icon={<TimelineIcon />}
                 color="#2196f3"
               />
@@ -434,7 +427,7 @@ export const DashboardPage: React.FC = () => {
                   <Typography color="textSecondary" variant="subtitle2" gutterBottom>
                     Access Level
                   </Typography>
-                  <Chip label="Project Manager" color="primary" />
+                  <Chip label={t('dashboard.projectManager')} color="primary" />
                   <Typography variant="caption" display="block" sx={{ mt: 1 }}>
                     Revenue data only
                   </Typography>
@@ -447,18 +440,18 @@ export const DashboardPage: React.FC = () => {
           <>
             <Grid item xs={12} sm={6} md={4}>
               <StatCard
-                title="Total Payment Outflow"
+                title={t('dashboard.totalPaymentOutflow')}
                 value={formatCurrency(summary.total_outflow)}
-                subtitle="Payments to suppliers"
+                subtitle={t('dashboard.paymentsToSuppliers')}
                 icon={<TrendingDownIcon />}
                 color="#f44336"
               />
             </Grid>
             <Grid item xs={12} sm={6} md={4}>
               <StatCard
-                title="Outflow Events"
+                title={t('dashboard.outflowEvents')}
                 value={currentData?.period_count?.toString() || '0'}
-                subtitle="Payment transactions"
+                subtitle={t('dashboard.paymentTransactions')}
                 icon={<TimelineIcon />}
                 color="#2196f3"
               />
@@ -469,7 +462,7 @@ export const DashboardPage: React.FC = () => {
                   <Typography color="textSecondary" variant="subtitle2" gutterBottom>
                     Access Level
                   </Typography>
-                  <Chip label="Procurement Specialist" color="secondary" />
+                  <Chip label={t('dashboard.procurementSpecialist')} color="secondary" />
                   <Typography variant="caption" display="block" sx={{ mt: 1 }}>
                     Payment data only
                   </Typography>
@@ -489,36 +482,36 @@ export const DashboardPage: React.FC = () => {
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <StatCard
-                    title="Total Inflow"
+                    title={t('dashboard.totalInflow')}
                     value={formatCurrency(currencyData.summary?.total_inflow || 0, currencyCode)}
-                    subtitle="Budget + Revenue"
+                    subtitle={t('dashboard.budgetRevenue')}
                     icon={<TrendingUpIcon />}
                     color="#4caf50"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <StatCard
-                    title="Total Outflow"
+                    title={t('dashboard.totalOutflow')}
                     value={formatCurrency(currencyData.summary?.total_outflow || 0, currencyCode)}
-                    subtitle="Payments"
+                    subtitle={t('dashboard.payments')}
                     icon={<TrendingDownIcon />}
                     color="#f44336"
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <StatCard
-                    title="Net Position"
+                    title={t('dashboard.netPosition')}
                     value={formatCurrency(currencyData.summary?.net_position || 0, currencyCode)}
-                    subtitle={(currencyData.summary?.net_position || 0) >= 0 ? 'Positive' : 'Negative'}
+                    subtitle={(currencyData.summary?.net_position || 0) >= 0 ? t('dashboard.positive') : 'Negative'}
                     icon={<AccountBalanceIcon />}
                     color={(currencyData.summary?.net_position || 0) >= 0 ? '#2196f3' : '#ff9800'}
                   />
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
                   <StatCard
-                    title="Final Balance"
+                    title={t('dashboard.finalBalance')}
                     value={formatCurrency(currencyData.summary?.final_balance || 0, currencyCode)}
-                    subtitle={`Peak: ${formatCurrency(currencyData.summary?.peak_balance || 0, currencyCode)}`}
+                    subtitle={`${t('dashboard.peak')}: ${formatCurrency(currencyData.summary?.peak_balance || 0, currencyCode)}`}
                     icon={<TimelineIcon />}
                     color="#9c27b0"
                   />
@@ -531,36 +524,36 @@ export const DashboardPage: React.FC = () => {
           <>
             <Grid item xs={12} sm={6} md={3}>
               <StatCard
-                title="Total Inflow"
+                title={t('dashboard.totalInflow')}
                 value={formatCurrency(summary.total_inflow)}
-                subtitle="Budget + Revenue"
+                subtitle={t('dashboard.budgetRevenue')}
                 icon={<TrendingUpIcon />}
                 color="#4caf50"
               />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <StatCard
-                title="Total Outflow"
+                title={t('dashboard.totalOutflow')}
                 value={formatCurrency(summary.total_outflow)}
-                subtitle="Payments"
+                subtitle={t('dashboard.payments')}
                 icon={<TrendingDownIcon />}
                 color="#f44336"
               />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <StatCard
-                title="Net Position"
+                title={t('dashboard.netPosition')}
                 value={formatCurrency(summary.net_position)}
-                subtitle={summary.net_position >= 0 ? 'Positive' : 'Negative'}
+                subtitle={summary.net_position >= 0 ? t('dashboard.positive') : 'Negative'}
                 icon={<AccountBalanceIcon />}
                 color={summary.net_position >= 0 ? '#2196f3' : '#ff9800'}
               />
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <StatCard
-                title="Final Balance"
+                title={t('dashboard.finalBalance')}
                 value={formatCurrency(summary.final_balance)}
-                subtitle={`Peak: ${formatCurrency(summary.peak_balance)}`}
+                subtitle={`${t('dashboard.peak')}: ${formatCurrency(summary.peak_balance)}`}
                 icon={<TimelineIcon />}
                 color="#9c27b0"
               />
@@ -577,9 +570,9 @@ export const DashboardPage: React.FC = () => {
           <Paper key={currencyCode} sx={{ p: 3, mb: 3 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">
-                {currencyCode} - {viewMode === 'forecast' && 'Forecasted Monthly Cash Flow'}
-                {viewMode === 'actual' && 'Actual Monthly Cash Flow'}
-                {viewMode === 'comparison' && 'Cash Flow Comparison'}
+                {currencyCode} - {viewMode === 'forecast' && t('dashboard.forecastedMonthlyCashFlow')}
+                {viewMode === 'actual' && t('dashboard.actualMonthlyCashFlow')}
+                {viewMode === 'comparison' && t('dashboard.cashFlowComparison')}
               </Typography>
               <Typography variant="subtitle2" color="text.secondary">
                 Currency: {currencyCode}
@@ -594,7 +587,7 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
-                  label={{ value: 'Month', position: 'insideBottom', offset: -5 }}
+                  label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
                   tick={{ fontSize: 12 }}
@@ -603,19 +596,19 @@ export const DashboardPage: React.FC = () => {
                 />
                 <Tooltip
                   formatter={(value: any, name: string) => [`${currencyCode} ${value.toLocaleString()}`, name]}
-                  labelFormatter={(label) => `Month: ${label}`}
+                  labelFormatter={(label) => `${t('dashboard.month')}: ${label}`}
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
                 />
                 <Legend />
-                <Bar dataKey="budget" fill="#9c27b0" name="Budget Allocation" />
-                <Bar dataKey="inflow" fill="#4caf50" name="Revenue Inflow" />
-                <Bar dataKey="outflow" fill="#f44336" name="Payment Outflow" />
+                <Bar dataKey="budget" fill="#9c27b0" name={t('dashboard.budget')} />
+                <Bar dataKey="inflow" fill="#4caf50" name={t('dashboard.revenueInflow')} />
+                <Bar dataKey="outflow" fill="#f44336" name={t('dashboard.paymentOutflow')} />
                 <Line
                   type="monotone"
                   dataKey="cumulative_balance"
                   stroke="#2196f3"
                   strokeWidth={3}
-                  name="Cumulative Balance"
+                  name={t('dashboard.cumulativeBalance')}
                   dot={{ fill: '#2196f3', r: 4 }}
                 />
               </ComposedChart>
@@ -628,14 +621,14 @@ export const DashboardPage: React.FC = () => {
           <Paper sx={{ p: 3, mb: 3 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">
-                {viewMode === 'forecast' && 'Forecasted Monthly Cash Flow'}
-                {viewMode === 'actual' && 'Actual Monthly Cash Flow'}
-                {viewMode === 'comparison' && 'Cash Flow Comparison'}
+                {viewMode === 'forecast' && t('dashboard.forecastedMonthlyCashFlow')}
+                {viewMode === 'actual' && t('dashboard.actualMonthlyCashFlow')}
+                {viewMode === 'comparison' && t('dashboard.cashFlowComparison')}
               </Typography>
               {viewMode === 'comparison' && (
                 <Box display="flex" gap={1}>
-                  <Chip icon={<ForecastIcon />} label="Forecast" color="primary" size="small" />
-                  <Chip icon={<ActualIcon />} label="Actual" color="success" size="small" />
+                  <Chip icon={<ForecastIcon />} label={t('dashboard.forecast')} color="primary" size="small" />
+                  <Chip icon={<ActualIcon />} label={t('dashboard.actual')} color="success" size="small" />
                 </Box>
               )}
             </Box>
@@ -659,12 +652,12 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
-                  label={{ value: 'Month', position: 'insideBottom', offset: -5 }}
+                  label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
                   tick={{ fontSize: 12 }}
                   tickFormatter={(value) => `﷼${(value / 1000).toFixed(0)}k`}
-                  label={{ value: 'Amount (IRR)', angle: -90, position: 'insideLeft' }}
+                  label={{ value: `${t('dashboard.amount')} (IRR)`, angle: -90, position: 'insideLeft' }}
                 />
                 <Tooltip
                   formatter={(value: any) => formatCurrency(value)}
@@ -674,17 +667,17 @@ export const DashboardPage: React.FC = () => {
                 
                 {viewMode === 'comparison' ? (
                   <>
-                    <Bar dataKey="budget_allocation" fill="#9c27b0" name="Budget" />
-                    <Bar dataKey="forecast_inflow" fill="#4caf50" name="Forecast Inflow" opacity={0.8} />
-                    <Bar dataKey="actual_inflow" fill="#2e7d32" name="Actual Inflow" />
-                    <Bar dataKey="forecast_outflow" fill="#f44336" name="Forecast Outflow" opacity={0.8} />
-                    <Bar dataKey="actual_outflow" fill="#c62828" name="Actual Outflow" />
+                    <Bar dataKey="budget_allocation" fill="#9c27b0" name={t('dashboard.budget')} />
+                    <Bar dataKey="forecast_inflow" fill="#4caf50" name={t('dashboard.forecastInflow')} opacity={0.8} />
+                    <Bar dataKey="actual_inflow" fill="#2e7d32" name={t('dashboard.actualInflow')} />
+                    <Bar dataKey="forecast_outflow" fill="#f44336" name={t('dashboard.forecastOutflow')} opacity={0.8} />
+                    <Bar dataKey="actual_outflow" fill="#c62828" name={t('dashboard.actualOutflow')} />
                     <Line
                       type="monotone"
                       dataKey="forecast_balance"
                       stroke="#2196f3"
                       strokeWidth={2}
-                      name="Forecast Balance"
+                      name={t('dashboard.forecastBalance')}
                       dot={{ fill: '#2196f3', r: 3 }}
                     />
                     <Line
@@ -692,21 +685,21 @@ export const DashboardPage: React.FC = () => {
                       dataKey="actual_balance"
                       stroke="#ff9800"
                       strokeWidth={2}
-                      name="Actual Balance"
+                      name={t('dashboard.actualBalance')}
                       dot={{ fill: '#ff9800', r: 3 }}
                     />
                   </>
                 ) : (
                   <>
-                    <Bar dataKey="budget_allocation" fill="#9c27b0" name="Budget Allocation" />
-                    <Bar dataKey="inflow" fill="#4caf50" name="Revenue Inflow" />
-                    <Bar dataKey="outflow" fill="#f44336" name="Payment Outflow" />
+                    <Bar dataKey="budget_allocation" fill="#9c27b0" name={t('dashboard.budgetAllocation')} />
+                    <Bar dataKey="inflow" fill="#4caf50" name={t('dashboard.revenueInflow')} />
+                    <Bar dataKey="outflow" fill="#f44336" name={t('dashboard.paymentOutflow')} />
                     <Line
                       type="monotone"
                       dataKey="cumulative_balance"
                       stroke="#2196f3"
                       strokeWidth={3}
-                      name="Cumulative Balance"
+                      name={t('dashboard.cumulativeBalance')}
                       dot={{ fill: '#2196f3', r: 4 }}
                     />
                   </>
@@ -720,14 +713,14 @@ export const DashboardPage: React.FC = () => {
             <Typography variant="h6" gutterBottom>
               {isPM ? 'Revenue Inflow Detail' : 
                isProcurement ? 'Payment Outflow Detail' :
-               'Revenue & Payment Flow Detail'}
+               t('dashboard.revenuePaymentFlowDetail')}
             </Typography>
             <Typography variant="body2" color="text.secondary" gutterBottom>
               {isPM 
                 ? 'Revenue inflows from clients based on delivery and invoice timing'
                 : isProcurement
                 ? 'Payment outflows to suppliers based on procurement terms'
-                : 'Detailed view of revenue inflows and payment outflows (separate from budget allocations)'}
+                : t('dashboard.detailedViewDescription')}
             </Typography>
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={currentData.time_series}>
@@ -735,27 +728,27 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
-                  label={{ value: 'Month', position: 'insideBottom', offset: -5 }}
+                  label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
                   tick={{ fontSize: 12 }}
                   tickFormatter={(value) => `﷼${value.toLocaleString()}`}
-                  label={{ value: 'Amount (IRR)', angle: -90, position: 'insideLeft' }}
+                  label={{ value: `${t('dashboard.amount')} (IRR)`, angle: -90, position: 'insideLeft' }}
                 />
                 <Tooltip
                   formatter={(value: any) => formatCurrency(value)}
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
                 />
                 <Legend />
-                {!isProcurement && <Bar dataKey="inflow" fill="#4caf50" name="Revenue Inflow" />}
-                {!isPM && <Bar dataKey="outflow" fill="#f44336" name="Payment Outflow" />}
+                {!isProcurement && <Bar dataKey="inflow" fill="#4caf50" name={t('dashboard.revenueInflow')} />}
+                {!isPM && <Bar dataKey="outflow" fill="#f44336" name={t('dashboard.paymentOutflow')} />}
               </ComposedChart>
             </ResponsiveContainer>
           </Paper>
 
           <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-              {viewMode === 'comparison' ? 'Cumulative Position Comparison' : 'Cumulative Cash Position'}
+              {viewMode === 'comparison' ? t('dashboard.cumulativeCashPosition') : t('dashboard.cumulativeCashPosition')}
             </Typography>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart
@@ -773,7 +766,7 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
-                  label={{ value: 'Month', position: 'insideBottom', offset: -5 }}
+                  label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
                   tick={{ fontSize: 12 }}
@@ -793,7 +786,7 @@ export const DashboardPage: React.FC = () => {
                       stroke="#2196f3"
                       strokeWidth={2}
                       strokeDasharray="5 5"
-                      name="Forecast Balance"
+                      name={t('dashboard.forecastBalance')}
                       dot={{ fill: '#2196f3', r: 4 }}
                     />
                     <Line
@@ -801,7 +794,7 @@ export const DashboardPage: React.FC = () => {
                       dataKey="actual_balance"
                       stroke="#2e7d32"
                       strokeWidth={3}
-                      name="Actual Balance"
+                      name={t('dashboard.actualBalance')}
                       dot={{ fill: '#2e7d32', r: 5 }}
                       activeDot={{ r: 8 }}
                     />
@@ -813,7 +806,7 @@ export const DashboardPage: React.FC = () => {
                       dataKey="cumulative_balance"
                       stroke="#2196f3"
                       strokeWidth={3}
-                      name="Cumulative Balance"
+                      name={t('dashboard.cumulativeBalance')}
                       dot={{ fill: '#2196f3', r: 5 }}
                       activeDot={{ r: 8 }}
                     />
@@ -823,7 +816,7 @@ export const DashboardPage: React.FC = () => {
                       stroke="#ff9800"
                       strokeWidth={2}
                       strokeDasharray="5 5"
-                      name="Monthly Net Flow"
+                      name={t('dashboard.monthlyNetFlow')}
                       dot={{ fill: '#ff9800', r: 3 }}
                     />
                   </>
@@ -836,7 +829,7 @@ export const DashboardPage: React.FC = () => {
           <Paper sx={{ p: 3, mt: 3 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">
-                Monthly Cash Flow Detail
+                {t('dashboard.monthlyCashFlowDetail')}
               </Typography>
               <Button
                 variant="outlined"
@@ -852,12 +845,12 @@ export const DashboardPage: React.FC = () => {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell><strong>Month</strong></TableCell>
-                    {!isRestricted && <TableCell align="right"><strong>Budget</strong></TableCell>}
-                    {!isProcurement && <TableCell align="right"><strong>Revenue Inflow</strong></TableCell>}
-                    {!isPM && <TableCell align="right"><strong>Payment Outflow</strong></TableCell>}
-                    {!isRestricted && <TableCell align="right"><strong>Net Flow</strong></TableCell>}
-                    {!isRestricted && <TableCell align="right"><strong>Cumulative Balance</strong></TableCell>}
+                    <TableCell><strong>{t('dashboard.month')}</strong></TableCell>
+                    {!isRestricted && <TableCell align="right"><strong>{t('dashboard.budget')}</strong></TableCell>}
+                    {!isProcurement && <TableCell align="right"><strong>{t('dashboard.revenueInflow')}</strong></TableCell>}
+                    {!isPM && <TableCell align="right"><strong>{t('dashboard.paymentOutflow')}</strong></TableCell>}
+                    {!isRestricted && <TableCell align="right"><strong>{t('dashboard.netFlow')}</strong></TableCell>}
+                    {!isRestricted && <TableCell align="right"><strong>{t('dashboard.cumulativeBalance')}</strong></TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -917,6 +910,7 @@ export const DashboardPage: React.FC = () => {
               page={page}
               onPageChange={handleChangePage}
               onRowsPerPageChange={handleChangeRowsPerPage}
+              labelRowsPerPage={t('dashboard.rowsPerPage')}
             />
           </Paper>
         </>
@@ -1002,21 +996,19 @@ export const DashboardPage: React.FC = () => {
       <Card sx={{ mt: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            About Cash Flow Analysis
+            {t('dashboard.aboutCashFlowAnalysis')}
           </Typography>
           <Typography variant="body2" paragraph>
-            This dashboard visualizes the projected cash flow based on finalized procurement decisions.
-            It shows when payments are due (outflows), when revenue is expected (inflows), and the
-            cumulative cash position over time.
+            {t('dashboard.dashboardDescription')}
           </Typography>
           <Typography variant="body2" paragraph>
-            <strong>Key Metrics:</strong>
+            <strong>{t('dashboard.keyMetrics')}:</strong>
           </Typography>
           <Box component="ul" sx={{ mt: 1, mb: 0 }}>
-            <li><strong>Budget Allocation:</strong> Initial funds available for each period</li>
-            <li><strong>Revenue Inflow:</strong> Expected payments from clients based on invoice dates</li>
-            <li><strong>Payment Outflow:</strong> Payments to suppliers based on procurement terms</li>
-            <li><strong>Cumulative Balance:</strong> Running total showing cash position over time</li>
+            <li><strong>{t('dashboard.budgetAllocation')}:</strong> {t('dashboard.budgetAllocationDesc')}</li>
+            <li><strong>{t('dashboard.revenueInflow')}:</strong> {t('dashboard.revenueInflowDesc')}</li>
+            <li><strong>{t('dashboard.paymentOutflow')}:</strong> {t('dashboard.paymentOutflowDesc')}</li>
+            <li><strong>{t('dashboard.cumulativeBalance')}:</strong> {t('dashboard.cumulativeBalanceDesc')}</li>
           </Box>
         </CardContent>
       </Card>

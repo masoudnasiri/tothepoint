@@ -83,6 +83,7 @@ async def list_items_with_details(
         FROM project_items pi
         LEFT JOIN finalized_decisions fd ON pi.id = fd.project_item_id AND fd.status IN ('LOCKED', 'PROPOSED')
         WHERE fd.id IS NULL  -- Only items without LOCKED or PROPOSED decisions
+          AND pi.is_finalized = true  -- Only finalized project items
         ORDER BY pi.item_code, 
                  CASE WHEN pi.description IS NOT NULL AND pi.description != '' THEN 1 ELSE 2 END,
                  pi.created_at DESC

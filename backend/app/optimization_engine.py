@@ -7,12 +7,12 @@ from typing import Dict, List, Tuple, Optional
 from decimal import Decimal
 from ortools.sat.python import cp_model
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models import (
     Project, ProjectItem, ProcurementOption, BudgetData, 
-    OptimizationResult, FinalizedDecision
+    OptimizationResult, FinalizedDecision, DecisionFactorWeight
 )
 from app.schemas import OptimizationRunRequest, OptimizationRunResponse
 from app.currency_conversion_service import CurrencyConversionService
@@ -52,7 +52,7 @@ class ProcurementOptimizer:
             # Step 4: Process results
             if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
                 await self._save_results(solver)
-                total_cost = self._calculate_total_cost(solver)
+                total_cost = await self._calculate_total_cost(solver)
                 execution_time = (datetime.now() - self.start_time).total_seconds()
                 
                 return OptimizationRunResponse(
@@ -165,6 +165,10 @@ class ProcurementOptimizer:
             if (item.project_id, item.item_code) not in decided_items
         ]
         
+        logger.info(f"Total items loaded: {len(all_items)}")
+        logger.info(f"Items after filtering decided items: {len(self.project_items)}")
+        logger.info(f"Decided items to exclude: {len(decided_items)}")
+        
         if not self.project_items:
             if all_items:
                 raise ValueError(
@@ -262,6 +266,67 @@ class ProcurementOptimizer:
         # Debug: Log item details
         for item in self.project_items:
             logger.info(f"Item {item.item_code}: {len([opt for opt in self.procurement_options.values() if opt.item_code == item.item_code])} finalized options")
+        
+        # Load decision factor weights
+        await self._load_decision_weights()
+    
+    async def _load_decision_weights(self):
+        """Load decision factor weights and discover available factors"""
+        # Load configured weights
+        weights_result = await self.db.execute(select(DecisionFactorWeight))
+        configured_weights = {w.factor_name: w.weight for w in weights_result.scalars().all()}
+        
+        # Discover available factors from current data
+        available_factors = set()
+        
+        # Add factors from project items
+        for item in self.project_items:
+            if item.item_code:
+                available_factors.add(f"item_{item.item_code}")
+            if item.category:
+                available_factors.add(f"category_{item.category}")
+            if item.unit:
+                available_factors.add(f"unit_{item.unit}")
+        
+        # Add factors from procurement options
+        for option in self.procurement_options.values():
+            if option.supplier_name:
+                available_factors.add(f"supplier_{option.supplier_name}")
+            if option.cost_currency:
+                available_factors.add(f"currency_{option.cost_currency}")
+            if option.payment_terms:
+                try:
+                    terms = option.payment_terms if isinstance(option.payment_terms, dict) else eval(option.payment_terms)
+                    if terms.get('type'):
+                        available_factors.add(f"payment_{terms['type']}")
+                except:
+                    pass
+            if option.expected_delivery_date:
+                available_factors.add('delivery_timing')
+            if option.discount_bundle_percent:
+                available_factors.add('bundle_discount')
+            if option.shipping_cost and option.shipping_cost > 0:
+                available_factors.add('shipping_cost')
+        
+        # Add common optimization factors
+        common_factors = [
+            'cost_minimization',
+            'delivery_speed',
+            'supplier_reliability',
+            'payment_terms_flexibility',
+            'currency_risk',
+            'budget_utilization'
+        ]
+        available_factors.update(common_factors)
+        
+        # Create final weights dictionary with default weight 1 for unconfigured factors
+        self.decision_weights = {}
+        for factor in available_factors:
+            self.decision_weights[factor] = configured_weights.get(factor, 1)  # Default weight 1
+        
+        logger.info(f"✅ Loaded {len(self.decision_weights)} decision factors")
+        logger.info(f"Configured weights: {len(configured_weights)}")
+        logger.info(f"Default weights (1): {len(available_factors) - len(configured_weights)}")
     
     async def _build_model(self, max_time_slots: int):
         """Build the CP-SAT optimization model"""
@@ -276,25 +341,44 @@ class ProcurementOptimizer:
             project_id = item.project_id
             item_code = item.item_code
             
-            # Get delivery options (list of ISO date strings)
-            delivery_options = item.delivery_options if item.delivery_options else []
+            # Get delivery options from the relationship
+            delivery_options = item.delivery_options_rel if item.delivery_options_rel else []
+            
+            logger.info(f"Item {item_code}: delivery_options_rel = {delivery_options}")
+            logger.info(f"Item {item_code}: type = {type(delivery_options)}, len = {len(delivery_options) if delivery_options else 0}")
             
             if not delivery_options:
                 logger.warning(f"Item {item_code} has no delivery options, skipping")
                 continue
             
             # Convert delivery dates to time slots
-            # Use a more flexible range to accommodate lead times
-            # Map each delivery option to a time slot starting from a higher number
-            # to ensure purchase_time (delivery_time - lead_time) remains positive
-            # Allow more time slots to accommodate more items
-            min_time = 5
-            # Use a more generous time range to accommodate more items
-            # Remove the max_time_slots constraint to allow more items
-            max_time = max(len(delivery_options) + 10, 20)  # At least 20 time slots, no max constraint
-            valid_times = list(range(min_time, max_time + 1))
+            # Use actual delivery dates from delivery options
+            from datetime import datetime, timedelta
+            
+            # Get delivery dates from delivery options
+            delivery_dates = []
+            for delivery_option in delivery_options:
+                if hasattr(delivery_option, 'delivery_date'):
+                    delivery_dates.append(delivery_option.delivery_date)
+                elif hasattr(delivery_option, 'delivery_date_str'):
+                    delivery_dates.append(delivery_option.delivery_date_str)
+            
+            if not delivery_dates:
+                logger.warning(f"Item {item_code} has delivery options but no valid delivery dates, skipping")
+                continue
+            
+            # Convert dates to time slots (days from today)
+            today = date.today()
+            valid_times = []
+            for delivery_date in delivery_dates:
+                if isinstance(delivery_date, str):
+                    delivery_date = datetime.strptime(delivery_date, '%Y-%m-%d').date()
+                days_from_today = (delivery_date - today).days
+                if days_from_today >= 1:  # Only future dates
+                    valid_times.append(days_from_today)
             
             if not valid_times:
+                logger.warning(f"Item {item_code} has no valid future delivery dates, skipping")
                 continue
                 
             # Find procurement options for this item
@@ -405,8 +489,9 @@ class ProcurementOptimizer:
             cash_flow_coeffs = []
             
             for var, option, item in time_groups[time_slot]:
-                # Calculate purchase date (simplified - in real implementation, you'd map time slots to actual dates)
-                purchase_date = date.today()  # This should be calculated from time_slot
+                # Calculate purchase date from time slot
+                # Time slot represents days from today
+                purchase_date = date.today() + timedelta(days=time_slot - 1)
                 cost_per_unit = await self._calculate_effective_cost(option, item, purchase_date)
                 total_cost = cost_per_unit * item.quantity
                 
@@ -504,8 +589,11 @@ class ProcurementOptimizer:
                         if i.project_id == project_id and i.item_code == item_code), None)
             
             if item:
-                # Calculate procurement cost (simplified date calculation)
-                purchase_date = date.today()  # This should be calculated from time slots
+                # Calculate procurement cost using actual purchase date
+                # Extract delivery time from variable name to calculate purchase date
+                delivery_time = int(parts[4])
+                purchase_time = delivery_time - option.lomc_lead_time
+                purchase_date = date.today() + timedelta(days=purchase_time - 1)
                 cost_per_unit = await self._calculate_effective_cost(option, item, purchase_date)
                 total_cost = cost_per_unit * item.quantity
                 
@@ -528,7 +616,102 @@ class ProcurementOptimizer:
                 # Apply priority weighting to value (higher priority = higher effective value)
                 # High priority (10) gets multiplier 1.5, low priority (1) gets multiplier 0.6
                 priority_multiplier = 0.5 + (priority_weight / 10.0)
-                weighted_value = business_value * priority_multiplier
+                
+                # Apply decision factor weights
+                factor_weight = 1.0  # Default weight
+                
+                # Check for item-specific factors
+                item_factor = f"item_{item_code}"
+                if item_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[item_factor]
+                
+                # Check for category factors
+                if hasattr(item, 'category') and item.category:
+                    category_factor = f"category_{item.category}"
+                    if category_factor in self.decision_weights:
+                        factor_weight *= self.decision_weights[category_factor]
+                
+                # Check for supplier factors
+                supplier_factor = f"supplier_{option.supplier_name}"
+                if supplier_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[supplier_factor]
+                
+                # Check for currency factors
+                currency_factor = f"currency_{option.cost_currency}"
+                if currency_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[currency_factor]
+                
+                # Check for payment terms factors
+                if option.payment_terms:
+                    try:
+                        terms = option.payment_terms if isinstance(option.payment_terms, dict) else eval(option.payment_terms)
+                        if terms.get('type'):
+                            payment_factor = f"payment_{terms['type']}"
+                            if payment_factor in self.decision_weights:
+                                factor_weight *= self.decision_weights[payment_factor]
+                    except:
+                        pass
+                
+                # Check for delivery timing factors
+                if option.expected_delivery_date:
+                    if 'delivery_timing' in self.decision_weights:
+                        factor_weight *= self.decision_weights['delivery_timing']
+                
+                # Check for bundle discount factors
+                if option.discount_bundle_percent:
+                    if 'bundle_discount' in self.decision_weights:
+                        factor_weight *= self.decision_weights['bundle_discount']
+                
+                # Check for shipping cost factors
+                if option.shipping_cost and option.shipping_cost > 0:
+                    if 'shipping_cost' in self.decision_weights:
+                        factor_weight *= self.decision_weights['shipping_cost']
+                
+                # Apply common optimization factors
+                if 'cost_minimization' in self.decision_weights:
+                    factor_weight *= self.decision_weights['cost_minimization']
+                
+                if 'delivery_speed' in self.decision_weights:
+                    # Faster delivery gets higher weight
+                    lead_time_factor = max(1, 30 - option.lomc_lead_time) / 30  # Normalize to 0-1
+                    factor_weight *= (1 + lead_time_factor * (self.decision_weights['delivery_speed'] - 1))
+                
+                if 'supplier_reliability' in self.decision_weights:
+                    # This could be enhanced with actual supplier ratings
+                    factor_weight *= self.decision_weights['supplier_reliability']
+                
+                if 'payment_terms_flexibility' in self.decision_weights:
+                    # More flexible payment terms get higher weight
+                    flexibility_factor = 1.0
+                    if option.payment_terms:
+                        try:
+                            terms = option.payment_terms if isinstance(option.payment_terms, dict) else eval(option.payment_terms)
+                            if terms.get('type') == 'credit':
+                                flexibility_factor = 1.2  # Credit terms are more flexible
+                            elif terms.get('type') == 'cash':
+                                flexibility_factor = 0.8  # Cash is less flexible
+                        except:
+                            pass
+                    factor_weight *= (1 + (flexibility_factor - 1) * (self.decision_weights['payment_terms_flexibility'] - 1))
+                
+                if 'currency_risk' in self.decision_weights:
+                    # Lower risk currencies get higher weight
+                    risk_factor = 1.0
+                    if option.cost_currency == 'IRR':
+                        risk_factor = 1.2  # IRR is local currency, lower risk
+                    elif option.cost_currency in ['USD', 'EUR']:
+                        risk_factor = 1.0  # Major currencies, medium risk
+                    else:
+                        risk_factor = 0.8  # Other currencies, higher risk
+                    factor_weight *= (1 + (risk_factor - 1) * (self.decision_weights['currency_risk'] - 1))
+                
+                if 'budget_utilization' in self.decision_weights:
+                    # Items that better utilize budget get higher weight
+                    # This could be enhanced with more sophisticated budget utilization logic
+                    factor_weight *= self.decision_weights['budget_utilization']
+                
+                # Apply all weights to the value
+                weighted_value = business_value * priority_multiplier * factor_weight
                 
                 # Scale to dollars (divide by 1000 for numerical stability)
                 # This converts $62,000 to 62, making the solver more efficient
@@ -553,6 +736,13 @@ class ProcurementOptimizer:
         # Each purchase that brings more value than cost will be favored
         # But the solver will try to stay within budget due to the penalty
         self.model.Minimize(sum(cost_terms) - sum(value_terms) + budget_penalty)
+        
+        # Log decision factor weights being used
+        logger.info(f"Decision factor weights applied: {len(self.decision_weights)} factors")
+        for factor, weight in sorted(self.decision_weights.items()):
+            if weight != 1:  # Only log non-default weights
+                logger.info(f"  {factor}: {weight}")
+        
         logger.info(f"Set objective: Minimize(Cost - Value + Budget_Penalty) with {len(cost_terms)} decision variables")
     
     async def _save_results(self, solver):
@@ -573,7 +763,7 @@ class ProcurementOptimizer:
                 
                 if item:
                     purchase_time = delivery_time - option.lomc_lead_time
-                    purchase_date = date.today()  # This should be calculated from time slots
+                    purchase_date = date.today() + timedelta(days=purchase_time - 1)
                     final_cost = await self._calculate_effective_cost(option, item, purchase_date) * item.quantity
                     
                     result = OptimizationResult(
@@ -594,7 +784,7 @@ class ProcurementOptimizer:
         
         logger.info(f"Saved {len(results)} optimization results")
     
-    def _calculate_total_cost(self, solver) -> Decimal:
+    async def _calculate_total_cost(self, solver) -> Decimal:
         """Calculate total cost of the optimized solution"""
         total_cost = Decimal('0')
         
@@ -604,13 +794,17 @@ class ProcurementOptimizer:
                 option_id = int(parts[3])
                 project_id = int(parts[1])
                 item_code = parts[2]
+                delivery_time = int(parts[4])  # Extract delivery time from variable name
                 
                 option = self.procurement_options[option_id]
                 item = next((i for i in self.project_items 
                             if i.project_id == project_id and i.item_code == item_code), None)
                 
                 if item:
-                    cost_per_unit = self._calculate_effective_cost(option, item)
+                    # Calculate purchase date from delivery time and lead time
+                    purchase_time = delivery_time - option.lomc_lead_time
+                    purchase_date = date.today() + timedelta(days=purchase_time - 1)
+                    cost_per_unit = await self._calculate_effective_cost(option, item, purchase_date)
                     total_cost += cost_per_unit * item.quantity
         
         return total_cost

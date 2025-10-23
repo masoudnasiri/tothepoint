@@ -100,6 +100,10 @@ export const itemsAPI = {
   create: (item: any) => api.post('/items/', item),
   update: (id: number, item: any) => api.put(`/items/${id}`, item),
   delete: (id: number) => api.delete(`/items/${id}`),
+  finalize: (id: number, data: any) => api.put(`/items/${id}/finalize`, data),
+  unfinalize: (id: number) => api.put(`/items/${id}/unfinalize`, {}),
+  listFinalized: (params?: { skip?: number; limit?: number }) =>
+    api.get('/items/finalized', { params }),
 };
 
 // Project Phases API

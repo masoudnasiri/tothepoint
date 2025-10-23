@@ -47,9 +47,28 @@ import {
   PMDeliveryAcceptance,
   ActualInvoiceData,
 } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
+
+const formatCurrencyWithCode = (amount: number | undefined, currency: string | undefined): string => {
+  if (amount === undefined || amount === null) return 'N/A';
+  
+  const currencySymbol = {
+    'IRR': 'IRR',
+    'USD': '$',
+    'EUR': '€',
+  }[currency || 'IRR'] || currency || 'IRR';
+  
+  const formattedAmount = amount.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  
+  return `${currencySymbol} ${formattedAmount}`;
+};
 
 export const ProcurementPlanPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [items, setItems] = useState<ProcurementPlanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -354,8 +373,8 @@ export const ProcurementPlanPage: React.FC = () => {
           <Grid item xs={12} md={4}>
             <TextField
               fullWidth
-              label="Search"
-              placeholder="Search by item code, name, project, supplier, etc..."
+              label={t('procurementPlan.search')}
+              placeholder={t('procurementPlan.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               variant="outlined"
@@ -373,7 +392,7 @@ export const ProcurementPlanPage: React.FC = () => {
               <InputLabel>Delivery Status</InputLabel>
               <Select
                 value={statusFilter}
-                label="Delivery Status"
+                label={t('procurementPlan.deliveryStatus')}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <MenuItem value="">All Statuses</MenuItem>
@@ -388,7 +407,7 @@ export const ProcurementPlanPage: React.FC = () => {
               <InputLabel>Project</InputLabel>
               <Select
                 value={projectFilter}
-                label="Project"
+                label={t('procurementPlan.project')}
                 onChange={(e) => setProjectFilter(e.target.value as number | '')}
               >
                 <MenuItem value="">All Projects</MenuItem>
@@ -407,7 +426,7 @@ export const ProcurementPlanPage: React.FC = () => {
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} md={4}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h6">Total Items</Typography>
+            <Typography variant="h6">{t('procurementPlan.totalItems')}</Typography>
             <Typography variant="h4">{filteredItems.length}</Typography>
             {searchTerm && (
               <Typography variant="caption" color="textSecondary">
@@ -418,7 +437,7 @@ export const ProcurementPlanPage: React.FC = () => {
         </Grid>
         <Grid item xs={12} md={4}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h6">Awaiting Delivery</Typography>
+            <Typography variant="h6">{t('procurementPlan.awaitingDelivery')}</Typography>
             <Typography variant="h4">
               {filteredItems.filter(i => i.delivery_status === 'AWAITING_DELIVERY').length}
             </Typography>
@@ -426,7 +445,7 @@ export const ProcurementPlanPage: React.FC = () => {
         </Grid>
         <Grid item xs={12} md={4}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h6">Completed</Typography>
+            <Typography variant="h6">{t('procurementPlan.completed')}</Typography>
             <Typography variant="h4">
               {filteredItems.filter(i => i.delivery_status === 'DELIVERY_COMPLETE').length}
             </Typography>
@@ -447,14 +466,16 @@ export const ProcurementPlanPage: React.FC = () => {
               {isProcurementTeam && <TableCell align="right">Cost</TableCell>}
               <TableCell>Planned Delivery</TableCell>
               <TableCell>Actual Delivery</TableCell>
-              <TableCell>Status</TableCell>
+              {isProcurementTeam && <TableCell>Invoice Status</TableCell>}
+              {isProcurementTeam && <TableCell>Payment Status</TableCell>}
+              <TableCell>Delivery Status</TableCell>
               <TableCell align="center">Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {filteredItems.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isProcurementTeam ? 10 : 8} align="center">
+                <TableCell colSpan={isProcurementTeam ? 12 : 8} align="center">
                   <Typography color="textSecondary">
                     {searchTerm || statusFilter || projectFilter
                       ? 'No items match your search criteria.'
@@ -472,11 +493,37 @@ export const ProcurementPlanPage: React.FC = () => {
                   <TableCell align="right">{item.quantity}</TableCell>
                   {isProcurementTeam && (
                     <TableCell align="right">
-                      ${item.final_cost?.toLocaleString() || 'N/A'}
+                      {formatCurrencyWithCode(item.final_cost, item.final_cost_currency)}
                     </TableCell>
                   )}
                   <TableCell>{item.delivery_date}</TableCell>
                   <TableCell>{item.actual_delivery_date || '-'}</TableCell>
+                  {isProcurementTeam && (
+                    <TableCell>
+                      {item.actual_invoice_issue_date ? (
+                        <Chip 
+                          label={`${t('procurementPlan.invoiced')} (${formatCurrencyWithCode(item.actual_invoice_amount, item.actual_invoice_currency)})`}
+                          color="success"
+                          size="small"
+                        />
+                      ) : (
+                        <Chip label={t('procurementPlan.notInvoiced')} color="default" size="small" />
+                      )}
+                    </TableCell>
+                  )}
+                  {isProcurementTeam && (
+                    <TableCell>
+                      {item.actual_payment_date ? (
+                        <Chip 
+                          label={`${t('procurementPlan.paid')} (${formatCurrencyWithCode(item.actual_payment_amount, item.actual_payment_currency)})`}
+                          color="success"
+                          size="small"
+                        />
+                      ) : (
+                        <Chip label={t('procurementPlan.notPaid')} color="warning" size="small" />
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell>
                     <Chip
                       label={getStatusLabel(item.delivery_status)}
@@ -558,11 +605,11 @@ export const ProcurementPlanPage: React.FC = () => {
             <Box sx={{ pt: 2 }}>
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Item Code</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.itemCode')}</Typography>
                   <Typography variant="body1" gutterBottom>{selectedItem.item_code}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Item Name</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.itemName')}</Typography>
                   <Typography variant="body1" gutterBottom>{selectedItem.item_name || 'N/A'}</Typography>
                 </Grid>
                 <Grid item xs={12}>
@@ -586,7 +633,9 @@ export const ProcurementPlanPage: React.FC = () => {
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2" color="textSecondary">Final Cost</Typography>
-                      <Typography variant="body1" gutterBottom>${selectedItem.final_cost?.toLocaleString() || 'N/A'}</Typography>
+                      <Typography variant="body1" gutterBottom>
+                        {formatCurrencyWithCode(selectedItem.final_cost, selectedItem.final_cost_currency)}
+                      </Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2" color="textSecondary">Purchase Date</Typography>
@@ -611,6 +660,56 @@ export const ProcurementPlanPage: React.FC = () => {
                     size="small"
                   />
                 </Grid>
+                
+                {/* Invoice and Payment Information */}
+                {isProcurementTeam && (
+                  <>
+                    <Grid item xs={12}>
+                      <Divider sx={{ my: 2 }}>
+                        <Typography variant="subtitle2" color="textSecondary">Invoice & Payment Information</Typography>
+                      </Divider>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="textSecondary">Invoice Status</Typography>
+                      {selectedItem.actual_invoice_issue_date ? (
+                        <Box>
+                          <Chip label="Invoiced" color="success" size="small" sx={{ mb: 1 }} />
+                          <Typography variant="body2">
+                            Issue Date: {selectedItem.actual_invoice_issue_date}
+                          </Typography>
+                          <Typography variant="body2">
+                            Amount: {formatCurrencyWithCode(selectedItem.actual_invoice_amount, selectedItem.actual_invoice_currency)}
+                          </Typography>
+                          {selectedItem.actual_invoice_received_date && (
+                            <Typography variant="body2">
+                              Received: {selectedItem.actual_invoice_received_date}
+                            </Typography>
+                          )}
+                        </Box>
+                      ) : (
+                        <Chip label={t('procurementPlan.notInvoiced')} color="default" size="small" />
+                      )}
+                    </Grid>
+                    
+                    <Grid item xs={12} md={6}>
+                      <Typography variant="subtitle2" color="textSecondary">Payment Status</Typography>
+                      {selectedItem.actual_payment_date ? (
+                        <Box>
+                          <Chip label="Paid" color="success" size="small" sx={{ mb: 1 }} />
+                          <Typography variant="body2">
+                            Payment Date: {selectedItem.actual_payment_date}
+                          </Typography>
+                          <Typography variant="body2">
+                            Amount: {formatCurrencyWithCode(selectedItem.actual_payment_amount, selectedItem.actual_payment_currency)}
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Chip label={t('procurementPlan.notPaid')} color="warning" size="small" />
+                      )}
+                    </Grid>
+                  </>
+                )}
                 
                 {selectedItem.serial_number && (
                   <Grid item xs={12} md={6}>
@@ -671,7 +770,7 @@ export const ProcurementPlanPage: React.FC = () => {
           <Box sx={{ pt: 2 }}>
             <TextField
               fullWidth
-              label="Actual Delivery Date"
+              label={t('procurementPlan.actualDeliveryDate')}
               type="date"
               value={confirmData.actual_delivery_date}
               onChange={(e) => setConfirmData({ ...confirmData, actual_delivery_date: e.target.value })}
@@ -685,18 +784,18 @@ export const ProcurementPlanPage: React.FC = () => {
                   onChange={(e) => setConfirmData({ ...confirmData, is_correct_item: e.target.checked })}
                 />
               }
-              label="Item matches the order specification"
+              label={t('procurementPlan.itemMatchesSpecification')}
             />
             <TextField
               fullWidth
-              label="Serial Number (Optional)"
+              label={t('procurementPlan.serialNumber')}
               value={confirmData.serial_number}
               onChange={(e) => setConfirmData({ ...confirmData, serial_number: e.target.value })}
               sx={{ mb: 2, mt: 2 }}
             />
             <TextField
               fullWidth
-              label="Delivery Notes (Optional)"
+              label={t('procurementPlan.deliveryNotes')}
               multiline
               rows={3}
               value={confirmData.delivery_notes}
@@ -730,11 +829,11 @@ export const ProcurementPlanPage: React.FC = () => {
                   onChange={(e) => setAcceptData({ ...acceptData, is_accepted_for_project: e.target.checked })}
                 />
               }
-              label="I accept this item for my project"
+              label={t('procurementPlan.acceptItemForProject')}
             />
             <TextField
               fullWidth
-              label="Customer Delivery Date (Optional)"
+              label={t('procurementPlan.customerDeliveryDate')}
               type="date"
               value={acceptData.customer_delivery_date}
               onChange={(e) => setAcceptData({ ...acceptData, customer_delivery_date: e.target.value })}

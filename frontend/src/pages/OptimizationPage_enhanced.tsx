@@ -57,6 +57,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { financeAPI, decisionsAPI, procurementAPI } from '../services/api.ts';
 import { BudgetAnalysis } from '../components/BudgetAnalysis.tsx';
 import { formatApiError } from '../utils/errorUtils.ts';
+import { useTranslation } from 'react-i18next';
 
 interface SolverInfo {
   type: string;
@@ -114,6 +115,7 @@ interface OptimizationResponse {
 
 export const OptimizationPageEnhanced: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [solverInfo, setSolverInfo] = useState<{ available_solvers: SolverInfo[], available_strategies: StrategyInfo[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [mainTabValue, setMainTabValue] = useState(0); // 0 = Optimization, 1 = Budget Analysis
@@ -136,7 +138,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
   const [procurementOptions, setProcurementOptions] = useState<any[]>([]);
   
   const [optimizationConfig, setOptimizationConfig] = useState({
-    max_time_slots: 12,
+    max_time_slots: 60,  // Increased from 12 to 60 to accommodate all delivery dates (up to 60 days)
     time_limit_seconds: 300,
     solver_type: 'CP_SAT',
     generate_multiple_proposals: true,
@@ -238,6 +240,8 @@ export const OptimizationPageEnhanced: React.FC = () => {
     setSuccess('');
 
     try {
+      console.log('[ENHANCED OPTIMIZATION] Starting optimization with config:', optimizationConfig);
+      
       const params = new URLSearchParams({
         solver_type: optimizationConfig.solver_type,
         generate_multiple_proposals: String(optimizationConfig.generate_multiple_proposals),
@@ -247,6 +251,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
         optimizationConfig.strategies.forEach(s => params.append('strategies', s));
       }
 
+      console.log('[ENHANCED OPTIMIZATION] Request params:', params.toString());
+      console.log('[ENHANCED OPTIMIZATION] Request body:', {
+        max_time_slots: optimizationConfig.max_time_slots,
+        time_limit_seconds: optimizationConfig.time_limit_seconds,
+      });
+
       const response = await financeAPI.runEnhancedOptimization(
         {
           max_time_slots: optimizationConfig.max_time_slots,
@@ -255,19 +265,29 @@ export const OptimizationPageEnhanced: React.FC = () => {
         params.toString()
       );
       
+      console.log('[ENHANCED OPTIMIZATION] Response:', response.data);
+      console.log('[ENHANCED OPTIMIZATION] Response status:', response.data.status);
+      console.log('[ENHANCED OPTIMIZATION] Proposals count:', response.data.proposals?.length || 0);
+      console.log('[ENHANCED OPTIMIZATION] Run ID:', response.data.run_id);
+      console.log('[ENHANCED OPTIMIZATION] Run ID type:', typeof response.data.run_id);
+      
       setLastRun(response.data);
       setRunDialogOpen(false);
       setSelectedProposalIndex(0);
       
       if (response.data.status === 'OPTIMAL' || response.data.status === 'FEASIBLE') {
+        console.log('[ENHANCED OPTIMIZATION] SUCCESS! Setting success message');
         setSuccess(
           `Optimization completed! Generated ${response.data.proposals.length} proposal(s). ` +
           `Best cost: $${response.data.total_cost.toLocaleString()}`
         );
       } else {
+        console.log('[ENHANCED OPTIMIZATION] FAILED! Setting error message');
         setError(`Optimization failed: ${response.data.message}`);
       }
     } catch (err: any) {
+      console.error('[ENHANCED OPTIMIZATION] ERROR:', err);
+      console.error('[ENHANCED OPTIMIZATION] Error response:', err.response?.data);
       setError(formatApiError(err, 'Optimization failed'));
     } finally {
       setOptimizing(false);
@@ -416,6 +436,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
       };
 
       console.log('Saving proposal data:', proposalData);
+      console.log('LastRun object:', lastRun);
+      console.log('LastRun run_id:', lastRun?.run_id);
+      console.log('LastRun run_id type:', typeof lastRun?.run_id);
 
       // Call the save-proposal endpoint
       const response = await decisionsAPI.saveProposal(proposalData);
@@ -542,9 +565,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4">Advanced Optimization</Typography>
+          <Typography variant="h4">{t('optimization.title')}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Multi-solver optimization with strategy comparison
+            {t('optimization.subtitle')}
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
@@ -588,12 +611,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
         <Tabs value={mainTabValue} onChange={(e, newValue) => setMainTabValue(newValue)}>
           <Tab 
             icon={<TrendingUpIcon />} 
-            label="Optimization Results" 
+            label={t('optimization.optimizationResults')} 
             iconPosition="start"
           />
           <Tab 
             icon={<AccountBalanceIcon />} 
-            label="Budget Analysis" 
+            label={t('optimization.budgetAnalysis')} 
             iconPosition="start"
           />
         </Tabs>
@@ -612,7 +635,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               <CardContent>
                 <Box display="flex" alignItems="center" mb={2}>
                   <CircularProgress size={20} sx={{ mr: 2, color: 'inherit' }} />
-              <Typography variant="h6">Running Optimization...</Typography>
+              <Typography variant="h6">{t('optimization.running')}</Typography>
             </Box>
             <LinearProgress sx={{ mb: 1 }} />
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
@@ -670,7 +693,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   {solver.description}
                 </Typography>
                 <Chip 
-                  label={optimizationConfig.solver_type === solver.type ? 'Selected' : 'Available'} 
+                  label={optimizationConfig.solver_type === solver.type ? t('optimization.selected') : t('optimization.available')} 
                   size="small" 
                   color={optimizationConfig.solver_type === solver.type ? 'primary' : 'default'}
                   sx={{ mt: 1 }}
@@ -697,7 +720,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     Status
                   </Typography>
                   <Chip 
-                    label={lastRun.status} 
+                    label={t(`optimization.${lastRun.status.toLowerCase()}`)} 
                     color={getStatusColor(lastRun.status) as any}
                     size="small"
                     sx={{ mt: 1 }}
@@ -778,18 +801,18 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   <Box display="flex" gap={1} alignItems="center">
                     {(Object.keys(editedDecisions).length > 0 || removedDecisions.size > 0 || addedDecisions.length > 0) && (
                       <Chip 
-                        label="Has local changes"
+                        label={t('optimization.hasLocalChanges')}
                         color="warning"
                         size="small"
                       />
                     )}
                     <Chip 
-                      label={`${selectedProposal.items_count} items`}
+                      label={`${selectedProposal.items_count} ${t('optimization.items')}`}
                       color="primary"
                       variant="outlined"
                     />
                     <Chip 
-                      label={selectedProposal.status}
+                      label={t(`optimization.${selectedProposal.status.toLowerCase()}`)}
                       color={getStatusColor(selectedProposal.status) as any}
                     />
                     {(user?.role === 'finance' || user?.role === 'admin' || user?.role === 'pm') && (
@@ -871,7 +894,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                                   {displayDecision.project_code}
                                 </Typography>
                                 {isEdited && (
-                                  <Chip label="EDITED" size="small" color="warning" sx={{ ml: 1 }} />
+                                  <Chip label={t('optimization.edited')} size="small" color="warning" sx={{ ml: 1 }} />
                                 )}
                               </TableCell>
                               <TableCell>
@@ -891,7 +914,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                                 </Typography>
                               </TableCell>
                               <TableCell>
-                                <Chip label={typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : 'Payment Terms'} size="small" />
+                                <Chip label={typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : t('optimization.paymentTerms')} size="small" />
                               </TableCell>
                               <TableCell align="center">
                                 <IconButton
@@ -922,7 +945,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             <Typography variant="body2" fontWeight="medium">
                               {decision.project_code}
                             </Typography>
-                            <Chip label="NEW" size="small" color="success" sx={{ ml: 1 }} />
+                            <Chip label={t('optimization.new')} size="small" color="success" sx={{ ml: 1 }} />
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2">{decision.item_code}</Typography>
@@ -941,7 +964,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             </Typography>
                           </TableCell>
                           <TableCell>
-                            <Chip label={typeof decision.payment_terms === 'string' ? decision.payment_terms : 'Payment Terms'} size="small" />
+                            <Chip label={typeof decision.payment_terms === 'string' ? decision.payment_terms : t('optimization.paymentTerms')} size="small" />
                           </TableCell>
                           <TableCell align="center">
                             <IconButton
@@ -1021,7 +1044,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
             <InputLabel>Solver Type</InputLabel>
             <Select
               value={optimizationConfig.solver_type}
-              label="Solver Type"
+              label={t('optimization.solverType')}
               onChange={(e) => setOptimizationConfig({ ...optimizationConfig, solver_type: e.target.value })}
             >
               {solverInfo?.available_solvers.map((solver) => (
@@ -1034,7 +1057,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
           <TextField
             margin="dense"
-            label="Maximum Time Slots"
+            label={t('optimization.maximumTimeSlots')}
             type="number"
             fullWidth
             variant="outlined"
@@ -1049,7 +1072,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
           <TextField
             margin="dense"
-            label="Time Limit (seconds)"
+            label={t('optimization.timeLimit')}
             type="number"
             fullWidth
             variant="outlined"
@@ -1072,7 +1095,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                 })}
               />
             }
-            label="Generate Multiple Proposals"
+            label={t('optimization.generateMultipleProposals')}
             sx={{ mb: 2 }}
           />
 
@@ -1082,7 +1105,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               <Select
                 multiple
                 value={optimizationConfig.strategies}
-                label="Strategies (leave empty for all)"
+                label={t('optimization.strategies')}
                 onChange={(e) => setOptimizationConfig({
                   ...optimizationConfig,
                   strategies: typeof e.target.value === 'string' ? [e.target.value] : e.target.value
@@ -1193,7 +1216,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               
               <TextField
                 margin="dense"
-                label="Item Code"
+                label={t('optimization.itemCode')}
                 fullWidth
                 variant="outlined"
                 value={selectedDecision.item_code}

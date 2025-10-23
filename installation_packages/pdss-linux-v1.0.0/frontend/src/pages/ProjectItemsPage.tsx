@@ -40,6 +40,9 @@ import {
   Close as CloseIcon,
   LocalShipping as DeliveryIcon,
   Visibility as VisibilityIcon,
+  CheckCircle as FinalizeIcon,
+  Unpublished as UnfinalizeIcon,
+  Lock as LockedIcon,
 } from '@mui/icons-material';
 import { DeliveryOptionsManager } from '../components/DeliveryOptionsManager.tsx';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -49,10 +52,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { itemsAPI, itemsMasterAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { ProjectItem, ProjectItemCreate, ItemMaster } from '../types/index.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 
 export const ProjectItemsPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [masterItems, setMasterItems] = useState<ItemMaster[]>([]);
   const [selectedMasterItem, setSelectedMasterItem] = useState<ItemMaster | null>(null);
@@ -64,6 +69,15 @@ export const ProjectItemsPage: React.FC = () => {
   const [deliveryOptionsDialogOpen, setDeliveryOptionsDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ProjectItem | null>(null);
   const [viewItemDeliveryOptions, setViewItemDeliveryOptions] = useState<any[]>([]);
+  
+  // Pagination and filter state
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [finalizedFilter, setFinalizedFilter] = useState<string>('');
+  const [externalPurchaseFilter, setExternalPurchaseFilter] = useState<string>('');
   
   // Form data with delivery_options array
   const [formData, setFormData] = useState<ProjectItemCreate>({
@@ -86,19 +100,53 @@ export const ProjectItemsPage: React.FC = () => {
       fetchMasterItems();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, page, rowsPerPage, searchTerm, statusFilter, finalizedFilter, externalPurchaseFilter]);
 
   const fetchItems = async () => {
     if (!projectId) return;
     
+    setLoading(true);
     try {
-      const response = await itemsAPI.listByProject(parseInt(projectId));
-      setItems(response.data);
+      const params: any = {
+        skip: page * rowsPerPage,
+        limit: rowsPerPage,
+      };
+      
+      if (searchTerm) params.search = searchTerm;
+      if (statusFilter) params.status = statusFilter;
+      if (finalizedFilter !== '') params.is_finalized = finalizedFilter === 'true';
+      if (externalPurchaseFilter !== '') params.external_purchase = externalPurchaseFilter === 'true';
+      
+      const response = await itemsAPI.listByProject(parseInt(projectId), params);
+      setItems(response.data.items || response.data);
+      setTotalCount(response.data.total || response.data.length);
     } catch (err: any) {
       setError(formatApiError(err, 'Failed to load project items'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleChangePage = (_event: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+    setPage(0); // Reset to first page on search
+  };
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('');
+    setFinalizedFilter('');
+    setExternalPurchaseFilter('');
+    setPage(0);
   };
 
   const fetchMasterItems = async () => {
@@ -143,6 +191,28 @@ export const ProjectItemsPage: React.FC = () => {
       fetchItems();
     } catch (err: any) {
       setError(formatApiError(err, 'Failed to delete item'));
+    }
+  };
+
+  const handleFinalizeItem = async (itemId: number) => {
+    if (!window.confirm('Are you sure you want to finalize this item? It will be visible in procurement.')) return;
+    
+    try {
+      await itemsAPI.finalize(itemId, { is_finalized: true });
+      fetchItems();
+    } catch (err: any) {
+      setError(formatApiError(err, 'Failed to finalize item'));
+    }
+  };
+
+  const handleUnfinalizeItem = async (itemId: number) => {
+    if (!window.confirm('Are you sure you want to unfinalize this item? It will be removed from procurement view.')) return;
+    
+    try {
+      await itemsAPI.unfinalize(itemId);
+      fetchItems();
+    } catch (err: any) {
+      setError(formatApiError(err, 'Failed to unfinalize item'));
     }
   };
 
@@ -478,6 +548,84 @@ export const ProjectItemsPage: React.FC = () => {
         </Alert>
       )}
 
+      {/* Search and Filter Bar */}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Box display="flex" gap={2} flexWrap="wrap" alignItems="center">
+          <TextField
+            label="Search"
+            placeholder="Search by code, name, or description..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            size="small"
+            sx={{ minWidth: 300, flexGrow: 1 }}
+          />
+          
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={statusFilter}
+              label="Status"
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(0);
+              }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="PENDING">PENDING</MenuItem>
+              <MenuItem value="SUGGESTED">SUGGESTED</MenuItem>
+              <MenuItem value="DECIDED">DECIDED</MenuItem>
+              <MenuItem value="PROCURED">PROCURED</MenuItem>
+              <MenuItem value="FULFILLED">FULFILLED</MenuItem>
+              <MenuItem value="PAID">PAID</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Finalized</InputLabel>
+            <Select
+              value={finalizedFilter}
+              label="Finalized"
+              onChange={(e) => {
+                setFinalizedFilter(e.target.value);
+                setPage(0);
+              }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="true">Yes</MenuItem>
+              <MenuItem value="false">No</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel>External Purchase</InputLabel>
+            <Select
+              value={externalPurchaseFilter}
+              label="External Purchase"
+              onChange={(e) => {
+                setExternalPurchaseFilter(e.target.value);
+                setPage(0);
+              }}
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="true">Yes</MenuItem>
+              <MenuItem value="false">No</MenuItem>
+            </Select>
+          </FormControl>
+
+          <Button
+            variant="outlined"
+            onClick={handleClearFilters}
+            size="small"
+          >
+            Clear Filters
+          </Button>
+
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
+            Total: {totalCount} item{totalCount !== 1 ? 's' : ''}
+          </Typography>
+        </Box>
+      </Paper>
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
@@ -524,18 +672,29 @@ export const ProjectItemsPage: React.FC = () => {
                   </Box>
                 </TableCell>
                 <TableCell align="center">
-                  <Chip 
-                    label={item.status} 
-                    size="small"
-                    color={
-                      item.status === 'PENDING' ? 'default' :
-                      item.status === 'SUGGESTED' ? 'info' :
-                      item.status === 'DECIDED' ? 'primary' :
-                      item.status === 'PROCURED' ? 'secondary' :
-                      item.status === 'FULFILLED' ? 'warning' :
-                      item.status === 'PAID' ? 'success' : 'default'
-                    }
-                  />
+                  <Box display="flex" flexDirection="column" gap={0.5} alignItems="center">
+                    <Chip 
+                      label={item.status} 
+                      size="small"
+                      color={
+                        item.status === 'PENDING' ? 'default' :
+                        item.status === 'SUGGESTED' ? 'info' :
+                        item.status === 'DECIDED' ? 'primary' :
+                        item.status === 'PROCURED' ? 'secondary' :
+                        item.status === 'FULFILLED' ? 'warning' :
+                        item.status === 'PAID' ? 'success' : 'default'
+                      }
+                    />
+                    {item.is_finalized && (
+                      <Chip
+                        label="FINALIZED"
+                        size="small"
+                        color="success"
+                        variant="filled"
+                        icon={<FinalizeIcon />}
+                      />
+                    )}
+                  </Box>
                 </TableCell>
                 <TableCell align="center">
                   <Chip
@@ -564,6 +723,7 @@ export const ProjectItemsPage: React.FC = () => {
                   >
                     <VisibilityIcon />
                   </IconButton>
+                  {/* Edit button - disabled if procurement has finalized decision */}
                   <IconButton
                     size="small"
                     onClick={() => {
@@ -588,18 +748,32 @@ export const ProjectItemsPage: React.FC = () => {
                       
                       setEditDialogOpen(true);
                     }}
-                    title="Edit Item"
+                    title={
+                      item.has_finalized_decision
+                        ? "Cannot edit: Procurement has finalized decision"
+                        : "Edit Item"
+                    }
+                    disabled={item.has_finalized_decision}
                   >
                     <EditIcon />
                   </IconButton>
+                  
+                  {/* Delete button - disabled if procurement has finalized decision */}
                   <IconButton
                     size="small"
                     onClick={() => handleDeleteItem(item.id)}
-                    title="Delete Item"
+                    title={
+                      item.has_finalized_decision
+                        ? "Cannot delete: Procurement has finalized decision"
+                        : "Delete Item"
+                    }
                     color="error"
+                    disabled={item.has_finalized_decision}
                   >
                     <DeleteIcon />
                   </IconButton>
+                  
+                  {/* Delivery Options */}
                   <IconButton
                     size="small"
                     onClick={() => openDeliveryOptionsDialog(item)}
@@ -608,12 +782,83 @@ export const ProjectItemsPage: React.FC = () => {
                   >
                     <DeliveryIcon />
                   </IconButton>
+                  
+                  {/* Finalize/Unfinalize toggle - for PMO/Admin only */}
+                  {(user?.role === 'pmo' || user?.role === 'admin') && (
+                    <>
+                      {!item.is_finalized ? (
+                        <IconButton
+                          size="small"
+                          onClick={() => handleFinalizeItem(item.id)}
+                          title="Finalize Item (makes visible in procurement)"
+                          color="success"
+                        >
+                          <FinalizeIcon />
+                        </IconButton>
+                      ) : (
+                        <IconButton
+                          size="small"
+                          onClick={() => handleUnfinalizeItem(item.id)}
+                          title={
+                            item.has_finalized_decision
+                              ? "Cannot unfinalize: Procurement has finalized decision"
+                              : "Unfinalize Item (remove from procurement)"
+                          }
+                          color="warning"
+                          disabled={item.has_finalized_decision}
+                        >
+                          {item.has_finalized_decision ? <LockedIcon /> : <UnfinalizeIcon />}
+                        </IconButton>
+                      )}
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Pagination */}
+      <Paper sx={{ mt: 2 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" p={2}>
+          <Typography variant="body2" color="text.secondary">
+            Showing {items.length === 0 ? 0 : page * rowsPerPage + 1} - {Math.min((page + 1) * rowsPerPage, totalCount)} of {totalCount}
+          </Typography>
+          <Box display="flex" gap={1} alignItems="center">
+            <FormControl size="small" sx={{ minWidth: 100 }}>
+              <InputLabel>Per Page</InputLabel>
+              <Select
+                value={rowsPerPage}
+                label="Per Page"
+                onChange={handleChangeRowsPerPage}
+              >
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={25}>25</MenuItem>
+                <MenuItem value={50}>50</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+              </Select>
+            </FormControl>
+            <Button
+              size="small"
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+            >
+              Previous
+            </Button>
+            <Typography variant="body2" sx={{ px: 2 }}>
+              Page {page + 1} of {Math.max(1, Math.ceil(totalCount / rowsPerPage))}
+            </Typography>
+            <Button
+              size="small"
+              disabled={(page + 1) * rowsPerPage >= totalCount}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </Button>
+          </Box>
+        </Box>
+      </Paper>
 
       {/* Create Item Dialog */}
       <Dialog 

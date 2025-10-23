@@ -37,9 +37,11 @@ import {
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { itemsMasterAPI } from '../services/api.ts';
 import { ItemMaster, ItemMasterCreate } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
 
 export const ItemsMasterPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [items, setItems] = useState<ItemMaster[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -189,7 +191,7 @@ export const ItemsMasterPage: React.FC = () => {
       <TextField
         autoFocus
         margin="dense"
-        label="Company / Brand *"
+        label={t('itemsMaster.companyBrand')}
         fullWidth
         variant="outlined"
         value={formData.company}
@@ -199,7 +201,7 @@ export const ItemsMasterPage: React.FC = () => {
       />
       <TextField
         margin="dense"
-        label="Item Name *"
+        label={t('itemsMaster.itemName')}
         fullWidth
         variant="outlined"
         value={formData.item_name}
@@ -209,7 +211,7 @@ export const ItemsMasterPage: React.FC = () => {
       />
       <TextField
         margin="dense"
-        label="Model / Variant"
+        label={t('itemsMaster.modelVariant')}
         fullWidth
         variant="outlined"
         value={formData.model}
@@ -253,32 +255,32 @@ export const ItemsMasterPage: React.FC = () => {
         <InputLabel>Category</InputLabel>
         <Select
           value={formData.category || ''}
-          label="Category"
+          label={t('itemsMaster.category')}
           onChange={(e) => setFormData({ ...formData, category: e.target.value })}
         >
           <MenuItem value="">
-            <em>None</em>
+            <em>{t('common.none')}</em>
           </MenuItem>
-          <MenuItem value="IT Equipment">IT Equipment</MenuItem>
-          <MenuItem value="Network & Communication">Network & Communication</MenuItem>
-          <MenuItem value="Security & Surveillance">Security & Surveillance</MenuItem>
-          <MenuItem value="Software & Licenses">Software & Licenses</MenuItem>
-          <MenuItem value="Storage & Backup">Storage & Backup</MenuItem>
-          <MenuItem value="Power & Cooling">Power & Cooling</MenuItem>
-          <MenuItem value="Datacenter Infrastructure">Datacenter Infrastructure</MenuItem>
-          <MenuItem value="Office Equipment">Office Equipment</MenuItem>
-          <MenuItem value="Construction">Construction</MenuItem>
-          <MenuItem value="Electrical">Electrical</MenuItem>
-          <MenuItem value="Mechanical">Mechanical</MenuItem>
-          <MenuItem value="Plumbing">Plumbing</MenuItem>
-          <MenuItem value="HVAC">HVAC</MenuItem>
-          <MenuItem value="Other">Other</MenuItem>
+          <MenuItem value="IT Equipment">{t('itemsMaster.categoryITEquipment')}</MenuItem>
+          <MenuItem value="Network & Communication">{t('itemsMaster.categoryNetworkCommunication')}</MenuItem>
+          <MenuItem value="Security & Surveillance">{t('itemsMaster.categorySecuritySurveillance')}</MenuItem>
+          <MenuItem value="Software & Licenses">{t('itemsMaster.categorySoftwareLicenses')}</MenuItem>
+          <MenuItem value="Storage & Backup">{t('itemsMaster.categoryStorageBackup')}</MenuItem>
+          <MenuItem value="Power & Cooling">{t('itemsMaster.categoryPowerCooling')}</MenuItem>
+          <MenuItem value="Datacenter Infrastructure">{t('itemsMaster.categoryDatacenter')}</MenuItem>
+          <MenuItem value="Office Equipment">{t('itemsMaster.categoryOfficeEquipment')}</MenuItem>
+          <MenuItem value="Construction">{t('itemsMaster.categoryConstruction')}</MenuItem>
+          <MenuItem value="Electrical">{t('itemsMaster.categoryElectrical')}</MenuItem>
+          <MenuItem value="Mechanical">{t('itemsMaster.categoryMechanical')}</MenuItem>
+          <MenuItem value="Plumbing">{t('itemsMaster.categoryPlumbing')}</MenuItem>
+          <MenuItem value="HVAC">{t('itemsMaster.categoryHVAC')}</MenuItem>
+          <MenuItem value="Other">{t('itemsMaster.categoryOther')}</MenuItem>
         </Select>
       </FormControl>
       
       <TextField
         margin="dense"
-        label="Description"
+        label={t('itemsMaster.description')}
         fullWidth
         variant="outlined"
         multiline
@@ -293,7 +295,7 @@ export const ItemsMasterPage: React.FC = () => {
         <InputLabel>Unit *</InputLabel>
         <Select
           value={formData.unit}
-          label="Unit *"
+          label={t('itemsMaster.unit')}
           onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
         >
           <MenuItem value="piece">Piece</MenuItem>
@@ -320,7 +322,7 @@ export const ItemsMasterPage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Items Master Catalog</Typography>
+        <Typography variant="h4">{t('itemsMaster.title')}</Typography>
         {canEdit && (
           <Box>
             <Button
@@ -372,7 +374,7 @@ export const ItemsMasterPage: React.FC = () => {
       <Paper sx={{ p: 2, mb: 3 }}>
         <TextField
           fullWidth
-          label="Search Items"
+          label={t('itemsMaster.searchItems')}
           placeholder="Search by code, company, name, or model..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -434,7 +436,7 @@ export const ItemsMasterPage: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Chip
-                      label={item.is_active ? 'Active' : 'Inactive'}
+                      label={item.is_active ? t('itemsMaster.active') : t('itemsMaster.inactive')}
                       color={item.is_active ? 'success' : 'default'}
                       size="small"
                     />
@@ -639,7 +641,7 @@ export const ItemsMasterPage: React.FC = () => {
                   Status
                 </Typography>
                 <Chip
-                  label={selectedItem.is_active ? 'Active' : 'Inactive'}
+                  label={selectedItem.is_active ? t('itemsMaster.active') : t('itemsMaster.inactive')}
                   color={selectedItem.is_active ? 'success' : 'default'}
                   size="small"
                 />

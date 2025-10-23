@@ -100,8 +100,9 @@ class EnhancedProcurementOptimizer:
                      "FEASIBLE" if any(p.status == "FEASIBLE" for p in proposals) else \
                      "INFEASIBLE"
             
-            # Get best proposal (lowest cost)
-            best_proposal = min(proposals, key=lambda p: p.total_cost) if proposals else None
+            # Get best proposal (lowest cost among proposals with items)
+            proposals_with_items = [p for p in proposals if p.items_count > 0]
+            best_proposal = min(proposals_with_items, key=lambda p: p.total_cost) if proposals_with_items else None
             
             # Save optimization run to database for later retrieval
             await self._save_optimization_run(request, status_val, proposals)
@@ -242,13 +243,25 @@ class EnhancedProcurementOptimizer:
         variables_created = 0
         
         for item in self.project_items:
-            delivery_options = item.delivery_options if item.delivery_options else []
+            delivery_options = item.delivery_options_rel if item.delivery_options_rel else []
             if not delivery_options:
                 logger.warning(f"❌ Item {item.item_code} has NO delivery options - SKIPPING")
                 continue
             
-            # Use a larger range to accommodate lead times (start from 5 instead of 1)
-            valid_times = list(range(5, min(len(delivery_options) + 5, request.max_time_slots + 1)))
+            # FIXED: Use actual delivery dates converted to day offsets from today
+            from datetime import date
+            today = date.today()
+            valid_times = []
+            for delivery_option in delivery_options:
+                delivery_date = delivery_option.delivery_date
+                days_from_today = (delivery_date - today).days
+                if days_from_today > 0:  # Only future dates
+                    valid_times.append(days_from_today)
+            
+            if not valid_times:
+                logger.warning(f"❌ Item {item.item_code} has NO valid future delivery dates - SKIPPING")
+                continue
+            
             item_options = [opt for opt in self.procurement_options.values() 
                           if opt.item_code == item.item_code]
             
@@ -261,8 +274,10 @@ class EnhancedProcurementOptimizer:
             
             for option in item_options:
                 for delivery_time in valid_times:
+                    # FIXED: Calculate purchase time using actual day offsets
                     purchase_time = delivery_time - option.lomc_lead_time
                     if purchase_time < 1:
+                        logger.debug(f"    Skipping {item.item_code} option {option.id}: delivery_time={delivery_time}, lead_time={option.lomc_lead_time}, purchase_time={purchase_time}")
                         continue
                     
                     var_name = f"buy_{item.project_id}_{item.item_code}_{option.id}_{delivery_time}"
@@ -306,6 +321,18 @@ class EnhancedProcurementOptimizer:
             logger.info(f"✅ Optimization successful!")
             logger.info(f"Items optimized: {len(decisions)}")
             logger.info(f"Total cost: ${total_cost}")
+            
+            # Debug: Check which variables were actually selected
+            selected_vars = []
+            for var_name, var in variables.items():
+                if solver.Value(var) == 1:
+                    selected_vars.append(var_name)
+            
+            logger.info(f"Selected variables: {len(selected_vars)}")
+            for var in selected_vars[:10]:  # Show first 10
+                logger.info(f"  {var}")
+            if len(selected_vars) > 10:
+                logger.info(f"  ... and {len(selected_vars) - 10} more")
             
             return OptimizationProposal(
                 proposal_name=self._get_strategy_name(strategy),
@@ -626,11 +653,15 @@ class EnhancedProcurementOptimizer:
         decided_items = {(row.project_id, row.item_code) for row in decided_query.all()}
         
         # Load project items with delivery options relationship
+        # ONLY load items that are finalized by PMO (is_finalized == True)
         from sqlalchemy.orm import selectinload
         items_result = await self.db.execute(
             select(ProjectItem)
             .options(selectinload(ProjectItem.delivery_options_rel))
-            .where(ProjectItem.project_id.in_(self.projects.keys()))
+            .where(
+                ProjectItem.project_id.in_(self.projects.keys()),
+                ProjectItem.is_finalized == True  # Only finalized items
+            )
         )
         all_items = list(items_result.scalars().all())
         self.project_items = [
@@ -723,7 +754,7 @@ class EnhancedProcurementOptimizer:
         valid_items = 0
         for item in self.project_items[:10]:  # Check first 10 items
             item_options = [opt for opt in self.procurement_options.values() if opt.item_code == item.item_code]
-            delivery_options_count = len(item.delivery_options) if item.delivery_options else 0
+            delivery_options_count = len(item.delivery_options_rel) if item.delivery_options_rel else 0
             logger.info(f"Item {item.item_code}: {len(item_options)} finalized options, {delivery_options_count} delivery options")
             
             if len(item_options) == 0:
@@ -795,6 +826,11 @@ class EnhancedProcurementOptimizer:
                 item_groups[key] = []
             item_groups[key].append(var)
         
+        logger.info(f"=== DEMAND CONSTRAINTS ===")
+        logger.info(f"Item groups: {len(item_groups)}")
+        for key, vars_list in item_groups.items():
+            logger.info(f"  Item {key}: {len(vars_list)} options")
+        
         # Allow partial optimization: each item can be purchased at most once (<= 1)
         # This allows the optimizer to skip items when budget is insufficient
         for vars_list in item_groups.values():
@@ -826,7 +862,12 @@ class EnhancedProcurementOptimizer:
         # Store slack variables for penalty in objective
         self.cpsat_budget_slack_vars = []
         
-        for time_slot in range(1, max_time_slots + 1):
+        # FIXED: Iterate over actual time slots that have variables, not a fixed range
+        logger.info(f"=== BUDGET CONSTRAINTS ===")
+        logger.info(f"Time groups keys: {sorted(time_groups.keys())}")
+        logger.info(f"Budget data keys: {list(self.budget_data.keys())}")
+        
+        for time_slot in sorted(time_groups.keys()):
             if time_slot not in time_groups:
                 continue
             
@@ -838,12 +879,20 @@ class EnhancedProcurementOptimizer:
                 cash_flow_vars.append(var)
                 # Scale to thousands for numerical stability
                 cash_flow_coeffs.append(int(cost / 1000))
+                logger.debug(f"    Cost: {cost:,.2f} -> {int(cost / 1000)}K for {item.item_code} {option.supplier_name}")
             
             if time_slot in self.budget_data:
                 budget_limit = int(self.budget_data[time_slot].available_budget / 1000)
+                logger.info(f"Time slot {time_slot}: budget={budget_limit}K, vars={len(cash_flow_vars)}")
             else:
                 # Use a large budget for time slots without explicit budget data
-                budget_limit = 1000  # $1M default
+                # Since we have over 1 trillion in total budget, use a generous default
+                budget_limit = 1000000  # $1B default (1,000,000K)
+                logger.info(f"Time slot {time_slot}: DEFAULT budget={budget_limit}K, vars={len(cash_flow_vars)}")
+            
+            # Calculate total cost for this time slot
+            total_cost = sum(cash_flow_coeffs)
+            logger.info(f"  Total cost for time slot {time_slot}: {total_cost}K (budget: {budget_limit}K)")
             
             if cash_flow_vars:
                 # Create slack variable to allow exceeding budget
@@ -893,9 +942,12 @@ class EnhancedProcurementOptimizer:
                 first_delivery = item.delivery_options_rel[0]
                 business_value = float(first_delivery.invoice_amount_per_unit) * item.quantity
             
-            # If no delivery option, use 20% markup as default
+            # If no delivery option, use 200% markup as default to ensure profitability
             if business_value == 0:
-                business_value = cost * 1.20
+                business_value = cost * 3.0  # 200% profit margin
+            
+            # Debug logging for objective function
+            logger.debug(f"Objective for {item.item_code}: cost={cost:,.2f}, value={business_value:,.2f}, profit={business_value-cost:,.2f}")
             
             project = self.projects.get(project_id)
             
@@ -911,20 +963,31 @@ class EnhancedProcurementOptimizer:
                 value_weight = float(priority) * 0.1
             elif strategy == OptimizationStrategy.FAST_DELIVERY:
                 # Earlier delivery = higher value
+                # Normalize delivery_time (days) to a reasonable scale
+                # Shorter delivery time = higher value weight
+                max_delivery_days = 90  # Assume max 90 days
+                normalized_delivery = min(delivery_time, max_delivery_days) / max_delivery_days
                 cost_weight = 1.0
-                value_weight = float(12 - delivery_time) * 0.1
+                value_weight = 1.0 + (1.0 - normalized_delivery) * 2.0  # Range: 1.0 to 3.0
             elif strategy == OptimizationStrategy.SMOOTH_CASHFLOW:
-                # Prefer middle time slots
-                mid_point = 8.5
-                distance = abs(delivery_time - mid_point)
-                cost_weight = 1.0 + distance * 0.1
-                value_weight = 1.0 - distance * 0.05
+                # Prefer middle time slots to balance cash flow
+                # Normalize delivery_time to 0-1 range
+                max_delivery_days = 90
+                normalized_delivery = min(delivery_time, max_delivery_days) / max_delivery_days
+                # Prefer middle range (around 0.5)
+                distance_from_middle = abs(normalized_delivery - 0.5)
+                cost_weight = 1.0 + distance_from_middle
+                value_weight = 1.0 + (0.5 - distance_from_middle) * 0.5  # Bonus for middle range
             else:  # BALANCED
+                # Balance between priority and delivery time
                 priority = project.priority_weight if project else 5
-                priority_factor = float(11 - priority) * 0.05
-                delivery_factor = float(12 - delivery_time) * 0.05
+                priority_factor = float(11 - priority) * 0.05  # Range: 0.3 to 0.55
+                # Normalize delivery time
+                max_delivery_days = 90
+                normalized_delivery = min(delivery_time, max_delivery_days) / max_delivery_days
+                delivery_factor = (1.0 - normalized_delivery) * 0.3  # Range: 0 to 0.3
                 cost_weight = priority_factor + delivery_factor + 0.5
-                value_weight = 1.0
+                value_weight = 1.0 + (priority * 0.1) + (1.0 - normalized_delivery) * 0.2
             
             # Scale to thousands for numerical stability
             cost_scaled = int(cost / 1000 * cost_weight)
@@ -940,7 +1003,17 @@ class EnhancedProcurementOptimizer:
             budget_penalty = sum(slack * BUDGET_PENALTY_MULTIPLIER for slack in self.cpsat_budget_slack_vars)
         
         # Objective: Minimize(Cost - Value + Budget_Penalty)
-        model.Minimize(sum(cost_terms) - sum(value_terms) + budget_penalty)
+        total_cost = sum(cost_terms)
+        total_value = sum(value_terms)
+        objective_value = total_cost - total_value + budget_penalty
+        
+        logger.info(f"=== OBJECTIVE FUNCTION ===")
+        logger.info(f"Total cost terms: {len(cost_terms)}")
+        logger.info(f"Total value terms: {len(value_terms)}")
+        logger.info(f"Budget penalty: {budget_penalty}")
+        logger.info(f"Final objective: {objective_value}")
+        
+        model.Minimize(objective_value)
     
     def _set_glop_objective(self, objective, variables: Dict, strategy: OptimizationStrategy):
         """Set objective for Glop LP solver

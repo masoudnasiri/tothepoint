@@ -195,6 +195,9 @@ export interface ProjectItem {
   finalized_at: string | null;
   created_at: string;
   updated_at: string | null;
+  // Procurement workflow fields (computed from backend)
+  procurement_options_count?: number;
+  has_finalized_decision?: boolean;
 }
 
 export interface ProjectItemCreate {
@@ -387,6 +390,7 @@ export interface ProcurementPlanItem {
   
   // Procurement Team fields (not visible to PM)
   final_cost?: number;
+  final_cost_currency?: string;
   purchase_date?: string;
   supplier_name?: string;
   procurement_option_id?: number;
@@ -398,9 +402,17 @@ export interface ProcurementPlanItem {
   // Invoice fields (Procurement/Finance only)
   actual_invoice_issue_date?: string;
   actual_invoice_amount?: number;
+  actual_invoice_currency?: string;
   actual_invoice_received_date?: string;
   invoice_entered_by_id?: number;
   invoice_entered_at?: string;
+  
+  // Payment fields (Finance only)
+  actual_payment_amount?: number;
+  actual_payment_currency?: string;
+  actual_payment_date?: string;
+  payment_entered_by_id?: number;
+  payment_entered_at?: string;
   
   // PM fields
   is_accepted_by_pm?: boolean;

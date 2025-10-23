@@ -45,7 +45,7 @@ import {
   Search as SearchIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import api, { procurementAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
+import api, { procurementAPI, excelAPI, deliveryOptionsAPI, itemsAPI } from '../services/api.ts';
 import { ProcurementOption, ProcurementOptionCreate } from '../types/index.ts';
 import { CurrencySelector } from '../components/CurrencySelector.tsx';
 
@@ -78,13 +78,16 @@ export const ProcurementPage: React.FC = () => {
   const [selectedItemCode, setSelectedItemCode] = useState<string>('');
   const [availableDeliveryOptions, setAvailableDeliveryOptions] = useState<DeliveryOption[]>([]);
   const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string>('');
+  const [selectedDeliveryOptionId, setSelectedDeliveryOptionId] = useState<number | null>(null);
   const [formData, setFormData] = useState<any>({
     item_code: '',
     supplier_name: '',
     base_cost: 0,
     currency_id: '',
     shipping_cost: 0,
+    delivery_option_id: null,
     lomc_lead_time: 0,
+    expected_delivery_date: '',
     discount_bundle_threshold: undefined,
     discount_bundle_percent: undefined,
     payment_terms: { type: 'cash', discount_percent: 0 },
@@ -92,6 +95,7 @@ export const ProcurementPage: React.FC = () => {
   });
   const [bulkUpdating, setBulkUpdating] = useState<string | null>(null);
   const [loadedItemOptions, setLoadedItemOptions] = useState<Record<string, ProcurementOption[]>>({});
+  const [loadingItemOptions, setLoadingItemOptions] = useState<Record<string, boolean>>({});
   const [expandedAccordion, setExpandedAccordion] = useState<string | false>(false);
   const [page, setPage] = useState(0);
   const ITEMS_PER_PAGE = 50;
@@ -110,54 +114,94 @@ export const ProcurementPage: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      // Only fetch items, not all options (too many options to load at once)
-      const itemsResponse = await procurementAPI.getItemsWithDetails();
+      // Fetch only finalized items (PMO finalized items)
+      const itemsResponse = await itemsAPI.listFinalized();
       
-      setItemsWithDetails(itemsResponse.data);
-      setItemCodes(itemsResponse.data.map((item: ItemWithDetails) => item.item_code));
+      // Convert finalized items to the format expected by the procurement page
+      const itemsWithDetails = itemsResponse.data.map((item: any) => ({
+        item_code: item.item_code,
+        item_name: item.item_name,
+        description: item.description || '',
+        project_id: item.project_id,
+        project_item_id: item.id
+      }));
+      
+      setItemsWithDetails(itemsWithDetails);
+      setItemCodes(itemsWithDetails.map((item: ItemWithDetails) => item.item_code));
       // Don't load all options at once - will fetch per item when needed
       setProcurementOptions([]);
       
-      // Calculate summary statistics
-      calculateSummaryStats();
+      // Calculate summary statistics with the newly loaded items
+      calculateSummaryStats(itemsWithDetails);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load procurement data');
+      console.error('Error loading finalized items:', err);
+      // Handle validation errors
+      if (err.response?.data?.detail) {
+        if (Array.isArray(err.response.data.detail)) {
+          // Pydantic validation errors
+          const errorMessages = err.response.data.detail.map((e: any) => e.msg).join(', ');
+          setError(`Validation error: ${errorMessages}`);
+        } else if (typeof err.response.data.detail === 'string') {
+          setError(err.response.data.detail);
+        } else {
+          setError('Failed to load finalized items');
+        }
+      } else {
+        setError('Failed to load procurement data');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateSummaryStats = async () => {
+  const calculateSummaryStats = async (items?: ItemWithDetails[]) => {
     try {
-      // Get all procurement options for summary
-      const allOptionsResponse = await procurementAPI.list();
-      const allOptions = allOptionsResponse.data;
+      // Use provided items or fall back to state
+      const itemsToProcess = items || itemsWithDetails;
       
-      // Calculate statistics
-      const totalItems = itemsWithDetails.length;
-      const totalOptions = allOptions.length;
-      const finalizedOptions = allOptions.filter((opt: any) => opt.is_finalized).length;
-      const notFinalizedOptions = totalOptions - finalizedOptions;
+      // Since we're only showing finalized items, calculate stats based on those items
+      const totalItems = itemsToProcess.length;
       
-      // Get unique suppliers and currencies
-      const uniqueSuppliers = [...new Set(allOptions.map((opt: any) => opt.supplier_name))];
-      const uniqueCurrencies = [...new Set(allOptions.map((opt: any) => opt.currency_code))];
+      // Get procurement options for the finalized items only
+      let totalOptions = 0;
+      let finalizedOptions = 0;
+      let uniqueSuppliers: string[] = [];
+      let uniqueCurrencies: string[] = [];
+      let totalCost = 0;
       
-      // Calculate cost statistics
-      const totalCost = allOptions.reduce((sum: number, opt: any) => sum + (opt.base_cost || 0), 0);
-      const finalizedCost = allOptions
-        .filter((opt: any) => opt.is_finalized)
-        .reduce((sum: number, opt: any) => sum + (opt.base_cost || 0), 0);
+      // For each finalized item, get its procurement options
+      for (const item of itemsToProcess) {
+        try {
+          const optionsResponse = await procurementAPI.listByItemCode(item.item_code);
+          const options = optionsResponse.data;
+          
+          totalOptions += options.length;
+          finalizedOptions += options.filter((opt: any) => opt.is_finalized).length;
+          
+          // Collect suppliers and currencies
+          options.forEach((opt: any) => {
+            if (opt.supplier_name) uniqueSuppliers.push(opt.supplier_name);
+            if (opt.currency_code) uniqueCurrencies.push(opt.currency_code);
+            if (opt.base_cost) totalCost += opt.base_cost;
+          });
+        } catch (err) {
+          console.warn(`Failed to load options for item ${item.item_code}:`, err);
+        }
+      }
+      
+      // Remove duplicates
+      uniqueSuppliers = [...new Set(uniqueSuppliers)];
+      uniqueCurrencies = [...new Set(uniqueCurrencies)];
       
       setSummaryStats({
         totalItems,
         totalOptions,
         finalizedOptions,
-        notFinalizedOptions,
+        notFinalizedOptions: totalOptions - finalizedOptions,
         uniqueSuppliers: uniqueSuppliers.length,
         uniqueCurrencies: uniqueCurrencies.length,
         totalCost,
-        finalizedCost,
+        finalizedCost: totalCost, // All options are for finalized items
         suppliers: uniqueSuppliers,
         currencies: uniqueCurrencies
       });
@@ -176,19 +220,37 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const handleAccordionChange = (itemCode: string) => async (event: React.SyntheticEvent, isExpanded: boolean) => {
-    setExpandedAccordion(isExpanded ? itemCode : false);
+  const handleAccordionChange = (itemKey: string) => async (event: React.SyntheticEvent, isExpanded: boolean) => {
+    setExpandedAccordion(isExpanded ? itemKey : false);
+    
+    // Extract itemCode from the key (format: "itemCode-projectItemId")
+    // Split by last dash to get itemCode (itemCode may contain dashes like DELL-LAT1)
+    const lastDashIndex = itemKey.lastIndexOf('-');
+    const itemCode = lastDashIndex !== -1 ? itemKey.substring(0, lastDashIndex) : itemKey;
     
     // If expanding and options not loaded yet, fetch them
     if (isExpanded && !loadedItemOptions[itemCode]) {
       try {
+        // Set loading state
+        setLoadingItemOptions(prev => ({ ...prev, [itemCode]: true }));
+        
         const options = await fetchOptionsByItemCode(itemCode);
         setLoadedItemOptions(prev => ({
           ...prev,
           [itemCode]: options
         }));
+        
+        // Clear loading state
+        setLoadingItemOptions(prev => ({ ...prev, [itemCode]: false }));
       } catch (err) {
         console.error('Failed to load options for', itemCode, err);
+        // Clear loading state on error
+        setLoadingItemOptions(prev => ({ ...prev, [itemCode]: false }));
+        // Set empty array to prevent repeated loading attempts
+        setLoadedItemOptions(prev => ({
+          ...prev,
+          [itemCode]: []
+        }));
       }
     }
   };
@@ -279,9 +341,20 @@ export const ProcurementPage: React.FC = () => {
     }
     
     try {
-      await procurementAPI.create(formData);
+      const createdOption = await procurementAPI.create(formData);
+      const itemCode = formData.item_code;
+      
       setCreateDialogOpen(false);
       resetForm();
+      
+      // Refresh the options for this specific item
+      const updatedOptions = await fetchOptionsByItemCode(itemCode);
+      setLoadedItemOptions(prev => ({
+        ...prev,
+        [itemCode]: updatedOptions
+      }));
+      
+      // Also refresh the items list
       fetchData();
     } catch (err: any) {
       // Handle validation errors (422) which return array of error objects
@@ -309,9 +382,20 @@ export const ProcurementPage: React.FC = () => {
     
     try {
       await procurementAPI.update(selectedOption.id, formData);
+      const itemCode = formData.item_code;
+      
       setEditDialogOpen(false);
       setSelectedOption(null);
       resetForm();
+      
+      // Refresh the options for this specific item
+      const updatedOptions = await fetchOptionsByItemCode(itemCode);
+      setLoadedItemOptions(prev => ({
+        ...prev,
+        [itemCode]: updatedOptions
+      }));
+      
+      // Also refresh the items list
       fetchData();
     } catch (err: any) {
       // Handle validation errors
@@ -333,11 +417,20 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const handleDeleteOption = async (optionId: number) => {
+  const handleDeleteOption = async (optionId: number, itemCode: string) => {
     if (!window.confirm('Are you sure you want to delete this procurement option?')) return;
     
     try {
       await procurementAPI.delete(optionId);
+      
+      // Refresh the options for this specific item
+      const updatedOptions = await fetchOptionsByItemCode(itemCode);
+      setLoadedItemOptions(prev => ({
+        ...prev,
+        [itemCode]: updatedOptions
+      }));
+      
+      // Also refresh the items list
       fetchData();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete procurement option');
@@ -490,7 +583,11 @@ export const ProcurementPage: React.FC = () => {
       item_code: selectedItemCode,
       supplier_name: '',
       base_cost: 0,
+      currency_id: '',
+      shipping_cost: 0,
+      delivery_option_id: null,
       lomc_lead_time: 0,
+      expected_delivery_date: '',
       discount_bundle_threshold: undefined,
       discount_bundle_percent: undefined,
       payment_terms: { type: 'cash', discount_percent: 0 },
@@ -498,8 +595,10 @@ export const ProcurementPage: React.FC = () => {
     });
     setAvailableDeliveryOptions([]);
     setSelectedDeliveryDate('');
+    setSelectedDeliveryOptionId(null);
     setSelectedItemDetails(null);
   };
+
 
   const handleExportOptions = async () => {
     try {
@@ -838,10 +937,10 @@ export const ProcurementPage: React.FC = () => {
         
         return (
           <Accordion 
-            key={itemCode} 
+            key={`${itemCode}-${itemDetails.project_item_id}`} 
             sx={{ mb: 2 }}
-            expanded={expandedAccordion === itemCode}
-            onChange={handleAccordionChange(itemCode)}
+            expanded={expandedAccordion === `${itemCode}-${itemDetails.project_item_id}`}
+            onChange={handleAccordionChange(`${itemCode}-${itemDetails.project_item_id}`)}
           >
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 2 }}>
@@ -875,10 +974,18 @@ export const ProcurementPage: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {itemOptions.length === 0 && expandedAccordion === itemCode ? (
+                  {loadingItemOptions[itemCode] ? (
                     <TableRow>
                       <TableCell colSpan={7} align="center">
                         <CircularProgress size={24} /> Loading options...
+                      </TableCell>
+                    </TableRow>
+                  ) : itemOptions.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          No procurement options yet. Click "Add Option" to create one.
+                        </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -933,7 +1040,7 @@ export const ProcurementPage: React.FC = () => {
                             <>
                               <IconButton
                                 size="small"
-                                onClick={() => {
+                                onClick={async () => {
                                   setSelectedOption(option);
                                   setFormData({
                                     item_code: option.item_code,
@@ -941,7 +1048,9 @@ export const ProcurementPage: React.FC = () => {
                                     base_cost: option.base_cost,
                                     currency_id: option.currency_id || 0,
                                     shipping_cost: (option as any).shipping_cost || 0,
+                                    delivery_option_id: (option as any).delivery_option_id || null,
                                     lomc_lead_time: option.lomc_lead_time,
+                                    expected_delivery_date: (option as any).expected_delivery_date || '',
                                     discount_bundle_threshold: option.discount_bundle_threshold,
                                     discount_bundle_percent: option.discount_bundle_percent,
                                     payment_terms: option.payment_terms,
@@ -950,6 +1059,10 @@ export const ProcurementPage: React.FC = () => {
                                   // Set item details for display
                                   const itemDetails = itemsWithDetails.find(item => item.item_code === option.item_code);
                                   setSelectedItemDetails(itemDetails || null);
+                                  // Fetch delivery options for this item
+                                  if (option.item_code) {
+                                    await fetchDeliveryOptions(option.item_code);
+                                  }
                                   setEditDialogOpen(true);
                                 }}
                                 title="Edit Option"
@@ -958,7 +1071,7 @@ export const ProcurementPage: React.FC = () => {
                               </IconButton>
                               <IconButton
                                 size="small"
-                                onClick={() => handleDeleteOption(option.id)}
+                                onClick={() => handleDeleteOption(option.id, itemCode)}
                                 title="Delete Option"
                                 color="error"
                               >
@@ -1107,38 +1220,54 @@ export const ProcurementPage: React.FC = () => {
             showRate
             sx={{ mb: 2 }}
           />
+          {/* Delivery Option Selection */}
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Delivery Date (from PM's Project Items)</InputLabel>
+            <InputLabel>Delivery Option</InputLabel>
             <Select
-              value={selectedDeliveryDate}
+              value={formData.delivery_option_id || ''}
               onChange={(e) => {
-                setSelectedDeliveryDate(e.target.value);
-                const selected = availableDeliveryOptions.find(opt => opt.delivery_date === e.target.value);
+                const deliveryOptionId = e.target.value;
+                const selectedOption = availableDeliveryOptions.find(opt => opt.id === deliveryOptionId);
                 setFormData({ 
                   ...formData, 
-                  lomc_lead_time: selected?.delivery_slot || 0 
+                  delivery_option_id: deliveryOptionId,
+                  expected_delivery_date: selectedOption?.delivery_date || '',
+                  lomc_lead_time: 0 // Reset lead time when using delivery option
                 });
+                setSelectedDeliveryOptionId(deliveryOptionId);
               }}
-              disabled={!formData.item_code || availableDeliveryOptions.length === 0}
+              disabled={availableDeliveryOptions.length === 0}
             >
-              {availableDeliveryOptions.length === 0 && formData.item_code ? (
-                <MenuItem value="" disabled>
-                  No delivery dates set for this item
-                </MenuItem>
+              {availableDeliveryOptions.length === 0 ? (
+                <MenuItem disabled>No delivery options available</MenuItem>
               ) : (
-                availableDeliveryOptions.map((opt) => (
-                  <MenuItem key={opt.id} value={opt.delivery_date}>
-                    {new Date(opt.delivery_date).toLocaleDateString()} {opt.delivery_slot ? `(Slot ${opt.delivery_slot})` : ''}
+                availableDeliveryOptions.map((option) => (
+                  <MenuItem key={option.id} value={option.id}>
+                    {option.delivery_date} - Slot {option.delivery_slot}
+                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} per unit)`}
                   </MenuItem>
                 ))
               )}
             </Select>
-            {formData.item_code && availableDeliveryOptions.length === 0 && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
-                No delivery dates found for this item. Please ask PM to set delivery options first.
-              </Alert>
+            {availableDeliveryOptions.length === 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                No delivery options found for this item. Please add delivery options in the project first.
+              </Typography>
             )}
           </FormControl>
+
+          {/* Expected Delivery Date (auto-filled) */}
+          <TextField
+            margin="dense"
+            label="Expected Delivery Date"
+            type="date"
+            fullWidth
+            variant="outlined"
+            value={formData.expected_delivery_date}
+            disabled
+            helperText="Auto-filled from selected delivery option"
+            sx={{ mb: 2 }}
+          />
           <TextField
             margin="dense"
             label="Bundle Discount Threshold"
@@ -1338,6 +1467,12 @@ export const ProcurementPage: React.FC = () => {
                 setFormData({ ...formData, item_code: newItemCode });
                 const itemDetails = itemsWithDetails.find(item => item.item_code === newItemCode);
                 setSelectedItemDetails(itemDetails || null);
+                // Fetch delivery options for the selected item
+                if (newItemCode) {
+                  fetchDeliveryOptions(newItemCode);
+                } else {
+                  setAvailableDeliveryOptions([]);
+                }
               }}
             >
               {itemCodes.map((code) => (
@@ -1410,14 +1545,52 @@ export const ProcurementPage: React.FC = () => {
             showRate
             sx={{ mb: 2 }}
           />
+          {/* Delivery Option Selection */}
+          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+            <InputLabel>Delivery Option</InputLabel>
+            <Select
+              value={formData.delivery_option_id || ''}
+              onChange={(e) => {
+                const deliveryOptionId = e.target.value;
+                const selectedOption = availableDeliveryOptions.find(opt => opt.id === deliveryOptionId);
+                setFormData({ 
+                  ...formData, 
+                  delivery_option_id: deliveryOptionId,
+                  expected_delivery_date: selectedOption?.delivery_date || '',
+                  lomc_lead_time: 0 // Reset lead time when using delivery option
+                });
+                setSelectedDeliveryOptionId(deliveryOptionId);
+              }}
+              disabled={availableDeliveryOptions.length === 0}
+            >
+              {availableDeliveryOptions.length === 0 ? (
+                <MenuItem disabled>No delivery options available</MenuItem>
+              ) : (
+                availableDeliveryOptions.map((option) => (
+                  <MenuItem key={option.id} value={option.id}>
+                    {option.delivery_date} - Slot {option.delivery_slot}
+                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} per unit)`}
+                  </MenuItem>
+                ))
+              )}
+            </Select>
+            {availableDeliveryOptions.length === 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                No delivery options found for this item. Please add delivery options in the project first.
+              </Typography>
+            )}
+          </FormControl>
+
+          {/* Expected Delivery Date (auto-filled) */}
           <TextField
             margin="dense"
-            label="Lead Time (periods)"
-            type="number"
+            label="Expected Delivery Date"
+            type="date"
             fullWidth
             variant="outlined"
-            value={formData.lomc_lead_time}
-            onChange={(e) => setFormData({ ...formData, lomc_lead_time: parseInt(e.target.value) || 0 })}
+            value={formData.expected_delivery_date}
+            disabled
+            helperText="Auto-filled from selected delivery option"
             sx={{ mb: 2 }}
           />
           <TextField

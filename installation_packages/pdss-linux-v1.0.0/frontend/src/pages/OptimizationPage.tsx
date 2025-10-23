@@ -75,9 +75,13 @@ export const OptimizationPage: React.FC = () => {
 
   const fetchResults = async () => {
     try {
+      console.log('Fetching optimization results...');
       const response = await financeAPI.listResults();
+      console.log('Results response:', response.data);
+      console.log('Results count:', response.data.length);
       setResults(response.data);
     } catch (err: any) {
+      console.error('Failed to fetch results:', err);
       setError(formatApiError(err, 'Failed to load optimization results'));
     } finally {
       setLoading(false);
@@ -112,17 +116,23 @@ export const OptimizationPage: React.FC = () => {
     setError('');
 
     try {
+      console.log('Starting optimization with config:', optimizationConfig);
       const response = await financeAPI.runOptimization(optimizationConfig);
+      console.log('Optimization response:', response.data);
+      
       setLastRun(response.data);
       setRunDialogOpen(false);
       fetchResults();
       
       if (response.data.status === 'OPTIMAL' || response.data.status === 'FEASIBLE') {
+        console.log('Optimization successful, showing alert');
         alert(`Optimization completed successfully!\nTotal Cost: $${response.data.total_cost.toLocaleString()}\nItems Optimized: ${response.data.items_optimized}`);
       } else {
+        console.log('Optimization failed, showing alert');
         alert(`Optimization failed: ${response.data.message}`);
       }
     } catch (err: any) {
+      console.error('Optimization error:', err);
       setError(formatApiError(err, 'Optimization failed'));
     } finally {
       setOptimizing(false);

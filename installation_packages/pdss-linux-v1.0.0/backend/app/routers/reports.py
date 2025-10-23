@@ -15,7 +15,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
 from app.database import get_db
-from app.auth import get_current_user
+from app.auth import get_current_user, get_user_projects, require_analytics_access
 from app.models import User, FinalizedDecision, CashflowEvent, Project
 
 router = APIRouter(prefix="/reports", tags=["Reports & Analytics"])
@@ -574,7 +574,7 @@ async def get_reports_data(
     project_ids: Optional[str] = Query(None, description="Comma-separated project IDs"),
     supplier_names: Optional[str] = Query(None, description="Comma-separated supplier names"),
     currency_view: Optional[str] = Query('unified', description="Currency view: 'unified' (IRR) or 'original' (multi-currency)"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_analytics_access()),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -585,15 +585,6 @@ async def get_reports_data(
     # Parse comma-separated values
     project_id_list = [int(x) for x in project_ids.split(',')] if project_ids else None
     supplier_name_list = [x.strip() for x in supplier_names.split(',')] if supplier_names else None
-    
-    # For PMs, filter to only their assigned projects
-    if current_user.role == 'pm':
-        user_project_ids = [p.id for p in current_user.assigned_projects]
-        if project_id_list:
-            # Intersect with user's projects
-            project_id_list = [pid for pid in project_id_list if pid in user_project_ids]
-        else:
-            project_id_list = user_project_ids
     
     # Aggregate all data
     financial_summary = await aggregate_financial_summary(db, start_date, end_date, project_id_list, supplier_name_list)
@@ -628,7 +619,7 @@ async def export_reports_excel(
     project_ids: Optional[str] = Query(None),
     supplier_names: Optional[str] = Query(None),
     currency_view: Optional[str] = Query('unified', description="Currency view: 'unified' (IRR) or 'original' (multi-currency)"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_analytics_access()),
     db: AsyncSession = Depends(get_db)
 ):
     """Export reports data to Excel file."""
@@ -636,14 +627,6 @@ async def export_reports_excel(
     # Get the same data as the main endpoint
     project_id_list = [int(x) for x in project_ids.split(',')] if project_ids else None
     supplier_name_list = [x.strip() for x in supplier_names.split(',')] if supplier_names else None
-    
-    # For PMs, filter to only their assigned projects
-    if current_user.role == 'pm':
-        user_project_ids = [p.id for p in current_user.assigned_projects]
-        if project_id_list:
-            project_id_list = [pid for pid in project_id_list if pid in user_project_ids]
-        else:
-            project_id_list = user_project_ids
     
     financial_summary = await aggregate_financial_summary(db, start_date, end_date, project_id_list, supplier_name_list)
     evm_analytics = await aggregate_evm_analytics(db, start_date, end_date, project_id_list, supplier_name_list)
@@ -776,15 +759,12 @@ async def export_reports_excel(
 
 @router.get("/filters/projects")
 async def get_projects_for_filter(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_analytics_access()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get list of projects for filter dropdown."""
-    if current_user.role == 'pm':
-        projects = current_user.assigned_projects
-    else:
-        result = await db.execute(select(Project).where(Project.is_active == True))
-        projects = result.scalars().all()
+    result = await db.execute(select(Project).where(Project.is_active == True))
+    projects = result.scalars().all()
     
     project_list = [{'id': p.id, 'name': p.name, 'code': p.project_code} for p in projects]
     print(f"📋 DEBUG: Returning {len(project_list)} projects for filter")
@@ -794,7 +774,7 @@ async def get_projects_for_filter(
 @router.get("/filters/suppliers")
 async def get_suppliers_for_filter(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_analytics_access())
 ):
     """Get list of suppliers for filter dropdown."""
     from app.models import ProcurementOption
@@ -816,7 +796,7 @@ async def get_suppliers_for_filter(
 
 @router.get("/data-summary")
 async def get_data_summary(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_analytics_access()),
     db: AsyncSession = Depends(get_db)
 ):
     """

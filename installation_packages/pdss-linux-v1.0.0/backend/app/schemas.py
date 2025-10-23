@@ -151,6 +151,7 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     username: Optional[str] = Field(None, min_length=3, max_length=50)
+    password: Optional[str] = Field(None, min_length=6, description="New password (leave empty to keep current)")
     role: Optional[str] = Field(None, pattern="^(admin|pmo|pm|procurement|finance)$")
     is_active: Optional[bool] = None
 
@@ -269,6 +270,11 @@ class ProjectItemBase(BaseModel):
     expected_cash_in_date: Optional[date] = None
     actual_cash_in_date: Optional[date] = None
     
+    # Finalization tracking (PMO feature)
+    is_finalized: bool = False
+    finalized_by: Optional[int] = None
+    finalized_at: Optional[datetime] = None
+    
     @validator('delivery_options')
     def validate_delivery_options(cls, v):
         if not v or len(v) == 0:
@@ -307,6 +313,11 @@ class ProjectItemUpdate(BaseModel):
     invoice_submission_date: Optional[date] = None
     expected_cash_in_date: Optional[date] = None
     actual_cash_in_date: Optional[date] = None
+    
+    # Finalization tracking (PMO feature)
+    is_finalized: Optional[bool] = None
+    finalized_by: Optional[int] = None
+    finalized_at: Optional[datetime] = None
 
 
 class ProjectItem(ProjectItemBase):
@@ -316,6 +327,12 @@ class ProjectItem(ProjectItemBase):
     updated_at: Optional[datetime] = None
     
     model_config = {"from_attributes": True}
+
+
+class ProjectItemFinalize(BaseModel):
+    """Schema for finalizing a project item (PMO only)"""
+    is_finalized: bool = True
+    finalized_at: Optional[datetime] = None  # Will be set by backend
 
 
 # Procurement Option Schemas
@@ -351,10 +368,13 @@ class ProcurementOptionBase(BaseModel):
     base_cost: Decimal = Field(..., gt=0)
     currency_id: int = Field(..., description="Currency ID for this procurement option")
     shipping_cost: Optional[Decimal] = Field(0, ge=0, description="Shipping cost in same currency as base_cost")
-    lomc_lead_time: int = Field(0, ge=0)
+    delivery_option_id: Optional[int] = Field(None, description="Link to delivery option from project item")
+    lomc_lead_time: int = Field(0, ge=0, description="Lead time in days (deprecated - use delivery_option)")
+    expected_delivery_date: Optional[date] = Field(None, description="Expected delivery date (auto-filled from delivery_option)")
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
     payment_terms: Union[PaymentTermsCash, PaymentTermsInstallments]
+    is_finalized: Optional[bool] = Field(False, description="Mark option as finalized during creation")
 
 
 class ProcurementOptionCreate(ProcurementOptionBase):
@@ -366,7 +386,9 @@ class ProcurementOptionUpdate(BaseModel):
     supplier_name: Optional[str] = Field(None, min_length=1)
     base_cost: Optional[Decimal] = Field(None, gt=0)
     shipping_cost: Optional[Decimal] = Field(None, ge=0)
-    lomc_lead_time: Optional[int] = Field(None, ge=0)
+    delivery_option_id: Optional[int] = Field(None, description="Link to delivery option from project item")
+    lomc_lead_time: Optional[int] = Field(None, ge=0, description="Lead time in days (deprecated)")
+    expected_delivery_date: Optional[date] = Field(None, description="Expected delivery date (auto-filled from delivery_option)")
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
     payment_terms: Optional[Union[PaymentTermsCash, PaymentTermsInstallments]] = None

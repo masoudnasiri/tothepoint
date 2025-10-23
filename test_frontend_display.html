@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Frontend Display</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <h1>Test Frontend Display</h1>
+    <div id="results"></div>
+    
+    <script>
+        const BASE_URL = "http://localhost:8000";
+        
+        async function testDisplay() {
+            const resultsDiv = document.getElementById('results');
+            
+            try {
+                // Login
+                console.log('Logging in...');
+                const loginResponse = await axios.post(`${BASE_URL}/auth/login`, {
+                    username: 'finance1',
+                    password: 'finance123'
+                });
+                const token = loginResponse.data.access_token;
+                const headers = { Authorization: `Bearer ${token}` };
+                
+                // Get Results (what frontend calls)
+                console.log('Getting results...');
+                const resultsResponse = await axios.get(`${BASE_URL}/finance/optimization-results`, { headers });
+                
+                resultsDiv.innerHTML += `
+                    <h2>Optimization Results (${resultsResponse.data.length} results):</h2>
+                `;
+                
+                // Group results by run_id (like frontend does)
+                const groupedResults = resultsResponse.data.reduce((acc, result) => {
+                    const runId = result.run_id;
+                    if (!acc[runId]) {
+                        acc[runId] = {
+                            run_id: runId,
+                            run_timestamp: result.run_timestamp,
+                            results: [],
+                            total_cost: 0,
+                        };
+                    }
+                    acc[runId].results.push(result);
+                    acc[runId].total_cost += parseFloat(String(result.final_cost)) || 0;
+                    return acc;
+                }, {});
+                
+                const runIds = Object.keys(groupedResults).sort((a, b) => 
+                    new Date(groupedResults[b].run_timestamp).getTime() - new Date(groupedResults[a].run_timestamp).getTime()
+                );
+                
+                resultsDiv.innerHTML += `
+                    <p>Run IDs found: ${runIds.length}</p>
+                    <p>Run IDs: ${runIds.join(', ')}</p>
+                `;
+                
+                // Show each run
+                runIds.forEach(runId => {
+                    const run = groupedResults[runId];
+                    resultsDiv.innerHTML += `
+                        <div style="border: 1px solid #ccc; margin: 10px; padding: 10px;">
+                            <h3>Run: ${runId}</h3>
+                            <p>Timestamp: ${run.run_timestamp}</p>
+                            <p>Results Count: ${run.results.length}</p>
+                            <p>Total Cost: ${run.total_cost}</p>
+                            <p>Items: ${run.results.map(r => r.item_code).join(', ')}</p>
+                        </div>
+                    `;
+                });
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultsDiv.innerHTML += `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Run test when page loads
+        testDisplay();
+    </script>
+</body>
+</html>

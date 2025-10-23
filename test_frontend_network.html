@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Frontend Network</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+    <h1>Test Frontend Network</h1>
+    <div id="results"></div>
+    <button onclick="testOptimization()">Test Optimization</button>
+    
+    <script>
+        const BASE_URL = "http://localhost:8000";
+        
+        async function testOptimization() {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<p>Testing optimization...</p>';
+            
+            try {
+                // Login
+                console.log('Logging in...');
+                const loginResponse = await axios.post(`${BASE_URL}/auth/login`, {
+                    username: 'finance1',
+                    password: 'finance123'
+                });
+                const token = loginResponse.data.access_token;
+                const headers = { Authorization: `Bearer ${token}` };
+                
+                // Test optimization
+                console.log('Running optimization...');
+                const optimizationRequest = {
+                    max_time_slots: 24,
+                    time_limit_seconds: 300
+                };
+                
+                const optimizationResponse = await axios.post(`${BASE_URL}/finance/optimize`, optimizationRequest, { headers });
+                
+                resultsDiv.innerHTML = `
+                    <h2>Optimization Response:</h2>
+                    <p>Status: ${optimizationResponse.data.status}</p>
+                    <p>Total Cost: ${optimizationResponse.data.total_cost}</p>
+                    <p>Items Optimized: ${optimizationResponse.data.items_optimized}</p>
+                    <p>Message: ${optimizationResponse.data.message}</p>
+                `;
+                
+                // Check if frontend should show alert
+                if (optimizationResponse.data.status === 'OPTIMAL' || optimizationResponse.data.status === 'FEASIBLE') {
+                    resultsDiv.innerHTML += `
+                        <div style="background: green; color: white; padding: 10px; margin: 10px 0;">
+                            <strong>Frontend should show alert:</strong><br>
+                            "Optimization completed successfully!<br>
+                            Total Cost: $${optimizationResponse.data.total_cost.toLocaleString()}<br>
+                            Items Optimized: ${optimizationResponse.data.items_optimized}"
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML += `
+                        <div style="background: red; color: white; padding: 10px; margin: 10px 0;">
+                            <strong>Frontend should show alert:</strong><br>
+                            "Optimization failed: ${optimizationResponse.data.message}"
+                        </div>
+                    `;
+                }
+                
+                // Test results
+                console.log('Getting results...');
+                const resultsResponse = await axios.get(`${BASE_URL}/finance/optimization-results`, { headers });
+                
+                resultsDiv.innerHTML += `
+                    <h2>Results:</h2>
+                    <p>Results Count: ${resultsResponse.data.length}</p>
+                `;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                resultsDiv.innerHTML += `
+                    <div style="background: red; color: white; padding: 10px; margin: 10px 0;">
+                        <strong>Error:</strong> ${error.message}<br>
+                        <strong>Response:</strong> ${error.response?.data ? JSON.stringify(error.response.data) : 'No response data'}<br>
+                        <strong>Status:</strong> ${error.response?.status || 'No status'}
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

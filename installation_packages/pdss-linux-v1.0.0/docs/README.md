@@ -18,9 +18,9 @@
 # 2. Access the application
 http://localhost:3000
 
-# 3. Default credentials
+# 3. Login and change default password immediately
 Username: admin
-Password: admin123
+⚠️  Change password after first login
 ```
 
 ### **For Developers:**

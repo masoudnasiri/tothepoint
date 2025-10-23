@@ -148,6 +148,11 @@ class ProjectItem(Base):
     expected_cash_in_date = Column(Date, nullable=True)
     actual_cash_in_date = Column(Date, nullable=True)
     
+    # Finalization tracking (PMO feature)
+    is_finalized = Column(Boolean, default=False, nullable=False)
+    finalized_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    finalized_at = Column(DateTime(timezone=True), nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -212,7 +217,9 @@ class ProcurementOption(Base):
     base_cost = Column(Numeric(12, 2), nullable=True)  # Keep for migration
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=True)  # Keep for migration
     
-    lomc_lead_time = Column(Integer, default=0)  # Lead time in time slots
+    lomc_lead_time = Column(Integer, default=0)  # Lead time in days (deprecated - use expected_delivery_date)
+    expected_delivery_date = Column(Date, nullable=True)  # Expected delivery date from supplier
+    delivery_option_id = Column(Integer, ForeignKey("delivery_options.id"), nullable=True)  # Link to project item's delivery option
     discount_bundle_threshold = Column(Integer)
     discount_bundle_percent = Column(Numeric(5, 2))
     payment_terms = Column(JSON, nullable=False)  # Structured JSON for payment terms

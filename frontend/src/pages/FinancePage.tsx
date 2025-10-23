@@ -43,6 +43,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { financeAPI, excelAPI, currencyAPI } from '../services/api.ts';
 import { BudgetData, BudgetDataCreate, Currency } from '../types/index.ts';
 import { CurrencyManagementPage } from './CurrencyManagementPage.tsx';
+import { useTranslation } from 'react-i18next';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -67,6 +68,7 @@ function TabPanel(props: TabPanelProps) {
 
 export const FinancePage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
   const [budgetData, setBudgetData] = useState<BudgetData[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
@@ -270,23 +272,23 @@ export const FinancePage: React.FC = () => {
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Finance Management</Typography>
+        <Typography variant="h4">{t('finance.title')}</Typography>
       </Box>
 
       <Paper sx={{ width: '100%' }}>
         <Tabs
           value={tabValue}
           onChange={(_, newValue) => setTabValue(newValue)}
-          aria-label="finance management tabs"
+          aria-label={t('finance.financeManagementTabs')}
         >
           <Tab 
             icon={<AccountBalanceIcon />} 
-            label="Budget Management" 
+            label={t('finance.budgetManagement')} 
             iconPosition="start"
           />
           <Tab 
             icon={<CurrencyExchangeIcon />} 
-            label="Currency Management" 
+            label={t('finance.currencyManagement')} 
             iconPosition="start"
           />
         </Tabs>
@@ -294,7 +296,7 @@ export const FinancePage: React.FC = () => {
         {/* Budget Management Tab */}
         <TabPanel value={tabValue} index={0}>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-            <Typography variant="h5">Budget Management</Typography>
+            <Typography variant="h5">{t('finance.budgetManagement')}</Typography>
         {(user?.role === 'finance' || user?.role === 'admin') && (
           <Box>
             <Button
@@ -357,12 +359,12 @@ export const FinancePage: React.FC = () => {
         </Typography>
         <Box display="flex" gap={2} flexWrap="wrap">
           <Chip
-            label={`Total Periods: ${budgetData.length}`}
+            label={`${t('finance.totalPeriods')}: ${budgetData.length}`}
             color="primary"
             variant="outlined"
           />
           <Chip
-            label={`Base Budget (IRR): ${formatIRR(calculateTotalBudget())}`}
+            label={`${t('finance.baseBudget')} (IRR): ${formatIRR(calculateTotalBudget())}`}
             color="success"
             variant="outlined"
           />
@@ -466,7 +468,7 @@ export const FinancePage: React.FC = () => {
         <DialogContent>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <DatePicker
-              label="Budget Date"
+              label={t('finance.budgetDate')}
               value={new Date(formData.budget_date)}
               onChange={(newValue) => {
                 if (newValue) {
@@ -479,7 +481,7 @@ export const FinancePage: React.FC = () => {
           
           <TextField
             margin="dense"
-            label="Base Budget (IRR)"
+            label={`${t('finance.baseBudget')} (IRR)`}
             type="number"
             fullWidth
             variant="outlined"
@@ -503,7 +505,7 @@ export const FinancePage: React.FC = () => {
                 return (
                   <Box key={code} display="flex" gap={1} alignItems="center" mb={1}>
                     <TextField
-                      label={`${code} Budget`}
+                      label={`${code} ${t('finance.budget')}`}
                       type="number"
                       fullWidth
                       variant="outlined"
@@ -531,7 +533,7 @@ export const FinancePage: React.FC = () => {
           <FormControl fullWidth margin="dense">
             <InputLabel>Add Currency Budget</InputLabel>
             <Select
-              label="Add Currency Budget"
+              label={t('finance.addCurrencyBudget')}
               value=""
               onChange={(e) => {
                 const code = e.target.value;
@@ -564,7 +566,7 @@ export const FinancePage: React.FC = () => {
         <DialogContent>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <DatePicker
-              label="Budget Date"
+              label={t('finance.budgetDate')}
               value={new Date(formData.budget_date)}
               onChange={(newValue) => {
                 if (newValue) {
@@ -578,7 +580,7 @@ export const FinancePage: React.FC = () => {
           
           <TextField
             margin="dense"
-            label="Base Budget (IRR)"
+            label={`${t('finance.baseBudget')} (IRR)`}
             type="number"
             fullWidth
             variant="outlined"
@@ -602,7 +604,7 @@ export const FinancePage: React.FC = () => {
                 return (
                   <Box key={code} display="flex" gap={1} alignItems="center" mb={1}>
                     <TextField
-                      label={`${code} Budget`}
+                      label={`${code} ${t('finance.budget')}`}
                       type="number"
                       fullWidth
                       variant="outlined"
@@ -630,7 +632,7 @@ export const FinancePage: React.FC = () => {
           <FormControl fullWidth margin="dense">
             <InputLabel>Add Currency Budget</InputLabel>
             <Select
-              label="Add Currency Budget"
+              label={t('finance.addCurrencyBudget')}
               value=""
               onChange={(e) => {
                 const code = e.target.value;

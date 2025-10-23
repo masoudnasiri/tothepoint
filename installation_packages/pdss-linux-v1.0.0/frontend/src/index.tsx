@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import App from './App.tsx';
+import './responsive.css';
 
 const theme = createTheme({
   palette: {
@@ -16,6 +17,37 @@ const theme = createTheme({
   },
   typography: {
     fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif',
+  },
+  breakpoints: {
+    values: {
+      xs: 0,
+      sm: 600,
+      md: 960,
+      lg: 1280,
+      xl: 1920,
+    },
+  },
+  components: {
+    MuiTableCell: {
+      styleOverrides: {
+        root: {
+          '@media (max-width: 600px)': {
+            padding: '8px 4px',
+            fontSize: '0.75rem',
+          },
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          '@media (max-width: 600px)': {
+            padding: '6px 12px',
+            fontSize: '0.875rem',
+          },
+        },
+      },
+    },
   },
 });
 

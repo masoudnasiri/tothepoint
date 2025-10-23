@@ -73,7 +73,23 @@ export const UsersPage: React.FC = () => {
       resetForm();
       fetchUsers();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create user');
+      // Handle validation errors (Pydantic returns array of error objects)
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          // Pydantic validation errors
+          const errorMessages = detail.map((e: any) => 
+            `${e.loc?.join(' -> ') || 'Field'}: ${e.msg}`
+          ).join('; ');
+          setError(errorMessages);
+        } else if (typeof detail === 'string') {
+          setError(detail);
+        } else {
+          setError('Failed to create user - invalid data');
+        }
+      } else {
+        setError('Failed to create user');
+      }
     }
   };
 
@@ -82,8 +98,8 @@ export const UsersPage: React.FC = () => {
     
     try {
       const updateData = { ...formData };
-      delete updateData.password; // Don't update password if empty
-      if (!updateData.password) {
+      // Only include password if it's not empty
+      if (!updateData.password || updateData.password.trim() === '') {
         delete updateData.password;
       }
       
@@ -93,7 +109,23 @@ export const UsersPage: React.FC = () => {
       resetForm();
       fetchUsers();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update user');
+      // Handle validation errors (Pydantic returns array of error objects)
+      if (err.response?.data?.detail) {
+        const detail = err.response.data.detail;
+        if (Array.isArray(detail)) {
+          // Pydantic validation errors
+          const errorMessages = detail.map((e: any) => 
+            `${e.loc?.join(' -> ') || 'Field'}: ${e.msg}`
+          ).join('; ');
+          setError(errorMessages);
+        } else if (typeof detail === 'string') {
+          setError(detail);
+        } else {
+          setError('Failed to update user - invalid data');
+        }
+      } else {
+        setError('Failed to update user');
+      }
     }
   };
 

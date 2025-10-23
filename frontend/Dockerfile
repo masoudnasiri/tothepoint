@@ -2,13 +2,13 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json ./
 
 # Install dependencies
 RUN npm install
 
-# Copy source code
+# Copy source code (excluding node_modules via .dockerignore)
 COPY . .
 
 EXPOSE 3000
