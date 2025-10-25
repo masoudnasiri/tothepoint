@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Typography,
@@ -55,6 +56,7 @@ import { ProjectItem, ProjectItemCreate, ItemMaster } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
 export const ProjectItemsPage: React.FC = () => {
+  const { t } = useTranslation();
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();

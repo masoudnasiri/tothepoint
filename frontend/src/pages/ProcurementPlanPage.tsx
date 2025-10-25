@@ -344,14 +344,14 @@ export const ProcurementPlanPage: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4" component="h1">
           <ShippingIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-          Procurement Plan & Delivery Tracking
+          {t('procurementPlan.titleWithDelivery')}
         </Typography>
         <Button
           variant="outlined"
           startIcon={<ExportIcon />}
           onClick={handleExport}
         >
-          Export to Excel
+          {t('procurementPlan.exportToExcel')}
         </Button>
       </Box>
 
@@ -389,28 +389,28 @@ export const ProcurementPlanPage: React.FC = () => {
           </Grid>
           <Grid item xs={12} md={4}>
             <FormControl fullWidth>
-              <InputLabel>Delivery Status</InputLabel>
+              <InputLabel>{t('procurementPlan.deliveryStatus')}</InputLabel>
               <Select
                 value={statusFilter}
                 label={t('procurementPlan.deliveryStatus')}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
-                <MenuItem value="">All Statuses</MenuItem>
-                <MenuItem value="AWAITING_DELIVERY">Awaiting Delivery</MenuItem>
-                <MenuItem value="CONFIRMED_BY_PROCUREMENT">Confirmed by Procurement</MenuItem>
-                <MenuItem value="DELIVERY_COMPLETE">Delivery Complete</MenuItem>
+                <MenuItem value="">{t('procurementPlan.allStatuses')}</MenuItem>
+                <MenuItem value="AWAITING_DELIVERY">{t('procurementPlan.awaitingDelivery')}</MenuItem>
+                <MenuItem value="CONFIRMED_BY_PROCUREMENT">{t('procurementPlan.confirmedByProcurement')}</MenuItem>
+                <MenuItem value="DELIVERY_COMPLETE">{t('procurementPlan.deliveryComplete')}</MenuItem>
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} md={4}>
             <FormControl fullWidth>
-              <InputLabel>Project</InputLabel>
+              <InputLabel>{t('procurementPlan.project')}</InputLabel>
               <Select
                 value={projectFilter}
                 label={t('procurementPlan.project')}
                 onChange={(e) => setProjectFilter(e.target.value as number | '')}
               >
-                <MenuItem value="">All Projects</MenuItem>
+                <MenuItem value="">{t('procurementPlan.allProjects')}</MenuItem>
                 {projects.map((project) => (
                   <MenuItem key={project.id} value={project.id}>
                     {project.name}
@@ -458,18 +458,18 @@ export const ProcurementPlanPage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Item Code</TableCell>
-              <TableCell>Item Name</TableCell>
-              <TableCell>Project</TableCell>
-              {isProcurementTeam && <TableCell>Supplier</TableCell>}
-              <TableCell align="right">Quantity</TableCell>
-              {isProcurementTeam && <TableCell align="right">Cost</TableCell>}
-              <TableCell>Planned Delivery</TableCell>
-              <TableCell>Actual Delivery</TableCell>
-              {isProcurementTeam && <TableCell>Invoice Status</TableCell>}
-              {isProcurementTeam && <TableCell>Payment Status</TableCell>}
-              <TableCell>Delivery Status</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell>{t('procurementPlan.itemCode')}</TableCell>
+              <TableCell>{t('procurementPlan.itemName')}</TableCell>
+              <TableCell>{t('procurementPlan.project')}</TableCell>
+              {isProcurementTeam && <TableCell>{t('procurementPlan.supplier')}</TableCell>}
+              <TableCell align="right">{t('procurementPlan.quantity')}</TableCell>
+              {isProcurementTeam && <TableCell align="right">{t('procurementPlan.cost')}</TableCell>}
+              <TableCell>{t('procurementPlan.plannedDelivery')}</TableCell>
+              <TableCell>{t('procurementPlan.actualDelivery')}</TableCell>
+              {isProcurementTeam && <TableCell>{t('procurementPlan.invoiceStatus')}</TableCell>}
+              {isProcurementTeam && <TableCell>{t('procurementPlan.paymentStatus')}</TableCell>}
+              <TableCell>{t('procurementPlan.deliveryStatus')}</TableCell>
+              <TableCell align="center">{t('procurementPlan.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -536,7 +536,7 @@ export const ProcurementPlanPage: React.FC = () => {
                       size="small"
                       color="primary"
                       onClick={() => handleViewItem(item)}
-                      title="View Details"
+                      title={t('procurementPlan.viewDetails')}
                     >
                       <ViewIcon />
                     </IconButton>
@@ -550,7 +550,7 @@ export const ProcurementPlanPage: React.FC = () => {
                           setSelectedItem(item);
                           setConfirmDialogOpen(true);
                         }}
-                        title="Confirm Delivery"
+                        title={t('procurementPlan.confirmDelivery')}
                       >
                         <ConfirmIcon />
                       </IconButton>
@@ -565,7 +565,7 @@ export const ProcurementPlanPage: React.FC = () => {
                           setSelectedItem(item);
                           setAcceptDialogOpen(true);
                         }}
-                        title="Accept Delivery"
+                        title={t('procurementPlan.acceptDelivery')}
                       >
                         <AcceptIcon />
                       </IconButton>
@@ -584,7 +584,7 @@ export const ProcurementPlanPage: React.FC = () => {
                           });
                           setInvoiceDialogOpen(true);
                         }}
-                        title="Enter Invoice"
+                        title={t('procurementPlan.enterInvoice')}
                       >
                         <InvoiceIcon />
                       </IconButton>
@@ -599,7 +599,7 @@ export const ProcurementPlanPage: React.FC = () => {
 
       {/* View Details Dialog */}
       <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Item Details</DialogTitle>
+        <DialogTitle>{t('procurementPlan.itemDetails')}</DialogTitle>
         <DialogContent>
           {selectedItem && (
             <Box sx={{ pt: 2 }}>
@@ -613,47 +613,47 @@ export const ProcurementPlanPage: React.FC = () => {
                   <Typography variant="body1" gutterBottom>{selectedItem.item_name || 'N/A'}</Typography>
                 </Grid>
                 <Grid item xs={12}>
-                  <Typography variant="subtitle2" color="textSecondary">Description</Typography>
-                  <Typography variant="body1" gutterBottom>{selectedItem.item_description || 'No description'}</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.description')}</Typography>
+                  <Typography variant="body1" gutterBottom>{selectedItem.item_description || t('procurementPlan.noDescription')}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Project</Typography>
-                  <Typography variant="body1" gutterBottom>{selectedItem.project_name || 'N/A'}</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.project')}</Typography>
+                  <Typography variant="body1" gutterBottom>{selectedItem.project_name || t('procurementPlan.nA')}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Quantity</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.quantity')}</Typography>
                   <Typography variant="body1" gutterBottom>{selectedItem.quantity}</Typography>
                 </Grid>
                 
                 {isProcurementTeam && (
                   <>
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Supplier</Typography>
-                      <Typography variant="body1" gutterBottom>{selectedItem.supplier_name || 'N/A'}</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.supplier')}</Typography>
+                      <Typography variant="body1" gutterBottom>{selectedItem.supplier_name || t('procurementPlan.nA')}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Final Cost</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.finalCost')}</Typography>
                       <Typography variant="body1" gutterBottom>
                         {formatCurrencyWithCode(selectedItem.final_cost, selectedItem.final_cost_currency)}
                       </Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Purchase Date</Typography>
-                      <Typography variant="body1" gutterBottom>{selectedItem.purchase_date || 'N/A'}</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.purchaseDate')}</Typography>
+                      <Typography variant="body1" gutterBottom>{selectedItem.purchase_date || t('procurementPlan.nA')}</Typography>
                     </Grid>
                   </>
                 )}
                 
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Planned Delivery</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.plannedDelivery')}</Typography>
                   <Typography variant="body1" gutterBottom>{selectedItem.delivery_date}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Actual Delivery</Typography>
-                  <Typography variant="body1" gutterBottom>{selectedItem.actual_delivery_date || 'Not yet delivered'}</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.actualDelivery')}</Typography>
+                  <Typography variant="body1" gutterBottom>{selectedItem.actual_delivery_date || t('procurementPlan.notYetDelivered')}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle2" color="textSecondary">Delivery Status</Typography>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.deliveryStatus')}</Typography>
                   <Chip
                     label={getStatusLabel(selectedItem.delivery_status)}
                     color={getStatusColor(selectedItem.delivery_status)}
@@ -671,10 +671,10 @@ export const ProcurementPlanPage: React.FC = () => {
                     </Grid>
                     
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Invoice Status</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceStatus')}</Typography>
                       {selectedItem.actual_invoice_issue_date ? (
                         <Box>
-                          <Chip label="Invoiced" color="success" size="small" sx={{ mb: 1 }} />
+                          <Chip label={t('procurementPlan.invoiced')} color="success" size="small" sx={{ mb: 1 }} />
                           <Typography variant="body2">
                             Issue Date: {selectedItem.actual_invoice_issue_date}
                           </Typography>
@@ -693,10 +693,10 @@ export const ProcurementPlanPage: React.FC = () => {
                     </Grid>
                     
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Payment Status</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.paymentStatus')}</Typography>
                       {selectedItem.actual_payment_date ? (
                         <Box>
-                          <Chip label="Paid" color="success" size="small" sx={{ mb: 1 }} />
+                          <Chip label={t('procurementPlan.paid')} color="success" size="small" sx={{ mb: 1 }} />
                           <Typography variant="body2">
                             Payment Date: {selectedItem.actual_payment_date}
                           </Typography>
@@ -713,21 +713,21 @@ export const ProcurementPlanPage: React.FC = () => {
                 
                 {selectedItem.serial_number && (
                   <Grid item xs={12} md={6}>
-                    <Typography variant="subtitle2" color="textSecondary">Serial Number</Typography>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.serialNumber')}</Typography>
                     <Typography variant="body1" gutterBottom>{selectedItem.serial_number}</Typography>
                   </Grid>
                 )}
                 
                 {isProcurementTeam && selectedItem.procurement_delivery_notes && (
                   <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="textSecondary">Procurement Notes</Typography>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.procurementNotes')}</Typography>
                     <Typography variant="body1" gutterBottom>{selectedItem.procurement_delivery_notes}</Typography>
                   </Grid>
                 )}
                 
                 {isPM && selectedItem.pm_acceptance_notes && (
                   <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="textSecondary">PM Acceptance Notes</Typography>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.pmAcceptanceNotes')}</Typography>
                     <Typography variant="body1" gutterBottom>{selectedItem.pm_acceptance_notes}</Typography>
                   </Grid>
                 )}
@@ -736,19 +736,19 @@ export const ProcurementPlanPage: React.FC = () => {
                   <>
                     <Grid item xs={12}><Divider sx={{ my: 1 }} /></Grid>
                     <Grid item xs={12}>
-                      <Typography variant="h6" gutterBottom>Invoice Information</Typography>
+                      <Typography variant="h6" gutterBottom>{t('procurementPlan.invoiceInformation')}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Invoice Issue Date</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceIssueDate')}</Typography>
                       <Typography variant="body1" gutterBottom>{selectedItem.actual_invoice_issue_date}</Typography>
                     </Grid>
                     <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">Invoice Amount</Typography>
+                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceAmount')}</Typography>
                       <Typography variant="body1" gutterBottom>${selectedItem.actual_invoice_amount?.toLocaleString() || 'N/A'}</Typography>
                     </Grid>
                     {selectedItem.actual_invoice_received_date && (
                       <Grid item xs={12} md={6}>
-                        <Typography variant="subtitle2" color="textSecondary">Invoice Received Date</Typography>
+                        <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceReceivedDate')}</Typography>
                         <Typography variant="body1" gutterBottom>{selectedItem.actual_invoice_received_date}</Typography>
                       </Grid>
                     )}
@@ -759,13 +759,13 @@ export const ProcurementPlanPage: React.FC = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
+          <Button onClick={() => setViewDialogOpen(false)}>{t('procurementPlan.close')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Confirm Delivery Dialog (Procurement Team) */}
       <Dialog open={confirmDialogOpen} onClose={() => setConfirmDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Confirm Supplier Delivery</DialogTitle>
+        <DialogTitle>{t('procurementPlan.confirmSupplierDelivery')}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
             <TextField
@@ -805,21 +805,21 @@ export const ProcurementPlanPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setConfirmDialogOpen(false)}>{t('procurementPlan.cancel')}</Button>
           <Button
             variant="contained"
             color="success"
             onClick={handleConfirmDelivery}
             disabled={!confirmData.is_correct_item}
           >
-            Confirm Delivery
+            {t('procurementPlan.confirm')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Accept Delivery Dialog (PM) */}
       <Dialog open={acceptDialogOpen} onClose={() => setAcceptDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Accept Delivery for Project</DialogTitle>
+        <DialogTitle>{t('procurementPlan.acceptDeliveryForProject')}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
             <FormControlLabel
@@ -852,21 +852,21 @@ export const ProcurementPlanPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAcceptDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setAcceptDialogOpen(false)}>{t('procurementPlan.cancel')}</Button>
           <Button
             variant="contained"
             color="info"
             onClick={handleAcceptDelivery}
             disabled={!acceptData.is_accepted_for_project}
           >
-            Accept Delivery
+            {t('procurementPlan.acceptDelivery')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Enter Invoice Dialog (Procurement Team) */}
       <Dialog open={invoiceDialogOpen} onClose={() => setInvoiceDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Enter Invoice Data</DialogTitle>
+        <DialogTitle>{t('procurementPlan.enterInvoiceData')}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
             <Alert severity="info" sx={{ mb: 2 }}>
@@ -874,7 +874,7 @@ export const ProcurementPlanPage: React.FC = () => {
             </Alert>
             <TextField
               fullWidth
-              label="Invoice Issue Date"
+              label={t('procurementPlan.invoiceIssueDate')}
               type="date"
               value={invoiceData.actual_invoice_issue_date}
               onChange={(e) => setInvoiceData({ ...invoiceData, actual_invoice_issue_date: e.target.value })}
@@ -884,7 +884,7 @@ export const ProcurementPlanPage: React.FC = () => {
             />
             <TextField
               fullWidth
-              label="Invoice Amount"
+              label={t('procurementPlan.invoiceAmount')}
               type="number"
               value={invoiceData.actual_invoice_amount}
               onChange={(e) => setInvoiceData({ ...invoiceData, actual_invoice_amount: parseFloat(e.target.value) })}
@@ -894,17 +894,17 @@ export const ProcurementPlanPage: React.FC = () => {
             />
             <TextField
               fullWidth
-              label="Invoice Received Date (Optional)"
+              label={t('procurementPlan.invoiceReceivedDateOptional')}
               type="date"
               value={invoiceData.actual_invoice_received_date}
               onChange={(e) => setInvoiceData({ ...invoiceData, actual_invoice_received_date: e.target.value })}
               InputLabelProps={{ shrink: true }}
               sx={{ mb: 2 }}
-              helperText="When payment was actually received from customer"
+              helperText={t('procurementPlan.whenPaymentReceived')}
             />
             <TextField
               fullWidth
-              label="Notes (Optional)"
+              label={t('procurementPlan.notesOptional')}
               multiline
               rows={3}
               value={invoiceData.notes}
@@ -913,13 +913,13 @@ export const ProcurementPlanPage: React.FC = () => {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setInvoiceDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setInvoiceDialogOpen(false)}>{t('procurementPlan.cancel')}</Button>
           <Button
             variant="contained"
             color="warning"
             onClick={handleEnterInvoice}
           >
-            Enter Invoice
+            {t('procurementPlan.enterInvoice')}
           </Button>
         </DialogActions>
       </Dialog>

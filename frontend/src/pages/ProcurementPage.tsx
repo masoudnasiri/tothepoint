@@ -689,7 +689,7 @@ export const ProcurementPage: React.FC = () => {
               sx={{ mr: 1 }}
               title={t('procurement.refreshToSeeItems')}
             >
-              Refresh
+              {t('procurement.refresh')}
             </Button>
             <Button
               variant="outlined"
@@ -697,7 +697,7 @@ export const ProcurementPage: React.FC = () => {
               onClick={handleDownloadTemplate}
               sx={{ mr: 1 }}
             >
-              Download Template
+              {t('procurement.downloadTemplate')}
             </Button>
             <Button
               variant="outlined"
@@ -705,7 +705,7 @@ export const ProcurementPage: React.FC = () => {
               startIcon={<UploadIcon />}
               sx={{ mr: 1 }}
             >
-              Import Options
+              {t('procurement.importOptions')}
               <input
                 type="file"
                 hidden
@@ -719,7 +719,7 @@ export const ProcurementPage: React.FC = () => {
               onClick={handleExportOptions}
               sx={{ mr: 1 }}
             >
-              Export Options
+              {t('procurement.exportOptions')}
             </Button>
             <Button
               variant="contained"
@@ -729,7 +729,7 @@ export const ProcurementPage: React.FC = () => {
               disabled={bulkUpdating !== null || itemCodes.length === 0}
               sx={{ mr: 1 }}
             >
-              {bulkUpdating === 'PAGE_BULK_UPDATE' ? 'Finalizing...' : 'Finalize All Items on Page'}
+              {bulkUpdating === 'PAGE_BULK_UPDATE' ? t('procurement.finalizing') : t('procurement.finalizeAllItemsOnPage')}
             </Button>
           </Box>
         )}
@@ -745,7 +745,7 @@ export const ProcurementPage: React.FC = () => {
       {summaryStats && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            📊 Procurement Summary
+            📊 {t('procurement.procurementSummary')}
           </Typography>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6} md={3}>
@@ -787,7 +787,7 @@ export const ProcurementPage: React.FC = () => {
       {/* Filters and Search */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          🔍 Filters & Search
+          🔍 {t('procurement.filtersAndSearch')}
         </Typography>
         <Grid container spacing={2}>
           {/* Search */}
@@ -807,16 +807,16 @@ export const ProcurementPage: React.FC = () => {
           {/* Project Filter */}
           <Grid item xs={12} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Projects</InputLabel>
+              <InputLabel>{t('procurement.projects')}</InputLabel>
               <Select
                 multiple
                 value={selectedProjects}
                 onChange={(e) => setSelectedProjects(e.target.value as number[])}
-                renderValue={(selected) => `${selected.length} selected`}
+                renderValue={(selected) => `${selected.length} ${t('procurement.selected')}`}
               >
                 {itemsWithDetails.map((item) => (
                   <MenuItem key={item.project_id} value={item.project_id}>
-                    Project {item.project_id}
+                    {t('procurement.project')} {item.project_id}
                   </MenuItem>
                 ))}
               </Select>
@@ -826,12 +826,12 @@ export const ProcurementPage: React.FC = () => {
           {/* Supplier Filter */}
           <Grid item xs={12} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Suppliers</InputLabel>
+              <InputLabel>{t('procurement.suppliers')}</InputLabel>
               <Select
                 multiple
                 value={selectedSuppliers}
                 onChange={(e) => setSelectedSuppliers(e.target.value as string[])}
-                renderValue={(selected) => `${selected.length} selected`}
+                renderValue={(selected) => `${selected.length} ${t('procurement.selected')}`}
               >
                 {summaryStats?.suppliers.map((supplier: string) => (
                   <MenuItem key={supplier} value={supplier}>
@@ -845,12 +845,12 @@ export const ProcurementPage: React.FC = () => {
           {/* Currency Filter */}
           <Grid item xs={12} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Currencies</InputLabel>
+              <InputLabel>{t('procurement.currencies')}</InputLabel>
               <Select
                 multiple
                 value={selectedCurrencies}
                 onChange={(e) => setSelectedCurrencies(e.target.value as string[])}
-                renderValue={(selected) => `${selected.length} selected`}
+                renderValue={(selected) => `${selected.length} ${t('procurement.selected')}`}
               >
                 {summaryStats?.currencies.map((currency: string) => (
                   <MenuItem key={currency} value={currency}>
@@ -864,14 +864,14 @@ export const ProcurementPage: React.FC = () => {
           {/* Finalized Filter */}
           <Grid item xs={12} md={2}>
             <FormControl fullWidth>
-              <InputLabel>Status</InputLabel>
+              <InputLabel>{t('procurement.status')}</InputLabel>
               <Select
                 value={finalizedFilter}
                 onChange={(e) => setFinalizedFilter(e.target.value)}
               >
-                <MenuItem value="all">All Options</MenuItem>
-                <MenuItem value="finalized">Finalized Only</MenuItem>
-                <MenuItem value="not_finalized">Not Finalized</MenuItem>
+                <MenuItem value="all">{t('procurement.allOptions')}</MenuItem>
+                <MenuItem value="finalized">{t('procurement.finalizedOnly')}</MenuItem>
+                <MenuItem value="not_finalized">{t('procurement.notFinalized')}</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -904,27 +904,26 @@ export const ProcurementPage: React.FC = () => {
 
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2">
-          ℹ️ <strong>Item Lifecycle:</strong> Items with finalized (LOCKED) decisions are automatically removed from this list. 
-          They will reappear if the decision is reverted by Finance team.
+          ℹ️ <strong>{t('procurement.itemLifecycle')}</strong>
         </Typography>
       </Alert>
 
       {itemCodes.length === 0 ? (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h6" color="text.secondary" gutterBottom>
-            No Items Available
+            {t('procurement.noItemsAvailable')}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            All items have finalized decisions or no project items exist yet.
+            {t('procurement.allItemsFinalized')}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Items will appear here when:
+            {t('procurement.itemsWillAppearWhen')}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            • PM creates new project items
+            {t('procurement.pmCreatesNewItems')}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            • Finance reverts locked decisions
+            {t('procurement.financeRevertsDecisions')}
           </Typography>
         </Paper>
       ) : (
@@ -966,27 +965,27 @@ export const ProcurementPage: React.FC = () => {
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>Supplier</TableCell>
-                    <TableCell align="right">Base Cost</TableCell>
-                    <TableCell align="center">Lead Time</TableCell>
-                    <TableCell align="center">Bundle Discount</TableCell>
-                    <TableCell>Payment Terms</TableCell>
-                    <TableCell align="center">Status</TableCell>
-                    <TableCell align="center">Actions</TableCell>
+                    <TableCell>{t('procurement.supplier')}</TableCell>
+                    <TableCell align="right">{t('procurement.baseCost')}</TableCell>
+                    <TableCell align="center">{t('procurement.leadTime')}</TableCell>
+                    <TableCell align="center">{t('procurement.bundleDiscount')}</TableCell>
+                    <TableCell>{t('procurement.paymentTerms')}</TableCell>
+                    <TableCell align="center">{t('procurement.status')}</TableCell>
+                    <TableCell align="center">{t('procurement.actions')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {loadingItemOptions[itemCode] ? (
                     <TableRow>
                       <TableCell colSpan={7} align="center">
-                        <CircularProgress size={24} /> Loading options...
+                        <CircularProgress size={24} /> {t('procurement.loadingOptions')}
                       </TableCell>
                     </TableRow>
                   ) : itemOptions.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} align="center">
                         <Typography variant="body2" color="text.secondary">
-                          No procurement options yet. Click "Add Option" to create one.
+                          {t('procurement.noProcurementOptionsYet')}
                         </Typography>
                       </TableCell>
                     </TableRow>
@@ -1119,7 +1118,7 @@ export const ProcurementPage: React.FC = () => {
                     setCreateDialogOpen(true);
                   }}
                 >
-                  Add Option for {itemCode}
+                  {t('procurement.addOptionFor')} {itemCode}
                 </Button>
                 
                 {/* Bulk Finalize/Unfinalize Button */}
@@ -1134,7 +1133,7 @@ export const ProcurementPage: React.FC = () => {
                       onClick={() => handleBulkFinalizeToggle(itemCode, !allFinalized)}
                       disabled={isUpdating}
                     >
-                      {isUpdating ? 'Updating...' : (allFinalized ? 'Unfinalize All' : 'Finalize All')}
+                      {isUpdating ? t('procurement.updating') : (allFinalized ? t('procurement.unfinalizeAll') : t('procurement.finalizeAll'))}
                     </Button>
                   );
                 })()}
@@ -1157,7 +1156,7 @@ export const ProcurementPage: React.FC = () => {
           showLastButton
         />
         <Typography variant="body2" sx={{ ml: 2, alignSelf: 'center', color: 'text.secondary' }}>
-          Showing {page * ITEMS_PER_PAGE + 1}-{Math.min((page + 1) * ITEMS_PER_PAGE, getFilteredItems().length)} of {getFilteredItems().length} items
+          {t('procurement.showing')} {page * ITEMS_PER_PAGE + 1}-{Math.min((page + 1) * ITEMS_PER_PAGE, getFilteredItems().length)} {t('procurement.of')} {getFilteredItems().length} {t('procurement.items')}
         </Typography>
       </Box>
       </>
@@ -1165,7 +1164,7 @@ export const ProcurementPage: React.FC = () => {
 
       {/* Create Option Dialog */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Add New Procurement Option</DialogTitle>
+        <DialogTitle>{t('procurement.addNewProcurementOption')}</DialogTitle>
         <DialogContent>
           {/* Item Information - Pre-filled */}
           <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: 'primary.lighter', border: '2px solid', borderColor: 'primary.main' }}>
@@ -1224,7 +1223,7 @@ export const ProcurementPage: React.FC = () => {
           />
           {/* Delivery Option Selection */}
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Delivery Option</InputLabel>
+            <InputLabel>{t('procurement.deliveryOption')}</InputLabel>
             <Select
               value={formData.delivery_option_id || ''}
               onChange={(e) => {
@@ -1241,12 +1240,12 @@ export const ProcurementPage: React.FC = () => {
               disabled={availableDeliveryOptions.length === 0}
             >
               {availableDeliveryOptions.length === 0 ? (
-                <MenuItem disabled>No delivery options available</MenuItem>
+                <MenuItem disabled>{t('procurement.noDeliveryOptionsAvailable')}</MenuItem>
               ) : (
                 availableDeliveryOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id}>
                     {option.delivery_date} - Slot {option.delivery_slot}
-                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} per unit)`}
+                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} ${t('procurement.perUnit')})`}
                   </MenuItem>
                 ))
               )}
@@ -1297,7 +1296,7 @@ export const ProcurementPage: React.FC = () => {
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Payment Type</InputLabel>
+            <InputLabel>{t('procurement.paymentType')}</InputLabel>
             <Select
               value={formData.payment_terms.type}
               onChange={(e) => {
@@ -1310,8 +1309,8 @@ export const ProcurementPage: React.FC = () => {
                 });
               }}
             >
-              <MenuItem value="cash">Cash</MenuItem>
-              <MenuItem value="installments">Installments</MenuItem>
+              <MenuItem value="cash">{t('procurement.cash')}</MenuItem>
+              <MenuItem value="installments">{t('procurement.installments')}</MenuItem>
             </Select>
           </FormControl>
           {formData.payment_terms.type === 'cash' && (
@@ -1335,7 +1334,7 @@ export const ProcurementPage: React.FC = () => {
           {formData.payment_terms.type === 'installments' && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="subtitle2" gutterBottom>
-                Installment Schedule (must total 100%)
+                {t('procurement.installmentSchedule')}
               </Typography>
               {formData.payment_terms.schedule.map((installment, index) => (
                 <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
@@ -1438,10 +1437,10 @@ export const ProcurementPage: React.FC = () => {
             label={
               <Box>
                 <Typography variant="body2" fontWeight="medium">
-                  ✅ Mark as Finalized
+                  ✅ {t('procurement.markAsFinalized')}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Only finalized options will be used in procurement optimization
+                  {t('procurement.onlyFinalizedOptions')}
                 </Typography>
               </Box>
             }
@@ -1449,9 +1448,9 @@ export const ProcurementPage: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setCreateDialogOpen(false)}>{t('procurement.cancel')}</Button>
           <Button onClick={handleCreateOption} variant="contained">
-            Add Option
+            {t('procurement.addOption')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1549,7 +1548,7 @@ export const ProcurementPage: React.FC = () => {
           />
           {/* Delivery Option Selection */}
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Delivery Option</InputLabel>
+            <InputLabel>{t('procurement.deliveryOption')}</InputLabel>
             <Select
               value={formData.delivery_option_id || ''}
               onChange={(e) => {
@@ -1566,12 +1565,12 @@ export const ProcurementPage: React.FC = () => {
               disabled={availableDeliveryOptions.length === 0}
             >
               {availableDeliveryOptions.length === 0 ? (
-                <MenuItem disabled>No delivery options available</MenuItem>
+                <MenuItem disabled>{t('procurement.noDeliveryOptionsAvailable')}</MenuItem>
               ) : (
                 availableDeliveryOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id}>
                     {option.delivery_date} - Slot {option.delivery_slot}
-                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} per unit)`}
+                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} ${t('procurement.perUnit')})`}
                   </MenuItem>
                 ))
               )}
@@ -1622,7 +1621,7 @@ export const ProcurementPage: React.FC = () => {
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Payment Type</InputLabel>
+            <InputLabel>{t('procurement.paymentType')}</InputLabel>
             <Select
               value={formData.payment_terms.type}
               onChange={(e) => {
@@ -1635,8 +1634,8 @@ export const ProcurementPage: React.FC = () => {
                 });
               }}
             >
-              <MenuItem value="cash">Cash</MenuItem>
-              <MenuItem value="installments">Installments</MenuItem>
+              <MenuItem value="cash">{t('procurement.cash')}</MenuItem>
+              <MenuItem value="installments">{t('procurement.installments')}</MenuItem>
             </Select>
           </FormControl>
           {formData.payment_terms.type === 'cash' && (
@@ -1660,7 +1659,7 @@ export const ProcurementPage: React.FC = () => {
           {formData.payment_terms.type === 'installments' && (
             <Box sx={{ mt: 2 }}>
               <Typography variant="subtitle2" gutterBottom>
-                Installment Schedule (must total 100%)
+                {t('procurement.installmentSchedule')}
               </Typography>
               {formData.payment_terms.schedule.map((installment, index) => (
                 <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
@@ -1763,10 +1762,10 @@ export const ProcurementPage: React.FC = () => {
             label={
               <Box>
                 <Typography variant="body2" fontWeight="medium">
-                  ✅ Mark as Finalized
+                  ✅ {t('procurement.markAsFinalized')}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Only finalized options will be used in procurement optimization
+                  {t('procurement.onlyFinalizedOptions')}
                 </Typography>
               </Box>
             }
@@ -1774,9 +1773,9 @@ export const ProcurementPage: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setEditDialogOpen(false)}>{t('procurement.cancel')}</Button>
           <Button onClick={handleEditOption} variant="contained">
-            Update Option
+            {t('procurement.updateOption')}
           </Button>
         </DialogActions>
       </Dialog>
