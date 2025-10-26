@@ -17,6 +17,7 @@ from app.database import get_db
 from app.auth import get_current_user
 from app.models import User, CashflowEvent, BudgetData, FinalizedDecision
 from app.currency_conversion_service import CurrencyConversionService
+from app.cashflow_sync_service import CashflowSyncService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -468,7 +469,7 @@ async def export_cashflow_to_excel(
             data.append({
                 'Event Date': event.event_date.isoformat(),
                 'Event Type': event.event_type.upper(),
-                'Amount': float(event.amount),
+                'Amount': float(event.amount_value if event.amount_value is not None else event.amount),
                 'Description': event.description or '',
                 'Related Decision ID': event.related_decision_id or '',
                 'Created At': event.created_at.isoformat()
@@ -512,5 +513,31 @@ async def export_cashflow_to_excel(
         raise HTTPException(
             status_code=500,
             detail=f"Error exporting cash flow: {str(e)}"
+        )
+
+
+@router.post("/sync-cashflow")
+async def sync_cashflow_with_payments(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Sync all existing payments with cash flow events
+    This endpoint integrates payments in/out data with the existing cash flow system
+    """
+    try:
+        cashflow_service = CashflowSyncService(db)
+        result = await cashflow_service.sync_all_payments()
+        
+        return {
+            "message": "Cash flow sync completed",
+            "synced_count": result['synced_count'],
+            "errors": result['errors'],
+            "success": result['success']
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error syncing cash flow: {str(e)}"
         )
 

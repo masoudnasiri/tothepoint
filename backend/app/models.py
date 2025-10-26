@@ -6,6 +6,9 @@ import uuid
 import enum
 from app.database import Base
 
+# Note: Invoice and Payment models are defined in models_invoice_payment.py
+# Using string references to avoid circular imports
+
 
 class ProjectItemStatus(enum.Enum):
     """Status enum for project items lifecycle"""
@@ -338,6 +341,7 @@ class FinalizedDecision(Base):
     actual_invoice_amount_value = Column(Numeric(15, 2), nullable=True)  # Actual invoice amount
     actual_invoice_amount_currency = Column(String(3), nullable=True, default='IRR')  # Currency of actual invoice
     actual_invoice_received_date = Column(Date, nullable=True)  # When payment actually received
+    is_final_invoice = Column(Boolean, nullable=False, default=False)  # Is this the final invoice for this item?
     invoice_entered_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     invoice_entered_at = Column(DateTime(timezone=True), nullable=True)
     
@@ -396,6 +400,7 @@ class FinalizedDecision(Base):
     pm_accepted_by = relationship("User", foreign_keys=[pm_accepted_by_id])
     currency = relationship("Currency")
     cashflow_events = relationship("CashflowEvent", back_populates="related_decision", cascade="all, delete-orphan")
+    supplier_payments = relationship("SupplierPayment", back_populates="decision", cascade="all, delete-orphan")
 
 
 class DecisionFactorWeight(Base):
@@ -476,3 +481,33 @@ class OptimizationResult(Base):
     # Relationships
     project = relationship("Project", back_populates="optimization_results")
     procurement_option = relationship("ProcurementOption", back_populates="optimization_results")
+
+
+class SupplierPayment(Base):
+    """
+    Supplier payments for procurement items
+    Tracks payments made to suppliers for finalized decisions
+    """
+    __tablename__ = "supplier_payments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(Integer, ForeignKey("finalized_decisions.id"), nullable=False)
+    supplier_name = Column(String(200), nullable=False)
+    item_code = Column(String(100), nullable=False, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    payment_date = Column(Date, nullable=False)
+    payment_amount = Column(Numeric(12, 2), nullable=False)
+    currency = Column(String(10), nullable=False, default='IRR')
+    payment_method = Column(String(50), nullable=False)  # cash, bank_transfer, check, credit_card
+    reference_number = Column(String(100), nullable=True)
+    notes = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default='completed')  # pending, completed, failed, cancelled
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    decision = relationship("FinalizedDecision", back_populates="supplier_payments")
+    project = relationship("Project")
+    created_by = relationship("User", foreign_keys=[created_by_id])

@@ -28,12 +28,14 @@ import {
   Grid,
   Divider,
   InputAdornment,
+  Pagination,
+  Stack,
+  FormGroup,
 } from '@mui/material';
 import {
   Visibility as ViewIcon,
   CheckCircle as ConfirmIcon,
   ThumbUp as AcceptIcon,
-  Receipt as InvoiceIcon,
   FileDownload as ExportIcon,
   LocalShipping as ShippingIcon,
   Search as SearchIcon,
@@ -45,7 +47,6 @@ import {
   DeliveryStatus,
   ProcurementDeliveryConfirmation,
   PMDeliveryAcceptance,
-  ActualInvoiceData,
 } from '../types/index.ts';
 import { useTranslation } from 'react-i18next';
 
@@ -80,11 +81,26 @@ export const ProcurementPlanPage: React.FC = () => {
   const [projects, setProjects] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
   
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [totalItems, setTotalItems] = useState(0);
+  
+  // Additional filters
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>('');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<string>('');
+  const [dateRangeFilter, setDateRangeFilter] = useState<{
+    startDate: string;
+    endDate: string;
+  }>({
+    startDate: '',
+    endDate: '',
+  });
+  
   // Dialogs
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
-  const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ProcurementPlanItem | null>(null);
   
   // Form data
@@ -100,28 +116,36 @@ export const ProcurementPlanPage: React.FC = () => {
     customer_delivery_date: '',
     acceptance_notes: '',
   });
-  
-  const [invoiceData, setInvoiceData] = useState<ActualInvoiceData>({
-    actual_invoice_issue_date: new Date().toISOString().split('T')[0],
-    actual_invoice_amount: 0,
-    actual_invoice_received_date: '',
-    notes: '',
-  });
 
   useEffect(() => {
     fetchItems();
     fetchProjects();
-  }, [statusFilter, projectFilter]);
+  }, [statusFilter, projectFilter, invoiceStatusFilter, paymentStatusFilter, dateRangeFilter, currentPage, itemsPerPage]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, projectFilter, invoiceStatusFilter, paymentStatusFilter, dateRangeFilter, searchTerm]);
 
   const fetchItems = async () => {
     try {
       setLoading(true);
-      const params: any = {};
+      const params: any = {
+        page: currentPage,
+        limit: itemsPerPage,
+      };
+      
       if (statusFilter) params.status_filter = statusFilter;
       if (projectFilter) params.project_id = projectFilter;
+      if (invoiceStatusFilter) params.invoice_status = invoiceStatusFilter;
+      if (paymentStatusFilter) params.payment_status = paymentStatusFilter;
+      if (dateRangeFilter.startDate) params.start_date = dateRangeFilter.startDate;
+      if (dateRangeFilter.endDate) params.end_date = dateRangeFilter.endDate;
+      if (searchTerm) params.search = searchTerm;
       
       const response = await procurementPlanAPI.list(params);
-      setItems(response.data);
+      setItems(response.data.items || response.data);
+      setTotalItems(response.data.total || response.data.length);
       setError('');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load procurement plan');
@@ -213,43 +237,6 @@ export const ProcurementPlanPage: React.FC = () => {
     }
   };
 
-  const handleEnterInvoice = async () => {
-    if (!selectedItem) return;
-    
-    // Validation
-    if (!invoiceData.actual_invoice_amount || invoiceData.actual_invoice_amount <= 0) {
-      setError('Invoice amount must be greater than 0');
-      return;
-    }
-    
-    try {
-      await procurementPlanAPI.enterInvoice(selectedItem.id, invoiceData);
-      setSuccess('Invoice data entered successfully!');
-      setInvoiceDialogOpen(false);
-      fetchItems();
-      // Reset form
-      setInvoiceData({
-        actual_invoice_issue_date: new Date().toISOString().split('T')[0],
-        actual_invoice_amount: 0,
-        actual_invoice_received_date: '',
-        notes: '',
-      });
-    } catch (err: any) {
-      // Handle validation errors
-      if (err.response?.data?.detail) {
-        if (Array.isArray(err.response.data.detail)) {
-          const errorMessages = err.response.data.detail.map((e: any) => e.msg).join(', ');
-          setError(errorMessages);
-        } else if (typeof err.response.data.detail === 'string') {
-          setError(err.response.data.detail);
-        } else {
-          setError('Failed to enter invoice data. Please check all required fields.');
-        }
-      } else {
-        setError('Failed to enter invoice data');
-      }
-    }
-  };
 
   const handleExport = async () => {
     try {
@@ -265,6 +252,25 @@ export const ProcurementPlanPage: React.FC = () => {
     } catch (err: any) {
       setError('Failed to export procurement plan');
     }
+  };
+
+  const handlePageChange = (event: React.ChangeEvent<unknown>, page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (event: any) => {
+    setItemsPerPage(Number(event.target.value));
+    setCurrentPage(1);
+  };
+
+  const clearFilters = () => {
+    setStatusFilter('');
+    setProjectFilter('');
+    setInvoiceStatusFilter('');
+    setPaymentStatusFilter('');
+    setDateRangeFilter({ startDate: '', endDate: '' });
+    setSearchTerm('');
+    setCurrentPage(1);
   };
 
   const getStatusColor = (status: DeliveryStatus): 'default' | 'warning' | 'success' => {
@@ -293,43 +299,65 @@ export const ProcurementPlanPage: React.FC = () => {
     }
   };
 
+  const getInvoiceStatusLabel = (item: ProcurementPlanItem): string => {
+    if (item.actual_invoice_issue_date) {
+      return t('procurementPlan.invoiced');
+    }
+    return t('procurementPlan.notInvoiced');
+  };
+
+  const getInvoiceStatusColor = (item: ProcurementPlanItem): 'default' | 'warning' | 'success' => {
+    if (item.actual_invoice_issue_date) {
+      return 'success';
+    }
+    return 'default';
+  };
+
+  const getPaymentStatusLabel = (item: ProcurementPlanItem): string => {
+    if (!item.actual_invoice_issue_date) {
+      return t('procurementPlan.notPaid');
+    }
+    
+    if (item.actual_payment_date) {
+      const invoiceAmount = item.actual_invoice_amount || 0;
+      const paymentAmount = item.actual_payment_amount || 0;
+      
+      if (paymentAmount >= invoiceAmount) {
+        return t('procurementPlan.fullyPaid');
+      } else if (paymentAmount > 0) {
+        return t('procurementPlan.partiallyPaid');
+      }
+    }
+    
+    return t('procurementPlan.notPaid');
+  };
+
+  const getPaymentStatusColor = (item: ProcurementPlanItem): 'default' | 'warning' | 'success' => {
+    if (!item.actual_invoice_issue_date) {
+      return 'default';
+    }
+    
+    if (item.actual_payment_date) {
+      const invoiceAmount = item.actual_invoice_amount || 0;
+      const paymentAmount = item.actual_payment_amount || 0;
+      
+      if (paymentAmount >= invoiceAmount) {
+        return 'success';
+      } else if (paymentAmount > 0) {
+        return 'warning';
+      }
+    }
+    
+    return 'default';
+  };
+
   const isProcurementTeam = user?.role === 'procurement' || user?.role === 'admin' || user?.role === 'finance';
   const isPM = user?.role === 'pm' || user?.role === 'pmo' || user?.role === 'admin';
 
-  // Filter items based on search term
-  const filteredItems = items.filter(item => {
-    if (!searchTerm) return true;
-    
-    const searchLower = searchTerm.toLowerCase();
-    
-    // Search in common fields
-    if (item.item_code?.toLowerCase().includes(searchLower)) return true;
-    if (item.item_name?.toLowerCase().includes(searchLower)) return true;
-    if (item.item_description?.toLowerCase().includes(searchLower)) return true;
-    if (item.project_name?.toLowerCase().includes(searchLower)) return true;
-    if (item.project_code?.toLowerCase().includes(searchLower)) return true;
-    if (item.serial_number?.toLowerCase().includes(searchLower)) return true;
-    if (item.delivery_status?.toLowerCase().includes(searchLower)) return true;
-    
-    // Search in procurement-specific fields (if visible)
-    if (isProcurementTeam) {
-      if (item.supplier_name?.toLowerCase().includes(searchLower)) return true;
-      if (item.final_cost?.toString().includes(searchLower)) return true;
-      if (item.procurement_delivery_notes?.toLowerCase().includes(searchLower)) return true;
-    }
-    
-    // Search in PM-specific fields (if visible)
-    if (isPM) {
-      if (item.pm_acceptance_notes?.toLowerCase().includes(searchLower)) return true;
-    }
-    
-    // Search in dates
-    if (item.delivery_date?.includes(searchTerm)) return true;
-    if (item.actual_delivery_date?.includes(searchTerm)) return true;
-    if (item.customer_delivery_date?.includes(searchTerm)) return true;
-    
-    return false;
-  });
+  // Calculate pagination info
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const startItem = (currentPage - 1) * itemsPerPage + 1;
+  const endItem = Math.min(currentPage * itemsPerPage, totalItems);
 
   if (loading) {
     return (
@@ -369,8 +397,16 @@ export const ProcurementPlanPage: React.FC = () => {
 
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3 }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+          <Typography variant="h6">{t('procurementPlan.filters')}</Typography>
+          <Button variant="outlined" onClick={clearFilters} size="small">
+            {t('procurementPlan.clearFilters')}
+          </Button>
+        </Box>
+        
         <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
+          {/* Search */}
+          <Grid item xs={12} md={3}>
             <TextField
               fullWidth
               label={t('procurementPlan.search')}
@@ -387,7 +423,9 @@ export const ProcurementPlanPage: React.FC = () => {
               }}
             />
           </Grid>
-          <Grid item xs={12} md={4}>
+          
+          {/* Delivery Status */}
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth>
               <InputLabel>{t('procurementPlan.deliveryStatus')}</InputLabel>
               <Select
@@ -402,7 +440,9 @@ export const ProcurementPlanPage: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={4}>
+          
+          {/* Project */}
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth>
               <InputLabel>{t('procurementPlan.project')}</InputLabel>
               <Select
@@ -419,35 +459,97 @@ export const ProcurementPlanPage: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
+          
+          {/* Invoice Status */}
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth>
+              <InputLabel>{t('procurementPlan.invoiceStatus')}</InputLabel>
+              <Select
+                value={invoiceStatusFilter}
+                label={t('procurementPlan.invoiceStatus')}
+                onChange={(e) => setInvoiceStatusFilter(e.target.value)}
+              >
+                <MenuItem value="">{t('procurementPlan.allInvoiceStatuses')}</MenuItem>
+                <MenuItem value="invoiced">{t('procurementPlan.invoiced')}</MenuItem>
+                <MenuItem value="not_invoiced">{t('procurementPlan.notInvoiced')}</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          {/* Payment Status */}
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth>
+              <InputLabel>{t('procurementPlan.paymentStatus')}</InputLabel>
+              <Select
+                value={paymentStatusFilter}
+                label={t('procurementPlan.paymentStatus')}
+                onChange={(e) => setPaymentStatusFilter(e.target.value)}
+              >
+                <MenuItem value="">{t('procurementPlan.allPaymentStatuses')}</MenuItem>
+                <MenuItem value="not_paid">{t('procurementPlan.notPaid')}</MenuItem>
+                <MenuItem value="partially_paid">{t('procurementPlan.partiallyPaid')}</MenuItem>
+                <MenuItem value="fully_paid">{t('procurementPlan.fullyPaid')}</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          
+          {/* Date Range */}
+          <Grid item xs={12} md={3}>
+            <TextField
+              fullWidth
+              label={t('procurementPlan.deliveryDateFrom')}
+              type="date"
+              value={dateRangeFilter.startDate}
+              onChange={(e) => setDateRangeFilter({ ...dateRangeFilter, startDate: e.target.value })}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Grid>
+          
+          <Grid item xs={12} md={3}>
+            <TextField
+              fullWidth
+              label={t('procurementPlan.deliveryDateTo')}
+              type="date"
+              value={dateRangeFilter.endDate}
+              onChange={(e) => setDateRangeFilter({ ...dateRangeFilter, endDate: e.target.value })}
+              InputLabelProps={{ shrink: true }}
+            />
+          </Grid>
         </Grid>
       </Paper>
 
       {/* Summary Stats */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
             <Typography variant="h6">{t('procurementPlan.totalItems')}</Typography>
-            <Typography variant="h4">{filteredItems.length}</Typography>
-            {searchTerm && (
-              <Typography variant="caption" color="textSecondary">
-                (filtered from {items.length})
-              </Typography>
-            )}
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, textAlign: 'center' }}>
-            <Typography variant="h6">{t('procurementPlan.awaitingDelivery')}</Typography>
-            <Typography variant="h4">
-              {filteredItems.filter(i => i.delivery_status === 'AWAITING_DELIVERY').length}
+            <Typography variant="h4">{totalItems}</Typography>
+            <Typography variant="caption" color="textSecondary">
+              {t('procurementPlan.showingItems', { start: startItem, end: endItem, total: totalItems })}
             </Typography>
           </Paper>
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h6">{t('procurementPlan.awaitingDelivery')}</Typography>
+            <Typography variant="h4">
+              {items.filter(i => i.delivery_status === 'AWAITING_DELIVERY').length}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={3}>
           <Paper sx={{ p: 2, textAlign: 'center' }}>
             <Typography variant="h6">{t('procurementPlan.completed')}</Typography>
             <Typography variant="h4">
-              {filteredItems.filter(i => i.delivery_status === 'DELIVERY_COMPLETE').length}
+              {items.filter(i => i.delivery_status === 'DELIVERY_COMPLETE').length}
+            </Typography>
+          </Paper>
+        </Grid>
+        <Grid item xs={12} md={3}>
+          <Paper sx={{ p: 2, textAlign: 'center' }}>
+            <Typography variant="h6">{t('procurementPlan.invoiced')}</Typography>
+            <Typography variant="h4">
+              {items.filter(i => i.actual_invoice_issue_date).length}
             </Typography>
           </Paper>
         </Grid>
@@ -466,25 +568,25 @@ export const ProcurementPlanPage: React.FC = () => {
               {isProcurementTeam && <TableCell align="right">{t('procurementPlan.cost')}</TableCell>}
               <TableCell>{t('procurementPlan.plannedDelivery')}</TableCell>
               <TableCell>{t('procurementPlan.actualDelivery')}</TableCell>
-              {isProcurementTeam && <TableCell>{t('procurementPlan.invoiceStatus')}</TableCell>}
-              {isProcurementTeam && <TableCell>{t('procurementPlan.paymentStatus')}</TableCell>}
               <TableCell>{t('procurementPlan.deliveryStatus')}</TableCell>
+              <TableCell>{t('procurementPlan.invoiceStatus')}</TableCell>
+              <TableCell>{t('procurementPlan.paymentStatus')}</TableCell>
               <TableCell align="center">{t('procurementPlan.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
-            {filteredItems.length === 0 ? (
+            {items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isProcurementTeam ? 12 : 8} align="center">
+                <TableCell colSpan={isProcurementTeam ? 14 : 10} align="center">
                   <Typography color="textSecondary">
-                    {searchTerm || statusFilter || projectFilter
-                      ? 'No items match your search criteria.'
-                      : 'No items found. Items will appear here after decisions are finalized.'}
+                    {searchTerm || statusFilter || projectFilter || invoiceStatusFilter || paymentStatusFilter || dateRangeFilter.startDate || dateRangeFilter.endDate
+                      ? t('procurementPlan.noItemsMatchCriteria')
+                      : t('procurementPlan.noItemsFound')}
                   </Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              filteredItems.map((item) => (
+              items.map((item) => (
                 <TableRow key={item.id} hover>
                   <TableCell>{item.item_code}</TableCell>
                   <TableCell>{item.item_name || 'N/A'}</TableCell>
@@ -498,36 +600,24 @@ export const ProcurementPlanPage: React.FC = () => {
                   )}
                   <TableCell>{item.delivery_date}</TableCell>
                   <TableCell>{item.actual_delivery_date || '-'}</TableCell>
-                  {isProcurementTeam && (
-                    <TableCell>
-                      {item.actual_invoice_issue_date ? (
-                        <Chip 
-                          label={`${t('procurementPlan.invoiced')} (${formatCurrencyWithCode(item.actual_invoice_amount, item.actual_invoice_currency)})`}
-                          color="success"
-                          size="small"
-                        />
-                      ) : (
-                        <Chip label={t('procurementPlan.notInvoiced')} color="default" size="small" />
-                      )}
-                    </TableCell>
-                  )}
-                  {isProcurementTeam && (
-                    <TableCell>
-                      {item.actual_payment_date ? (
-                        <Chip 
-                          label={`${t('procurementPlan.paid')} (${formatCurrencyWithCode(item.actual_payment_amount, item.actual_payment_currency)})`}
-                          color="success"
-                          size="small"
-                        />
-                      ) : (
-                        <Chip label={t('procurementPlan.notPaid')} color="warning" size="small" />
-                      )}
-                    </TableCell>
-                  )}
                   <TableCell>
                     <Chip
                       label={getStatusLabel(item.delivery_status)}
                       color={getStatusColor(item.delivery_status)}
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={getInvoiceStatusLabel(item)}
+                      color={getInvoiceStatusColor(item)}
+                      size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={getPaymentStatusLabel(item)}
+                      color={getPaymentStatusColor(item)}
                       size="small"
                     />
                   </TableCell>
@@ -571,24 +661,6 @@ export const ProcurementPlanPage: React.FC = () => {
                       </IconButton>
                     )}
                     
-                    {/* Procurement Team: Enter Invoice (only when delivery complete) */}
-                    {isProcurementTeam && item.delivery_status === 'DELIVERY_COMPLETE' && !item.actual_invoice_issue_date && (
-                      <IconButton
-                        size="small"
-                        color="warning"
-                        onClick={() => {
-                          setSelectedItem(item);
-                          setInvoiceData({
-                            ...invoiceData,
-                            actual_invoice_amount: item.final_cost || 0,
-                          });
-                          setInvoiceDialogOpen(true);
-                        }}
-                        title={t('procurementPlan.enterInvoice')}
-                      >
-                        <InvoiceIcon />
-                      </IconButton>
-                    )}
                   </TableCell>
                 </TableRow>
               ))
@@ -596,6 +668,47 @@ export const ProcurementPlanPage: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Pagination Controls */}
+      {totalItems > 0 && (
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3, mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="body2" color="textSecondary">
+              {t('procurementPlan.itemsPerPage')}:
+            </Typography>
+            <FormControl size="small" sx={{ minWidth: 80 }}>
+              <Select
+                value={itemsPerPage}
+                onChange={handleItemsPerPageChange}
+                displayEmpty
+              >
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={25}>25</MenuItem>
+                <MenuItem value={50}>50</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="textSecondary">
+              {t('procurementPlan.showingItems', { start: startItem, end: endItem, total: totalItems })}
+            </Typography>
+          </Box>
+          
+          <Stack spacing={2} alignItems="center">
+            <Pagination
+              count={totalPages}
+              page={currentPage}
+              onChange={handlePageChange}
+              color="primary"
+              size="large"
+              showFirstButton
+              showLastButton
+            />
+            <Typography variant="caption" color="textSecondary">
+              {t('procurementPlan.pageOf', { current: currentPage, total: totalPages })}
+            </Typography>
+          </Stack>
+        </Box>
+      )}
 
       {/* View Details Dialog */}
       <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="md" fullWidth>
@@ -661,55 +774,56 @@ export const ProcurementPlanPage: React.FC = () => {
                   />
                 </Grid>
                 
-                {/* Invoice and Payment Information */}
-                {isProcurementTeam && (
-                  <>
-                    <Grid item xs={12}>
-                      <Divider sx={{ my: 2 }}>
-                        <Typography variant="subtitle2" color="textSecondary">Invoice & Payment Information</Typography>
-                      </Divider>
-                    </Grid>
-                    
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceStatus')}</Typography>
-                      {selectedItem.actual_invoice_issue_date ? (
-                        <Box>
-                          <Chip label={t('procurementPlan.invoiced')} color="success" size="small" sx={{ mb: 1 }} />
-                          <Typography variant="body2">
-                            Issue Date: {selectedItem.actual_invoice_issue_date}
-                          </Typography>
-                          <Typography variant="body2">
-                            Amount: {formatCurrencyWithCode(selectedItem.actual_invoice_amount, selectedItem.actual_invoice_currency)}
-                          </Typography>
-                          {selectedItem.actual_invoice_received_date && (
-                            <Typography variant="body2">
-                              Received: {selectedItem.actual_invoice_received_date}
-                            </Typography>
-                          )}
-                        </Box>
-                      ) : (
-                        <Chip label={t('procurementPlan.notInvoiced')} color="default" size="small" />
-                      )}
-                    </Grid>
-                    
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.paymentStatus')}</Typography>
-                      {selectedItem.actual_payment_date ? (
-                        <Box>
-                          <Chip label={t('procurementPlan.paid')} color="success" size="small" sx={{ mb: 1 }} />
-                          <Typography variant="body2">
-                            Payment Date: {selectedItem.actual_payment_date}
-                          </Typography>
-                          <Typography variant="body2">
-                            Amount: {formatCurrencyWithCode(selectedItem.actual_payment_amount, selectedItem.actual_payment_currency)}
-                          </Typography>
-                        </Box>
-                      ) : (
-                        <Chip label={t('procurementPlan.notPaid')} color="warning" size="small" />
-                      )}
-                    </Grid>
-                  </>
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceStatus')}</Typography>
+                  <Chip
+                    label={getInvoiceStatusLabel(selectedItem)}
+                    color={getInvoiceStatusColor(selectedItem)}
+                    size="small"
+                  />
+                </Grid>
+                
+                <Grid item xs={12} md={6}>
+                  <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.paymentStatus')}</Typography>
+                  <Chip
+                    label={getPaymentStatusLabel(selectedItem)}
+                    color={getPaymentStatusColor(selectedItem)}
+                    size="small"
+                  />
+                </Grid>
+                
+                {selectedItem.actual_invoice_issue_date && (
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceDate')}</Typography>
+                    <Typography variant="body1" gutterBottom>{selectedItem.actual_invoice_issue_date}</Typography>
+                  </Grid>
                 )}
+                
+                {selectedItem.actual_invoice_amount && (
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceAmount')}</Typography>
+                    <Typography variant="body1" gutterBottom>
+                      {formatCurrencyWithCode(selectedItem.actual_invoice_amount, selectedItem.actual_invoice_currency)}
+                    </Typography>
+                  </Grid>
+                )}
+                
+                {selectedItem.actual_payment_date && (
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.paymentDate')}</Typography>
+                    <Typography variant="body1" gutterBottom>{selectedItem.actual_payment_date}</Typography>
+                  </Grid>
+                )}
+                
+                {selectedItem.actual_payment_amount && (
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.paymentAmount')}</Typography>
+                    <Typography variant="body1" gutterBottom>
+                      {formatCurrencyWithCode(selectedItem.actual_payment_amount, selectedItem.actual_payment_currency)}
+                    </Typography>
+                  </Grid>
+                )}
+                
                 
                 {selectedItem.serial_number && (
                   <Grid item xs={12} md={6}>
@@ -732,28 +846,6 @@ export const ProcurementPlanPage: React.FC = () => {
                   </Grid>
                 )}
                 
-                {isProcurementTeam && selectedItem.actual_invoice_issue_date && (
-                  <>
-                    <Grid item xs={12}><Divider sx={{ my: 1 }} /></Grid>
-                    <Grid item xs={12}>
-                      <Typography variant="h6" gutterBottom>{t('procurementPlan.invoiceInformation')}</Typography>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceIssueDate')}</Typography>
-                      <Typography variant="body1" gutterBottom>{selectedItem.actual_invoice_issue_date}</Typography>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceAmount')}</Typography>
-                      <Typography variant="body1" gutterBottom>${selectedItem.actual_invoice_amount?.toLocaleString() || 'N/A'}</Typography>
-                    </Grid>
-                    {selectedItem.actual_invoice_received_date && (
-                      <Grid item xs={12} md={6}>
-                        <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceReceivedDate')}</Typography>
-                        <Typography variant="body1" gutterBottom>{selectedItem.actual_invoice_received_date}</Typography>
-                      </Grid>
-                    )}
-                  </>
-                )}
               </Grid>
             </Box>
           )}
@@ -864,65 +956,6 @@ export const ProcurementPlanPage: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Enter Invoice Dialog (Procurement Team) */}
-      <Dialog open={invoiceDialogOpen} onClose={() => setInvoiceDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t('procurementPlan.enterInvoiceData')}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Invoice can only be entered when delivery is complete (confirmed by both Procurement and PM).
-            </Alert>
-            <TextField
-              fullWidth
-              label={t('procurementPlan.invoiceIssueDate')}
-              type="date"
-              value={invoiceData.actual_invoice_issue_date}
-              onChange={(e) => setInvoiceData({ ...invoiceData, actual_invoice_issue_date: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-              required
-            />
-            <TextField
-              fullWidth
-              label={t('procurementPlan.invoiceAmount')}
-              type="number"
-              value={invoiceData.actual_invoice_amount}
-              onChange={(e) => setInvoiceData({ ...invoiceData, actual_invoice_amount: parseFloat(e.target.value) })}
-              sx={{ mb: 2 }}
-              required
-              inputProps={{ min: 0, step: 0.01 }}
-            />
-            <TextField
-              fullWidth
-              label={t('procurementPlan.invoiceReceivedDateOptional')}
-              type="date"
-              value={invoiceData.actual_invoice_received_date}
-              onChange={(e) => setInvoiceData({ ...invoiceData, actual_invoice_received_date: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-              helperText={t('procurementPlan.whenPaymentReceived')}
-            />
-            <TextField
-              fullWidth
-              label={t('procurementPlan.notesOptional')}
-              multiline
-              rows={3}
-              value={invoiceData.notes}
-              onChange={(e) => setInvoiceData({ ...invoiceData, notes: e.target.value })}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setInvoiceDialogOpen(false)}>{t('procurementPlan.cancel')}</Button>
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={handleEnterInvoice}
-          >
-            {t('procurementPlan.enterInvoice')}
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 };

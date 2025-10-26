@@ -116,8 +116,8 @@ export const ProcurementPage: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      // Fetch only finalized items (PMO finalized items)
-      const itemsResponse = await itemsAPI.listFinalized();
+      // Fetch only finalized items (PMO finalized items) - request all items
+      const itemsResponse = await itemsAPI.listFinalized({ skip: 0, limit: 10000 });
       
       // Convert finalized items to the format expected by the procurement page
       const itemsWithDetails = itemsResponse.data.map((item: any) => ({
@@ -657,12 +657,19 @@ export const ProcurementPage: React.FC = () => {
   };
 
   const formatPaymentTerms = (terms: any) => {
+    if (!terms) return 'N/A';
+    
     if (terms.type === 'cash') {
       return `Cash${terms.discount_percent ? ` (${terms.discount_percent}% discount)` : ''}`;
-    } else {
-      const schedule = terms.schedule.map((s: any) => `${s.percent}%`).join(', ');
-      return `Installments (${schedule})`;
+    } else if (terms.type === 'installments') {
+      if (terms.schedule && Array.isArray(terms.schedule)) {
+        const schedule = terms.schedule.map((s: any) => `${s.percent}%`).join(', ');
+        return `Installments (${schedule})`;
+      }
+      return 'Installments';
     }
+    
+    return 'Unknown';
   };
 
   if (loading) {
@@ -1060,9 +1067,28 @@ export const ProcurementPage: React.FC = () => {
                                   // Set item details for display
                                   const itemDetails = itemsWithDetails.find(item => item.item_code === option.item_code);
                                   setSelectedItemDetails(itemDetails || null);
-                                  // Fetch delivery options for this item
-                                  if (option.item_code) {
-                                    await fetchDeliveryOptions(option.item_code);
+                                  // Fetch delivery options for this item with project ID
+                                  if (option.item_code && itemDetails) {
+                                    try {
+                                      const url = `/delivery-options/by-item-code/${option.item_code}?project_id=${itemDetails.project_id}`;
+                                      const response = await api.get(url);
+                                      const deliveryOptions = response.data;
+                                      setAvailableDeliveryOptions(deliveryOptions);
+                                      
+                                      // Check if the current delivery_option_id is valid in the new options
+                                      const currentDeliveryOptionId = option.delivery_option_id;
+                                      const isValidDeliveryOption = deliveryOptions.some(opt => opt.id === currentDeliveryOptionId);
+                                      if (!isValidDeliveryOption && deliveryOptions.length > 0) {
+                                        // Reset to the first available option if current one is not valid
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          delivery_option_id: deliveryOptions[0].id,
+                                          expected_delivery_date: deliveryOptions[0].delivery_date
+                                        }));
+                                      }
+                                    } catch (err) {
+                                      setAvailableDeliveryOptions([]);
+                                    }
                                   }
                                   setEditDialogOpen(true);
                                 }}
@@ -1468,9 +1494,9 @@ export const ProcurementPage: React.FC = () => {
                 setFormData({ ...formData, item_code: newItemCode });
                 const itemDetails = itemsWithDetails.find(item => item.item_code === newItemCode);
                 setSelectedItemDetails(itemDetails || null);
-                // Fetch delivery options for the selected item
-                if (newItemCode) {
-                  fetchDeliveryOptions(newItemCode);
+                // Fetch delivery options for the selected item with project ID
+                if (newItemCode && itemDetails) {
+                  fetchDeliveryOptions(newItemCode, itemDetails.project_id);
                 } else {
                   setAvailableDeliveryOptions([]);
                 }

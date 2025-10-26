@@ -5,7 +5,7 @@ with role-based access control for Procurement Team and Project Managers.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date
@@ -99,14 +99,24 @@ async def list_procurement_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     status_filter: Optional[str] = None,
-    project_id: Optional[int] = None
+    project_id: Optional[int] = None,
+    page: int = 1,
+    limit: int = 25,
+    search: Optional[str] = None,
+    invoice_status: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
 ):
     """
-    Get procurement plan items based on user role.
+    Get procurement plan items based on user role with pagination and filtering.
     
     - Procurement Team: All finalized items with full details
     - PM: Only items from their assigned projects, limited details
     """
+    from datetime import datetime
+    from sqlalchemy import and_, or_, func
+    
     # Base query for LOCKED decisions only
     stmt = select(FinalizedDecision).where(
         FinalizedDecision.status == 'LOCKED'
@@ -116,9 +126,48 @@ async def list_procurement_plan(
         selectinload(FinalizedDecision.procurement_option)
     )
     
+    # Apply filters
+    filters = []
+    
     # Filter by delivery status if provided
     if status_filter:
-        stmt = stmt.where(FinalizedDecision.delivery_status == status_filter)
+        filters.append(FinalizedDecision.delivery_status == status_filter)
+    
+    # Filter by project if provided
+    if project_id:
+        filters.append(FinalizedDecision.project_id == project_id)
+    
+    # Filter by invoice status
+    if invoice_status == 'invoiced':
+        filters.append(FinalizedDecision.actual_invoice_issue_date.isnot(None))
+    elif invoice_status == 'not_invoiced':
+        filters.append(FinalizedDecision.actual_invoice_issue_date.is_(None))
+    
+    # Filter by payment status
+    if payment_status == 'not_paid':
+        filters.append(FinalizedDecision.actual_payment_date.is_(None))
+    elif payment_status == 'partially_paid':
+        filters.append(and_(
+            FinalizedDecision.actual_payment_date.isnot(None),
+            FinalizedDecision.actual_payment_amount < FinalizedDecision.actual_invoice_amount
+        ))
+    elif payment_status == 'fully_paid':
+        filters.append(and_(
+            FinalizedDecision.actual_payment_date.isnot(None),
+            FinalizedDecision.actual_payment_amount >= FinalizedDecision.actual_invoice_amount
+        ))
+    
+    # Filter by date range
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date)
+        filters.append(FinalizedDecision.delivery_date >= start_dt.date())
+    if end_date:
+        end_dt = datetime.fromisoformat(end_date)
+        filters.append(FinalizedDecision.delivery_date <= end_dt.date())
+    
+    # Apply all filters
+    if filters:
+        stmt = stmt.where(and_(*filters))
     
     # Role-based filtering
     if current_user.role == 'pm':
@@ -130,16 +179,31 @@ async def list_procurement_plan(
         assigned_project_ids = [row[0] for row in assigned_projects_result.fetchall()]
         
         if not assigned_project_ids:
-            return []
+            return {"items": [], "total": 0, "page": page, "limit": limit}
         
         stmt = stmt.where(FinalizedDecision.project_id.in_(assigned_project_ids))
     
-    # Additional project filter
-    if project_id:
-        stmt = stmt.where(FinalizedDecision.project_id == project_id)
+    # Get total count for pagination
+    count_stmt = select(func.count(FinalizedDecision.id)).select_from(stmt.subquery())
+    total_result = await db.execute(count_stmt)
+    total_count = total_result.scalar()
+    
+    # Apply search filter if provided
+    if search:
+        search_filters = [
+            FinalizedDecision.item_code.ilike(f"%{search}%"),
+            FinalizedDecision.project.has(Project.name.ilike(f"%{search}%")),
+            FinalizedDecision.project_item.has(ProjectItem.item_name.ilike(f"%{search}%")),
+            FinalizedDecision.procurement_option.has(ProcurementOption.supplier_name.ilike(f"%{search}%"))
+        ]
+        stmt = stmt.where(or_(*search_filters))
     
     # Order by delivery date
     stmt = stmt.order_by(FinalizedDecision.delivery_date.asc())
+    
+    # Apply pagination
+    offset = (page - 1) * limit
+    stmt = stmt.offset(offset).limit(limit)
     
     result = await db.execute(stmt)
     decisions = result.scalars().all()
@@ -150,7 +214,12 @@ async def list_procurement_plan(
         for decision in decisions
     ]
     
-    return filtered_data
+    return {
+        "items": filtered_data,
+        "total": total_count,
+        "page": page,
+        "limit": limit
+    }
 
 
 @router.get("/{decision_id}")

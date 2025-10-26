@@ -102,6 +102,7 @@ export const itemsAPI = {
   delete: (id: number) => api.delete(`/items/${id}`),
   finalize: (id: number, data: any) => api.put(`/items/${id}/finalize`, data),
   unfinalize: (id: number) => api.put(`/items/${id}/unfinalize`, {}),
+  finalizeAll: (projectId: number) => api.put(`/items/project/${projectId}/finalize-all`, {}),
   listFinalized: (params?: { skip?: number; limit?: number }) =>
     api.get('/items/finalized', { params }),
 };
@@ -318,7 +319,17 @@ export const deliveryOptionsAPI = {
 
 // Procurement Plan & Delivery Tracking API
 export const procurementPlanAPI = {
-  list: (params?: { status_filter?: string; project_id?: number }) =>
+  list: (params?: { 
+    status_filter?: string; 
+    project_id?: number;
+    page?: number;
+    limit?: number;
+    search?: string;
+    invoice_status?: string;
+    payment_status?: string;
+    start_date?: string;
+    end_date?: string;
+  }) =>
     api.get('/procurement-plan/', { params }),
   get: (decisionId: number) => api.get(`/procurement-plan/${decisionId}`),
   confirmDelivery: (decisionId: number, data: any) =>
@@ -373,8 +384,11 @@ export const currencyAPI = {
     api.put(`/currencies/rates/${rateId}`, null, {
       params: { rate }
     }),
-  deleteExchangeRate: (rateId: number) =>
-    api.delete(`/currencies/rates/${rateId}`),
+  deleteExchangeRate: (rateId: number) => {
+    console.log('API: deleteExchangeRate called with rateId:', rateId);
+    console.log('API: Making DELETE request to:', `/currencies/rates/${rateId}`);
+    return api.delete(`/currencies/rates/${rateId}`);
+  },
   
   // OLD Exchange rate management (kept for backward compatibility)
   getExchangeRates: (currencyId: number, startDate?: string, endDate?: string) => 
@@ -396,6 +410,74 @@ export const currencyAPI = {
         conversion_date: conversionDate
       }
     }),
+
+  // BrsApi Currency conversion
+  brsApi: {
+    getCurrencies: () => api.get('/brs-api/currencies'),
+    getCurrencyRate: (symbol: string) => api.get(`/brs-api/currencies/${symbol}`),
+    convert: (amount: number, fromCurrency: string, toCurrency: string, forceRefresh?: boolean) =>
+      api.post('/brs-api/convert', null, {
+        params: {
+          amount,
+          from_currency: fromCurrency,
+          to_currency: toCurrency,
+          force_refresh: forceRefresh
+        }
+      }),
+    getSupportedCurrencies: () => api.get('/brs-api/supported-currencies'),
+    healthCheck: () => api.get('/brs-api/health')
+  },
+};
+
+// Supplier Payments API
+export const supplierPaymentsAPI = {
+  // List supplier payments with filtering and pagination
+  list: (params?: {
+    skip?: number;
+    limit?: number;
+    project_id?: number;
+    supplier_name?: string;
+    item_code?: string;
+    status?: string;
+    start_date?: string;
+    end_date?: string;
+  }) => api.get('/supplier-payments/', { params }),
+  
+  // Get specific supplier payment
+  get: (id: number) => api.get(`/supplier-payments/${id}`),
+  
+  // Create new supplier payment
+  create: (data: {
+    decision_id: number;
+    supplier_name: string;
+    item_code: string;
+    project_id: number;
+    payment_date: string;
+    payment_amount: number;
+    currency: string;
+    payment_method: string;
+    reference_number?: string;
+    notes?: string;
+    status?: string;
+  }) => api.post('/supplier-payments/', data),
+  
+  // Update supplier payment
+  update: (id: number, data: {
+    supplier_name?: string;
+    payment_date?: string;
+    payment_amount?: number;
+    currency?: string;
+    payment_method?: string;
+    reference_number?: string;
+    notes?: string;
+    status?: string;
+  }) => api.put(`/supplier-payments/${id}`, data),
+  
+  // Delete supplier payment
+  delete: (id: number) => api.delete(`/supplier-payments/${id}`),
+  
+  // Get payments for a specific decision
+  getByDecision: (decisionId: number) => api.get(`/supplier-payments/decisions/${decisionId}/payments`),
 };
 
 export default api;

@@ -65,6 +65,7 @@ export const ProjectItemsPage: React.FC = () => {
   const [selectedMasterItem, setSelectedMasterItem] = useState<ItemMaster | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
@@ -123,7 +124,7 @@ export const ProjectItemsPage: React.FC = () => {
       setItems(response.data.items || response.data);
       setTotalCount(response.data.total || response.data.length);
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to load project items'));
+      setError(formatApiError(err, t('projectItems.failedToLoadProjectItems')));
     } finally {
       setLoading(false);
     }
@@ -156,7 +157,7 @@ export const ProjectItemsPage: React.FC = () => {
       const response = await itemsMasterAPI.list({ active_only: true });
       setMasterItems(response.data);
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to load items catalog'));
+      setError(formatApiError(err, t('projectItems.failedToLoadItemsCatalog')));
     }
   };
 
@@ -167,7 +168,7 @@ export const ProjectItemsPage: React.FC = () => {
       resetForm();
       fetchItems();
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to create item'));
+      setError(formatApiError(err, t('projectItems.failedToCreateItem')));
     }
   };
 
@@ -181,40 +182,54 @@ export const ProjectItemsPage: React.FC = () => {
       resetForm();
       fetchItems();
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to update item'));
+      setError(formatApiError(err, t('projectItems.failedToUpdateItem')));
     }
   };
 
   const handleDeleteItem = async (itemId: number) => {
-    if (!window.confirm('Are you sure you want to delete this item?')) return;
+    if (!window.confirm(t('projectItems.areYouSureDelete'))) return;
     
     try {
       await itemsAPI.delete(itemId);
       fetchItems();
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to delete item'));
+      setError(formatApiError(err, t('projectItems.failedToDeleteItem')));
     }
   };
 
   const handleFinalizeItem = async (itemId: number) => {
-    if (!window.confirm('Are you sure you want to finalize this item? It will be visible in procurement.')) return;
+    if (!window.confirm(t('projectItems.areYouSureFinalize'))) return;
     
     try {
       await itemsAPI.finalize(itemId, { is_finalized: true });
       fetchItems();
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to finalize item'));
+      setError(formatApiError(err, t('projectItems.failedToFinalizeItem')));
     }
   };
 
   const handleUnfinalizeItem = async (itemId: number) => {
-    if (!window.confirm('Are you sure you want to unfinalize this item? It will be removed from procurement view.')) return;
+    if (!window.confirm(t('projectItems.areYouSureUnfinalize'))) return;
     
     try {
       await itemsAPI.unfinalize(itemId);
       fetchItems();
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to unfinalize item'));
+      setError(formatApiError(err, t('projectItems.failedToUnfinalizeItem')));
+    }
+  };
+
+  const handleFinalizeAllItems = async () => {
+    if (!projectId) return;
+    
+    if (!window.confirm(t('projectItems.areYouSureFinalizeAll'))) return;
+    
+    try {
+      const response = await itemsAPI.finalizeAll(parseInt(projectId));
+      fetchItems();
+      setSuccess(`Successfully finalized ${response.data.finalized_count} items`);
+    } catch (err: any) {
+      setError(formatApiError(err, t('projectItems.failedToFinalizeAllItems')));
     }
   };
 
@@ -270,7 +285,7 @@ export const ProjectItemsPage: React.FC = () => {
         delivery_options: formData.delivery_options.filter(d => d !== dateToRemove),
       });
     } else {
-      alert('At least one delivery date must be provided');
+      alert(t('projectItems.atLeastOneDeliveryDateRequired'));
     }
   };
 
@@ -287,7 +302,7 @@ export const ProjectItemsPage: React.FC = () => {
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      setError('Failed to export items');
+      setError(t('projectItems.failedToExportItems'));
     }
   };
 
@@ -298,9 +313,9 @@ export const ProjectItemsPage: React.FC = () => {
     try {
       await excelAPI.importItems(file);
       fetchItems();
-      alert('Items imported successfully');
+      alert(t('projectItems.itemsImportedSuccessfully'));
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to import items'));
+      setError(formatApiError(err, t('projectItems.failedToImportItems')));
     }
   };
 
@@ -317,7 +332,7 @@ export const ProjectItemsPage: React.FC = () => {
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      setError('Failed to download template');
+      setError(t('projectItems.failedToDownloadTemplate'));
     }
   };
 
@@ -363,29 +378,29 @@ export const ProjectItemsPage: React.FC = () => {
       {selectedMasterItem && (
         <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: 'success.lighter', border: '2px solid', borderColor: 'success.main' }}>
           <Typography variant="subtitle2" color="success.dark" gutterBottom>
-            📦 Selected Item
+            📦 {t('projectItems.selectedItem')}
           </Typography>
           <Typography variant="body2" sx={{ mb: 0.5 }}>
-            <strong>Code:</strong> {selectedMasterItem.item_code}
+            <strong>{t('projectItems.code')}:</strong> {selectedMasterItem.item_code}
           </Typography>
           <Typography variant="body2" sx={{ mb: 0.5 }}>
-            <strong>Company:</strong> {selectedMasterItem.company}
+            <strong>{t('projectItems.company')}:</strong> {selectedMasterItem.company}
           </Typography>
           <Typography variant="body2" sx={{ mb: 0.5 }}>
-            <strong>Name:</strong> {selectedMasterItem.item_name}
+            <strong>{t('projectItems.name')}:</strong> {selectedMasterItem.item_name}
           </Typography>
           {selectedMasterItem.model && (
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>Model:</strong> {selectedMasterItem.model}
+              <strong>{t('projectItems.model')}:</strong> {selectedMasterItem.model}
             </Typography>
           )}
           {selectedMasterItem.category && (
             <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>Category:</strong> {selectedMasterItem.category}
+              <strong>{t('projectItems.category')}:</strong> {selectedMasterItem.category}
             </Typography>
           )}
           <Typography variant="body2">
-            <strong>Unit:</strong> {selectedMasterItem.unit}
+            <strong>{t('projectItems.unit')}:</strong> {selectedMasterItem.unit}
           </Typography>
         </Paper>
       )}
@@ -404,7 +419,7 @@ export const ProjectItemsPage: React.FC = () => {
       {/* Delivery Options Manager */}
       <Box sx={{ mb: 2, p: 2, border: '1px solid #ddd', borderRadius: 1 }}>
         <Typography variant="subtitle2" gutterBottom>
-          Delivery Date Options (at least 1 required)
+          {t('projectItems.deliveryDateOptions')}
         </Typography>
         
         {/* List of current delivery dates */}
@@ -418,7 +433,7 @@ export const ProjectItemsPage: React.FC = () => {
                   month: 'short',
                   day: 'numeric',
                 })}
-                secondary={index === 0 ? 'Primary option' : `Option ${index + 1}`}
+                secondary={index === 0 ? t('projectItems.primaryOption') : `${t('projectItems.option')} ${index + 1}`}
               />
               <ListItemSecondaryAction>
                 <IconButton
@@ -426,7 +441,7 @@ export const ProjectItemsPage: React.FC = () => {
                   size="small"
                   onClick={() => removeDeliveryDate(dateStr)}
                   disabled={formData.delivery_options.length === 1}
-                  title={formData.delivery_options.length === 1 ? 'Cannot remove last date' : 'Remove date'}
+                  title={formData.delivery_options.length === 1 ? t('projectItems.cannotRemoveLastDate') : t('projectItems.removeDate')}
                 >
                   <CloseIcon fontSize="small" />
                 </IconButton>
@@ -493,12 +508,12 @@ export const ProjectItemsPage: React.FC = () => {
         <IconButton onClick={() => navigate('/projects')} sx={{ mr: 1 }}>
           <ArrowBackIcon />
         </IconButton>
-        <Typography variant="h4">Project Items</Typography>
+        <Typography variant="h4">{t('projectItems.projectItems')}</Typography>
       </Box>
 
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="subtitle1" color="text.secondary">
-          Project ID: {projectId}
+          {t('projectItems.projectId')}: {projectId}
         </Typography>
         <Box>
           <Button
@@ -507,7 +522,7 @@ export const ProjectItemsPage: React.FC = () => {
             onClick={handleDownloadTemplate}
             sx={{ mr: 1 }}
           >
-            Download Template
+            {t('projectItems.downloadTemplate')}
           </Button>
           <Button
             variant="outlined"
@@ -515,7 +530,7 @@ export const ProjectItemsPage: React.FC = () => {
             startIcon={<UploadIcon />}
             sx={{ mr: 1 }}
           >
-            Import Items
+            {t('projectItems.importItems')}
             <input
               type="file"
               hidden
@@ -529,7 +544,7 @@ export const ProjectItemsPage: React.FC = () => {
             onClick={handleExportItems}
             sx={{ mr: 1 }}
           >
-            Export Items
+            {t('projectItems.exportItems')}
           </Button>
           <Button
             variant="contained"
@@ -539,7 +554,16 @@ export const ProjectItemsPage: React.FC = () => {
               setCreateDialogOpen(true);
             }}
           >
-            Add Item
+            {t('projectItems.addItem')}
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<FinalizeIcon />}
+            onClick={handleFinalizeAllItems}
+            sx={{ ml: 1 }}
+          >
+            {t('projectItems.finalizeAllItems')}
           </Button>
         </Box>
       </Box>
@@ -550,12 +574,18 @@ export const ProjectItemsPage: React.FC = () => {
         </Alert>
       )}
 
+      {success && (
+        <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
+          {success}
+        </Alert>
+      )}
+
       {/* Search and Filter Bar */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box display="flex" gap={2} flexWrap="wrap" alignItems="center">
           <TextField
-            label="Search"
-            placeholder="Search by code, name, or description..."
+            label={t('projectItems.search')}
+            placeholder={t('projectItems.searchPlaceholder')}
             value={searchTerm}
             onChange={handleSearchChange}
             size="small"
@@ -563,30 +593,30 @@ export const ProjectItemsPage: React.FC = () => {
           />
           
           <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Status</InputLabel>
+            <InputLabel>{t('projectItems.status')}</InputLabel>
             <Select
               value={statusFilter}
-              label="Status"
+              label={t('projectItems.status')}
               onChange={(e) => {
                 setStatusFilter(e.target.value);
                 setPage(0);
               }}
             >
-              <MenuItem value="">All</MenuItem>
-              <MenuItem value="PENDING">PENDING</MenuItem>
-              <MenuItem value="SUGGESTED">SUGGESTED</MenuItem>
-              <MenuItem value="DECIDED">DECIDED</MenuItem>
-              <MenuItem value="PROCURED">PROCURED</MenuItem>
-              <MenuItem value="FULFILLED">FULFILLED</MenuItem>
-              <MenuItem value="PAID">PAID</MenuItem>
+              <MenuItem value="">{t('projectItems.all')}</MenuItem>
+              <MenuItem value="PENDING">{t('projectItems.pending')}</MenuItem>
+              <MenuItem value="SUGGESTED">{t('projectItems.suggested')}</MenuItem>
+              <MenuItem value="DECIDED">{t('projectItems.decided')}</MenuItem>
+              <MenuItem value="PROCURED">{t('projectItems.procured')}</MenuItem>
+              <MenuItem value="FULFILLED">{t('projectItems.fulfilled')}</MenuItem>
+              <MenuItem value="PAID">{t('projectItems.paid')}</MenuItem>
             </Select>
           </FormControl>
-
+          
           <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Finalized</InputLabel>
+            <InputLabel>{t('projectItems.finalized')}</InputLabel>
             <Select
               value={finalizedFilter}
-              label="Finalized"
+              label={t('projectItems.finalized')}
               onChange={(e) => {
                 setFinalizedFilter(e.target.value);
                 setPage(0);
@@ -619,11 +649,11 @@ export const ProjectItemsPage: React.FC = () => {
             onClick={handleClearFilters}
             size="small"
           >
-            Clear Filters
+            {t('projectItems.clearFilters')}
           </Button>
 
           <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-            Total: {totalCount} item{totalCount !== 1 ? 's' : ''}
+            {t('projectItems.total')}: {totalCount} {totalCount !== 1 ? t('projectItems.items') : t('projectItems.item')}
           </Typography>
         </Box>
       </Paper>
@@ -632,13 +662,13 @@ export const ProjectItemsPage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Item Code</TableCell>
-              <TableCell>Item Name</TableCell>
-              <TableCell align="right">Quantity</TableCell>
-              <TableCell align="center">Delivery Options</TableCell>
-              <TableCell align="center">Status</TableCell>
-              <TableCell align="center">External Purchase</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell>{t('projectItems.itemCode')}</TableCell>
+              <TableCell>{t('projectItems.itemName')}</TableCell>
+              <TableCell align="right">{t('projectItems.quantity')}</TableCell>
+              <TableCell align="center">{t('projectItems.deliveryOptions')}</TableCell>
+              <TableCell align="center">{t('projectItems.status')}</TableCell>
+              <TableCell align="center">{t('projectItems.externalPurchase')}</TableCell>
+              <TableCell align="center">{t('projectItems.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -689,7 +719,7 @@ export const ProjectItemsPage: React.FC = () => {
                     />
                     {item.is_finalized && (
                       <Chip
-                        label="FINALIZED"
+                        label={t('projectItems.finalized')}
                         size="small"
                         color="success"
                         variant="filled"
@@ -700,7 +730,7 @@ export const ProjectItemsPage: React.FC = () => {
                 </TableCell>
                 <TableCell align="center">
                   <Chip
-                    label={item.external_purchase ? 'Yes' : 'No'}
+                    label={item.external_purchase ? t('projectItems.yes') : t('projectItems.no')}
                     size="small"
                     color={item.external_purchase ? 'warning' : 'default'}
                   />
@@ -720,7 +750,7 @@ export const ProjectItemsPage: React.FC = () => {
                       }
                       setViewDialogOpen(true);
                     }}
-                    title="View Item Details"
+                    title={t('projectItems.viewItemDetails')}
                     color="primary"
                   >
                     <VisibilityIcon />
@@ -732,7 +762,7 @@ export const ProjectItemsPage: React.FC = () => {
                       setSelectedItem(item);
                       setFormData({
                         project_id: item.project_id,
-                        master_item_id: item.master_item_id,
+                        master_item_id: (item as any).master_item_id,
                         item_code: item.item_code,
                         item_name: item.item_name || '',
                         quantity: item.quantity,
@@ -742,8 +772,8 @@ export const ProjectItemsPage: React.FC = () => {
                       });
                       
                       // Load the master item for display
-                      if (item.master_item_id) {
-                        itemsMasterAPI.get(item.master_item_id).then(response => {
+                      if ((item as any).master_item_id) {
+                        itemsMasterAPI.get((item as any).master_item_id).then(response => {
                           setSelectedMasterItem(response.data);
                         }).catch(err => console.error('Failed to load master item'));
                       }
@@ -752,8 +782,8 @@ export const ProjectItemsPage: React.FC = () => {
                     }}
                     title={
                       item.has_finalized_decision
-                        ? "Cannot edit: Procurement has finalized decision"
-                        : "Edit Item"
+                        ? t('projectItems.cannotEditProcurement')
+                        : t('projectItems.editItem')
                     }
                     disabled={item.has_finalized_decision}
                   >
@@ -766,8 +796,8 @@ export const ProjectItemsPage: React.FC = () => {
                     onClick={() => handleDeleteItem(item.id)}
                     title={
                       item.has_finalized_decision
-                        ? "Cannot delete: Procurement has finalized decision"
-                        : "Delete Item"
+                        ? t('projectItems.cannotDeleteProcurement')
+                        : t('projectItems.deleteItem')
                     }
                     color="error"
                     disabled={item.has_finalized_decision}
@@ -792,7 +822,7 @@ export const ProjectItemsPage: React.FC = () => {
                         <IconButton
                           size="small"
                           onClick={() => handleFinalizeItem(item.id)}
-                          title="Finalize Item (makes visible in procurement)"
+                          title={t('projectItems.finalizeItem')}
                           color="success"
                         >
                           <FinalizeIcon />
@@ -803,8 +833,8 @@ export const ProjectItemsPage: React.FC = () => {
                           onClick={() => handleUnfinalizeItem(item.id)}
                           title={
                             item.has_finalized_decision
-                              ? "Cannot unfinalize: Procurement has finalized decision"
-                              : "Unfinalize Item (remove from procurement)"
+                              ? t('projectItems.cannotUnfinalizeProcurement')
+                              : t('projectItems.unfinalizeItem')
                           }
                           color="warning"
                           disabled={item.has_finalized_decision}
@@ -825,15 +855,15 @@ export const ProjectItemsPage: React.FC = () => {
       <Paper sx={{ mt: 2 }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" p={2}>
           <Typography variant="body2" color="text.secondary">
-            Showing {items.length === 0 ? 0 : page * rowsPerPage + 1} - {Math.min((page + 1) * rowsPerPage, totalCount)} of {totalCount}
+            {t('projectItems.showing')} {items.length === 0 ? 0 : page * rowsPerPage + 1} - {Math.min((page + 1) * rowsPerPage, totalCount)} {t('projectItems.of')} {totalCount}
           </Typography>
           <Box display="flex" gap={1} alignItems="center">
             <FormControl size="small" sx={{ minWidth: 100 }}>
-              <InputLabel>Per Page</InputLabel>
+              <InputLabel>{t('projectItems.perPage')}</InputLabel>
               <Select
                 value={rowsPerPage}
-                label="Per Page"
-                onChange={handleChangeRowsPerPage}
+                label={t('projectItems.perPage')}
+                onChange={(e) => handleChangeRowsPerPage(e as any)}
               >
                 <MenuItem value={10}>10</MenuItem>
                 <MenuItem value={25}>25</MenuItem>
@@ -846,17 +876,17 @@ export const ProjectItemsPage: React.FC = () => {
               disabled={page === 0}
               onClick={() => setPage(page - 1)}
             >
-              Previous
+              {t('projectItems.previous')}
             </Button>
             <Typography variant="body2" sx={{ px: 2 }}>
-              Page {page + 1} of {Math.max(1, Math.ceil(totalCount / rowsPerPage))}
+              {t('projectItems.page')} {page + 1} {t('projectItems.of')} {Math.max(1, Math.ceil(totalCount / rowsPerPage))}
             </Typography>
             <Button
               size="small"
               disabled={(page + 1) * rowsPerPage >= totalCount}
               onClick={() => setPage(page + 1)}
             >
-              Next
+              {t('projectItems.next')}
             </Button>
           </Box>
         </Box>
@@ -873,18 +903,18 @@ export const ProjectItemsPage: React.FC = () => {
         maxWidth="sm" 
         fullWidth
       >
-        <DialogTitle>Add New Item</DialogTitle>
+        <DialogTitle>{t('projectItems.addNewItem')}</DialogTitle>
         <DialogContent>
           {renderFormFields()}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setCreateDialogOpen(false)}>{t('projectItems.cancel')}</Button>
           <Button 
             onClick={handleCreateItem} 
             variant="contained"
             disabled={!formData.item_code || !formData.delivery_options || formData.delivery_options.length === 0}
           >
-            Add Item
+            {t('projectItems.addItem')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -898,7 +928,7 @@ export const ProjectItemsPage: React.FC = () => {
         maxWidth="sm" 
         fullWidth
       >
-        <DialogTitle>Edit Item</DialogTitle>
+        <DialogTitle>{t('projectItems.editItem')}</DialogTitle>
         <DialogContent>
           {renderFormFields()}
         </DialogContent>
@@ -907,13 +937,13 @@ export const ProjectItemsPage: React.FC = () => {
             setEditDialogOpen(false);
             resetForm();
             setSelectedItem(null);
-          }}>Cancel</Button>
+          }}>{t('projectItems.cancel')}</Button>
           <Button 
             onClick={handleEditItem} 
             variant="contained"
             disabled={!formData.item_code || !formData.delivery_options || formData.delivery_options.length === 0}
           >
-            Update Item
+            {t('projectItems.updateItem')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -926,7 +956,7 @@ export const ProjectItemsPage: React.FC = () => {
         fullWidth
       >
         <DialogTitle>
-          Delivery & Invoice Configuration
+          {t('projectItems.deliveryInvoiceConfiguration')}
         </DialogTitle>
         <DialogContent>
           {selectedItem && (
@@ -952,7 +982,7 @@ export const ProjectItemsPage: React.FC = () => {
         maxWidth="md" 
         fullWidth
       >
-        <DialogTitle>Item Details</DialogTitle>
+        <DialogTitle>{t('projectItems.itemDetails')}</DialogTitle>
         <DialogContent>
           {selectedItem && (
             <Box sx={{ pt: 2 }}>
@@ -968,7 +998,7 @@ export const ProjectItemsPage: React.FC = () => {
               <Box sx={{ display: 'grid', gap: 2 }}>
                 <Paper elevation={1} sx={{ p: 2 }}>
                   <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                    Quantity
+                    {t('projectItems.quantity')}
                   </Typography>
                   <Typography variant="h6">{selectedItem.quantity}</Typography>
                 </Paper>
@@ -976,7 +1006,7 @@ export const ProjectItemsPage: React.FC = () => {
                 {selectedItem.description && (
                   <Paper elevation={1} sx={{ p: 2 }}>
                     <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                      Description
+                      {t('projectItems.description')}
                     </Typography>
                     <Typography variant="body1">{selectedItem.description}</Typography>
                   </Paper>
@@ -984,35 +1014,35 @@ export const ProjectItemsPage: React.FC = () => {
 
                 <Paper elevation={1} sx={{ p: 2 }}>
                   <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                    Delivery & Invoice Options
+                    {t('projectItems.deliveryInvoiceOptions')}
                   </Typography>
                   {viewItemDeliveryOptions && viewItemDeliveryOptions.length > 0 ? (
                     <Box sx={{ mt: 2 }}>
                       {viewItemDeliveryOptions.map((option, index) => (
                         <Paper key={option.id} elevation={2} sx={{ p: 2, mb: 2, bgcolor: 'grey.50' }}>
                           <Typography variant="body2" fontWeight="medium" gutterBottom>
-                            Option {index + 1} - Slot {option.slot_number}
+                            {t('projectItems.option')} {index + 1} - {t('projectItems.slot')} {option.slot_number}
                           </Typography>
                           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 1 }}>
                             <Box>
-                              <Typography variant="caption" color="textSecondary">Delivery Date:</Typography>
+                              <Typography variant="caption" color="textSecondary">{t('projectItems.deliveryDate')}:</Typography>
                               <Typography variant="body2">{option.delivery_date}</Typography>
                             </Box>
                             <Box>
-                              <Typography variant="caption" color="textSecondary">Invoice Amount/Unit:</Typography>
+                              <Typography variant="caption" color="textSecondary">{t('projectItems.invoiceAmountPerUnit')}:</Typography>
                               <Typography variant="body2">${option.invoice_amount_per_unit}</Typography>
                             </Box>
                             <Box>
-                              <Typography variant="caption" color="textSecondary">Invoice Timing:</Typography>
+                              <Typography variant="caption" color="textSecondary">{t('projectItems.invoiceTiming')}:</Typography>
                               <Typography variant="body2">
                                 {option.invoice_timing_type === 'ABSOLUTE' 
-                                  ? `Absolute: ${option.invoice_issue_date}`
-                                  : `Relative: ${option.invoice_days_after_delivery} days after delivery`
+                                  ? `${t('projectItems.absolute')}: ${option.invoice_issue_date}`
+                                  : `${t('projectItems.relative')}: ${option.invoice_days_after_delivery} ${t('projectItems.daysAfterDelivery')}`
                                 }
                               </Typography>
                             </Box>
                             <Box>
-                              <Typography variant="caption" color="textSecondary">Total Invoice:</Typography>
+                              <Typography variant="caption" color="textSecondary">{t('projectItems.totalInvoice')}:</Typography>
                               <Typography variant="body2" fontWeight="medium">
                                 ${(option.invoice_amount_per_unit * selectedItem.quantity).toFixed(2)}
                               </Typography>
@@ -1023,17 +1053,17 @@ export const ProjectItemsPage: React.FC = () => {
                     </Box>
                   ) : (
                     <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-                      No delivery & invoice options configured
+                      {t('projectItems.noDeliveryInvoiceOptions')}
                     </Typography>
                   )}
                 </Paper>
 
                 <Paper elevation={1} sx={{ p: 2 }}>
                   <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                    External Purchase
+                    {t('projectItems.externalPurchase')}
                   </Typography>
                   <Chip 
-                    label={selectedItem.external_purchase ? 'Yes' : 'No'} 
+                    label={selectedItem.external_purchase ? t('projectItems.yes') : t('projectItems.no')} 
                     color={selectedItem.external_purchase ? 'warning' : 'default'}
                   />
                 </Paper>
@@ -1041,7 +1071,7 @@ export const ProjectItemsPage: React.FC = () => {
                 {selectedItem.file_name && (
                   <Paper elevation={1} sx={{ p: 2 }}>
                     <Typography variant="subtitle2" color="textSecondary" gutterBottom>
-                      Attached File
+                      {t('projectItems.attachedFile')}
                     </Typography>
                     <Typography variant="body2">📎 {selectedItem.file_name}</Typography>
                   </Paper>
@@ -1049,13 +1079,13 @@ export const ProjectItemsPage: React.FC = () => {
 
                 <Paper elevation={1} sx={{ p: 2, bgcolor: 'grey.50' }}>
                   <Typography variant="caption" color="textSecondary">
-                    Created: {new Date(selectedItem.created_at).toLocaleString()}
+                    {t('projectItems.created')}: {new Date(selectedItem.created_at).toLocaleString()}
                   </Typography>
                   {selectedItem.updated_at && (
                     <>
                       <br />
                       <Typography variant="caption" color="textSecondary">
-                        Updated: {new Date(selectedItem.updated_at).toLocaleString()}
+                        {t('projectItems.updated')}: {new Date(selectedItem.updated_at).toLocaleString()}
                       </Typography>
                     </>
                   )}
@@ -1065,7 +1095,7 @@ export const ProjectItemsPage: React.FC = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setViewDialogOpen(false)}>Close</Button>
+          <Button onClick={() => setViewDialogOpen(false)}>{t('projectItems.close')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

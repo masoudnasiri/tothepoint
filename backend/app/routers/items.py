@@ -423,3 +423,55 @@ async def unfinalize_project_item_by_id(
     
     # Return updated item
     return await get_project_item(db, item_id)
+
+
+@router.put("/project/{project_id}/finalize-all")
+async def finalize_all_project_items(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Finalize all non-finalized items in a project"""
+    from sqlalchemy import select, update
+    from app.models import ProjectItem as ProjectItemModel
+    from datetime import datetime
+    
+    user_projects = await get_user_projects(db, current_user)
+    
+    # Check if user can access this project
+    if current_user.role == "pm" and project_id not in user_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this project"
+        )
+    
+    # Get all non-finalized items in the project
+    query = select(ProjectItemModel).where(
+        ProjectItemModel.project_id == project_id,
+        ProjectItemModel.is_finalized == False
+    )
+    result = await db.execute(query)
+    items = result.scalars().all()
+    
+    if not items:
+        return {"message": "No items to finalize", "finalized_count": 0}
+    
+    # Finalize all items
+    await db.execute(
+        update(ProjectItemModel)
+        .where(
+            ProjectItemModel.project_id == project_id,
+            ProjectItemModel.is_finalized == False
+        )
+        .values(
+            is_finalized=True, 
+            finalized_by=current_user.id, 
+            finalized_at=datetime.utcnow()
+        )
+    )
+    await db.commit()
+    
+    return {
+        "message": f"Successfully finalized {len(items)} items",
+        "finalized_count": len(items)
+    }

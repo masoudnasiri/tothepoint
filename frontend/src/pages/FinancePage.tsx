@@ -26,6 +26,7 @@ import {
   FormControl,
   InputLabel,
   Divider,
+  Grid,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -35,6 +36,8 @@ import {
   Upload as UploadIcon,
   AccountBalance as AccountBalanceIcon,
   CurrencyExchange as CurrencyExchangeIcon,
+  Receipt as ReceiptIcon,
+  AttachMoney as AttachMoneyIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -43,6 +46,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { financeAPI, excelAPI, currencyAPI } from '../services/api.ts';
 import { BudgetData, BudgetDataCreate, Currency } from '../types/index.ts';
 import { CurrencyManagementPage } from './CurrencyManagementPage.tsx';
+import InvoicePaymentManagement from '../components/InvoicePaymentManagement.tsx';
 import { useTranslation } from 'react-i18next';
 
 interface TabPanelProps {
@@ -291,6 +295,11 @@ export const FinancePage: React.FC = () => {
             label={t('finance.currencyManagement')} 
             iconPosition="start"
           />
+          <Tab 
+            icon={<ReceiptIcon />} 
+            label={t('finance.invoiceAndPayment')} 
+            iconPosition="start"
+          />
         </Tabs>
 
         {/* Budget Management Tab */}
@@ -305,7 +314,7 @@ export const FinancePage: React.FC = () => {
               onClick={handleDownloadTemplate}
               sx={{ mr: 1 }}
             >
-              Download Template
+              {t('finance.downloadTemplate')}
             </Button>
             <Button
               variant="outlined"
@@ -313,7 +322,7 @@ export const FinancePage: React.FC = () => {
               startIcon={<UploadIcon />}
               sx={{ mr: 1 }}
             >
-              Import Budget
+              {t('finance.importBudget')}
               <input
                 type="file"
                 hidden
@@ -327,7 +336,7 @@ export const FinancePage: React.FC = () => {
               onClick={handleExportBudget}
               sx={{ mr: 1 }}
             >
-              Export Budget
+              {t('finance.exportBudget')}
             </Button>
             <Button
               variant="contained"
@@ -341,7 +350,7 @@ export const FinancePage: React.FC = () => {
                 setCreateDialogOpen(true);
               }}
             >
-              Add Budget
+              {t('finance.addBudget')}
             </Button>
           </Box>
         )}
@@ -355,7 +364,7 @@ export const FinancePage: React.FC = () => {
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Budget Summary
+          {t('finance.budgetSummary')}
         </Typography>
         <Box display="flex" gap={2} flexWrap="wrap">
           <Chip
@@ -383,11 +392,11 @@ export const FinancePage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Budget Date</TableCell>
-              <TableCell align="right">Base Budget (IRR)</TableCell>
-              <TableCell align="left">Multi-Currency Budgets</TableCell>
-              <TableCell align="center">Created</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell>{t('finance.budgetDate')}</TableCell>
+              <TableCell align="right">{t('finance.baseBudgetIRR')}</TableCell>
+              <TableCell align="left">{t('finance.multiCurrencyBudgets')}</TableCell>
+              <TableCell align="center">{t('finance.created')}</TableCell>
+              <TableCell align="center">{t('common.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -418,7 +427,7 @@ export const FinancePage: React.FC = () => {
                     </Box>
                   ) : (
                     <Typography variant="body2" color="text.secondary">
-                      None
+                      {t('finance.none')}
                     </Typography>
                   )}
                 </TableCell>
@@ -464,7 +473,7 @@ export const FinancePage: React.FC = () => {
 
       {/* Create Budget Dialog */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Add New Budget Entry</DialogTitle>
+        <DialogTitle>{t('finance.addNewBudgetEntry')}</DialogTitle>
         <DialogContent>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <DatePicker
@@ -493,7 +502,7 @@ export const FinancePage: React.FC = () => {
 
           <Divider sx={{ my: 3 }}>
             <Typography variant="body2" color="text.secondary">
-              Multi-Currency Budgets (Optional)
+              {t('finance.multiCurrencyBudgetsOptional')}
             </Typography>
           </Divider>
 
@@ -521,7 +530,7 @@ export const FinancePage: React.FC = () => {
                       size="small"
                       onClick={() => removeCurrencyBudget(code)}
                     >
-                      Remove
+                      {t('finance.remove')}
                     </Button>
                   </Box>
                 );
@@ -531,7 +540,7 @@ export const FinancePage: React.FC = () => {
 
           {/* Add new currency budget */}
           <FormControl fullWidth margin="dense">
-            <InputLabel>Add Currency Budget</InputLabel>
+            <InputLabel>{t('finance.addCurrencyBudget')}</InputLabel>
             <Select
               label={t('finance.addCurrencyBudget')}
               value=""
@@ -555,14 +564,14 @@ export const FinancePage: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleCreateBudget} variant="contained">
-            Add Budget
+            {t('finance.addBudget')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Edit Budget Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Edit Budget Entry</DialogTitle>
+        <DialogTitle>{t('finance.editBudgetEntry')}</DialogTitle>
         <DialogContent>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <DatePicker
@@ -592,7 +601,7 @@ export const FinancePage: React.FC = () => {
 
           <Divider sx={{ my: 3 }}>
             <Typography variant="body2" color="text.secondary">
-              Multi-Currency Budgets (Optional)
+              {t('finance.multiCurrencyBudgetsOptional')}
             </Typography>
           </Divider>
 
@@ -620,7 +629,7 @@ export const FinancePage: React.FC = () => {
                       size="small"
                       onClick={() => removeCurrencyBudget(code)}
                     >
-                      Remove
+                      {t('finance.remove')}
                     </Button>
                   </Box>
                 );
@@ -630,7 +639,7 @@ export const FinancePage: React.FC = () => {
 
           {/* Add new currency budget */}
           <FormControl fullWidth margin="dense">
-            <InputLabel>Add Currency Budget</InputLabel>
+            <InputLabel>{t('finance.addCurrencyBudget')}</InputLabel>
             <Select
               label={t('finance.addCurrencyBudget')}
               value=""
@@ -654,7 +663,7 @@ export const FinancePage: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleEditBudget} variant="contained">
-            Update Budget
+            {t('finance.updateBudget')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -663,6 +672,11 @@ export const FinancePage: React.FC = () => {
         {/* Currency Management Tab */}
         <TabPanel value={tabValue} index={1}>
           <CurrencyManagementPage />
+        </TabPanel>
+
+        {/* Invoice and Payment Tab */}
+        <TabPanel value={tabValue} index={2}>
+          <InvoicePaymentManagement />
         </TabPanel>
       </Paper>
     </Box>

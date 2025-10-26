@@ -112,8 +112,10 @@ export const DashboardPage: React.FC = () => {
   const { t } = useTranslation();
   const [forecastData, setForecastData] = useState<CashflowResponse | null>(null);
   const [actualData, setActualData] = useState<CashflowResponse | null>(null);
+  const [allData, setAllData] = useState<CashflowResponse | null>(null);
   const [forecastByCurrency, setForecastByCurrency] = useState<{[key: string]: CashflowResponse}>({});
   const [actualByCurrency, setActualByCurrency] = useState<{[key: string]: CashflowResponse}>({});
+  const [allDataByCurrency, setAllDataByCurrency] = useState<{[key: string]: CashflowResponse}>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [page, setPage] = useState(0);
@@ -128,7 +130,7 @@ export const DashboardPage: React.FC = () => {
         const projectIdsParam = selectedProjects.length > 0 ? selectedProjects.join(',') : undefined;
         
         // Fetch both forecast and actual data with currency view
-        const [forecastResponse, actualResponse] = await Promise.all([
+        const [forecastResponse, actualResponse, allDataResponse] = await Promise.all([
           dashboardAPI.getCashflow({ 
             forecast_type: 'FORECAST',
             project_ids: projectIdsParam,
@@ -136,6 +138,11 @@ export const DashboardPage: React.FC = () => {
           }),
           dashboardAPI.getCashflow({ 
             forecast_type: 'ACTUAL',
+            project_ids: projectIdsParam,
+            currency_view: currencyDisplayMode === 'unified' ? 'unified' : 'original'
+          }),
+          dashboardAPI.getCashflow({ 
+            // No forecast_type filter - get all events (both forecast and actual)
             project_ids: projectIdsParam,
             currency_view: currencyDisplayMode === 'unified' ? 'unified' : 'original'
           })
@@ -168,6 +175,19 @@ export const DashboardPage: React.FC = () => {
           // Unified response
           setActualData(actualResponse.data);
           setActualByCurrency({});
+        }
+        
+        // Process all data (both forecast and actual)
+        if (allDataResponse.data.view_mode === 'original' && allDataResponse.data.currencies) {
+          // Multi-currency response - store all currencies
+          setAllDataByCurrency(allDataResponse.data.currencies);
+          // Also set main data to IRR for backward compatibility
+          const irrData = allDataResponse.data.currencies['IRR'] || { time_series: [], summary: {}, period_count: 0 };
+          setAllData(irrData);
+        } else {
+          // Unified response
+          setAllData(allDataResponse.data);
+          setAllDataByCurrency({});
         }
       } catch (err: any) {
         console.error('Dashboard fetch error:', err);
@@ -247,17 +267,32 @@ export const DashboardPage: React.FC = () => {
 
   // Get data based on selected view mode
   const currentData = viewMode === 'forecast' ? forecastData : 
-                      viewMode === 'actual' ? actualData : 
+                      viewMode === 'actual' ? actualData :  // Use actualData (only actual events) for actual view
                       forecastData; // For comparison, we'll use forecast as base
 
-  const summary = currentData?.summary || {
+  // Get summary based on selected view mode
+  const summary = viewMode === 'forecast' ? (forecastData?.summary || {
     total_inflow: 0,
     total_outflow: 0,
     net_position: 0,
     peak_balance: 0,
     min_balance: 0,
     final_balance: 0,
-  };
+  }) : viewMode === 'actual' ? (actualData?.summary || {
+    total_inflow: 0,
+    total_outflow: 0,
+    net_position: 0,
+    peak_balance: 0,
+    min_balance: 0,
+    final_balance: 0,
+  }) : (forecastData?.summary || {
+    total_inflow: 0,
+    total_outflow: 0,
+    net_position: 0,
+    peak_balance: 0,
+    min_balance: 0,
+    final_balance: 0,
+  });
 
   const actualSummary = actualData?.summary || {
     total_inflow: 0,
@@ -368,13 +403,17 @@ export const DashboardPage: React.FC = () => {
       </Paper>
 
       {/* Multi-Currency Summary (Original Mode) */}
-      {currencyDisplayMode === 'original' && Object.keys(forecastByCurrency).length > 0 && (
+      {currencyDisplayMode === 'original' && Object.keys(viewMode === 'forecast' ? forecastByCurrency : 
+                                                          viewMode === 'actual' ? actualByCurrency : 
+                                                          forecastByCurrency).length > 0 && (
         <Paper sx={{ p: 3, mb: 4 }}>
           <Typography variant="h6" gutterBottom>
             {t('dashboard.cashFlowByCurrency')}
           </Typography>
           <Grid container spacing={2}>
-            {Object.entries(forecastByCurrency).map(([currencyCode, currencyData]) => (
+            {Object.entries(viewMode === 'forecast' ? forecastByCurrency : 
+                          viewMode === 'actual' ? actualByCurrency : 
+                          forecastByCurrency).map(([currencyCode, currencyData]) => (
               <Grid item xs={12} sm={6} md={4} key={currencyCode}>
                 <Card variant="outlined">
                   <CardContent>
@@ -563,10 +602,13 @@ export const DashboardPage: React.FC = () => {
       </Grid>
 
       {/* Cash Flow Chart */}
-      {console.log('DEBUG: Rendering check - currencyDisplayMode:', currencyDisplayMode, 'forecastByCurrency keys:', Object.keys(forecastByCurrency), 'length:', Object.keys(forecastByCurrency).length)}
-      {currencyDisplayMode === 'original' && Object.keys(forecastByCurrency).length > 0 ? (
+      {currencyDisplayMode === 'original' && Object.keys(viewMode === 'forecast' ? forecastByCurrency : 
+                                                          viewMode === 'actual' ? actualByCurrency : 
+                                                          forecastByCurrency).length > 0 ? (
         // Multi-Currency Charts (Original Mode) - Separate chart for each currency
-        Object.entries(forecastByCurrency).map(([currencyCode, currencyData]) => (
+        Object.entries(viewMode === 'forecast' ? forecastByCurrency : 
+                      viewMode === 'actual' ? actualByCurrency : 
+                      forecastByCurrency).map(([currencyCode, currencyData]) => (
           <Paper key={currencyCode} sx={{ p: 3, mb: 3 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
               <Typography variant="h6">
@@ -644,7 +686,7 @@ export const DashboardPage: React.FC = () => {
                     actual_outflow: actualData?.time_series[idx]?.outflow || 0,
                     budget: f.budget,
                   })) :
-                  currentData.time_series
+                  currentData?.time_series || []  // Use currentData based on view mode
                 }
                 margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
               >
@@ -723,7 +765,7 @@ export const DashboardPage: React.FC = () => {
                 : t('dashboard.detailedViewDescription')}
             </Typography>
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={currentData.time_series}>
+              <ComposedChart data={currentData?.time_series || []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                   dataKey="month"

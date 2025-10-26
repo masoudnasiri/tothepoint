@@ -77,27 +77,60 @@ async def get_earned_value_analytics(
     
     # Calculate Planned Value (PV) - budgeted cost of work scheduled to be complete by now
     # PV = Sum of planned costs for work that SHOULD be done by today (based on delivery dates)
+    # FALLBACK: If all delivery dates are in future, use finalized_at dates instead
     today = date.today()
     
     PV = 0
     items_should_be_done = 0
+    
+    # Check if all delivery dates are in the future (data quality issue)
+    all_delivery_dates_future = all(
+        d.delivery_date and d.delivery_date > today 
+        for d in decisions if d.delivery_date
+    )
+    
     for d in decisions:
-        # Work is "scheduled" if delivery date has passed
-        if d.delivery_date and d.delivery_date <= today:
+        # Use finalized_at date as fallback if delivery dates are unrealistic
+        if all_delivery_dates_future and d.finalized_at:
+            # Work is "scheduled" if finalized more than 30 days ago
+            if d.finalized_at.date() <= today - timedelta(days=30):
+                items_should_be_done += 1
+                PV += float(d.final_cost)
+        elif d.delivery_date and d.delivery_date <= today:
+            # Normal case: use delivery date
             items_should_be_done += 1
-            # Add the PLANNED COST (not invoice amount) to PV
             PV += float(d.final_cost)
     
     # Calculate Earned Value (EV) - budgeted cost of work actually completed
-    # EV = Sum of planned costs for work that HAS BEEN ACCEPTED by PM
-    # This is more accurate than just LOCKED status
+    # Priority: Actual Payment > PM Acceptance > Delivery Complete > LOCKED Status
     EV = 0
     items_actually_done = 0
+    
     for d in decisions:
-        if d.status == 'LOCKED' and d.pm_accepted_at:
+        # Priority 1: Actual payment indicates truly completed work
+        if d.status == 'LOCKED' and d.actual_payment_amount and d.actual_payment_amount > 0:
             items_actually_done += 1
-            # Add the PLANNED COST (not actual cost or invoice) to EV
             EV += float(d.final_cost)
+        # Priority 2: PM acceptance if workflow exists
+        elif d.status == 'LOCKED' and d.pm_accepted_at:
+            items_actually_done += 1
+            EV += float(d.final_cost)
+        # Priority 3: Delivery complete status
+        elif d.status == 'LOCKED' and d.delivery_status == 'DELIVERY_COMPLETE':
+            items_actually_done += 1
+            EV += float(d.final_cost)
+        # Priority 4: LOCKED status (least reliable indicator)
+        elif d.status == 'LOCKED':
+            # Only use LOCKED if no other indicators are available
+            has_any_completion_indicator = any(
+                decision.actual_payment_amount or 
+                decision.pm_accepted_at or 
+                decision.delivery_status == 'DELIVERY_COMPLETE'
+                for decision in decisions
+            )
+            if not has_any_completion_indicator:
+                items_actually_done += 1
+                EV += float(d.final_cost)
     
     # Calculate performance indices
     CPI = EV / AC if AC > 0 else 1.0
@@ -147,17 +180,32 @@ async def get_earned_value_analytics(
         # PV at this date - budgeted cost of work scheduled by target_date
         pv_at_date = 0
         for d in decisions:
-            # Work is "scheduled" if delivery date <= target_date
-            if d.delivery_date and d.delivery_date <= target_date:
+            # Use finalized_at date as fallback if delivery dates are unrealistic
+            if all_delivery_dates_future and d.finalized_at:
+                # Work is "scheduled" if finalized by target_date
+                if d.finalized_at.date() <= target_date:
+                    pv_at_date += float(d.final_cost)
+            elif d.delivery_date and d.delivery_date <= target_date:
+                # Normal case: use delivery date
                 pv_at_date += float(d.final_cost)
         
         # EV at this date - budgeted cost of work actually completed by target_date
         ev_at_date = 0
         for d in decisions:
-            if d.status == 'LOCKED' and d.pm_accepted_at and d.pm_accepted_at.date() <= target_date:
-                # Add PLANNED COST (not actual or invoice)
-                # Work is "earned" when PM accepts it
-                ev_at_date += float(d.final_cost)
+            # Check if PM acceptance workflow is implemented
+            has_pm_acceptance_workflow = any(
+                decision.pm_accepted_at is not None 
+                for decision in decisions
+            )
+            
+            if has_pm_acceptance_workflow:
+                # Use PM acceptance if workflow exists
+                if d.status == 'LOCKED' and d.pm_accepted_at and d.pm_accepted_at.date() <= target_date:
+                    ev_at_date += float(d.final_cost)
+            else:
+                # FALLBACK: Use LOCKED status if PM acceptance workflow is missing
+                if d.status == 'LOCKED' and d.finalized_at and d.finalized_at.date() <= target_date:
+                    ev_at_date += float(d.final_cost)
         
         # AC at this date - sum of actual costs for payments made by this date
         ac_at_date = sum(
@@ -448,14 +496,35 @@ async def get_portfolio_eva(
             PV += float(d.final_cost)
     
     # EV - budgeted cost of work actually completed across all projects
-    # Work is "earned" when PM accepts it
+    # Priority: Actual Payment > PM Acceptance > Delivery Complete > LOCKED Status
     EV = 0
     items_actually_done = 0
+    
     for d in all_decisions:
-        if d.status == 'LOCKED' and d.pm_accepted_at:
+        # Priority 1: Actual payment indicates truly completed work
+        if d.status == 'LOCKED' and d.actual_payment_amount and d.actual_payment_amount > 0:
             items_actually_done += 1
-            # Add PLANNED COST (not actual or invoice)
             EV += float(d.final_cost)
+        # Priority 2: PM acceptance if workflow exists
+        elif d.status == 'LOCKED' and d.pm_accepted_at:
+            items_actually_done += 1
+            EV += float(d.final_cost)
+        # Priority 3: Delivery complete status
+        elif d.status == 'LOCKED' and d.delivery_status == 'DELIVERY_COMPLETE':
+            items_actually_done += 1
+            EV += float(d.final_cost)
+        # Priority 4: LOCKED status (least reliable indicator)
+        elif d.status == 'LOCKED':
+            # Only use LOCKED if no other indicators are available
+            has_any_completion_indicator = any(
+                decision.actual_payment_amount or 
+                decision.pm_accepted_at or 
+                decision.delivery_status == 'DELIVERY_COMPLETE'
+                for decision in all_decisions
+            )
+            if not has_any_completion_indicator:
+                items_actually_done += 1
+                EV += float(d.final_cost)
     
     # AC - actual cost across all projects
     # Only count decisions where payment has actually been made

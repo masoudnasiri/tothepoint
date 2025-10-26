@@ -556,7 +556,7 @@ async def update_exchange_rate(
 
 
 @router.delete("/exchange-rates/{rate_id}")
-async def delete_exchange_rate(
+async def delete_exchange_rate_legacy(
     rate_id: int,
     current_user: User = Depends(require_finance()),
     db: AsyncSession = Depends(get_db)
@@ -605,7 +605,6 @@ async def convert_currency(
     from_currency_id: int = Query(..., description="Source currency ID"),
     to_currency_id: int = Query(..., description="Target currency ID"),
     conversion_date: Optional[date] = Query(None, description="Date for conversion (defaults to today)"),
-    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Convert amount between currencies"""
@@ -636,11 +635,12 @@ async def convert_currency(
     if not from_currency.is_base_currency:
         from_rate_query = select(ExchangeRate).where(
             and_(
-                ExchangeRate.currency_id == from_currency_id,
+                ExchangeRate.from_currency == from_currency.code,
+                ExchangeRate.to_currency == 'IRR',  # Assuming IRR is base currency
                 ExchangeRate.is_active == True,
-                ExchangeRate.rate_date <= conversion_date
+                ExchangeRate.date <= conversion_date
             )
-        ).order_by(ExchangeRate.rate_date.desc()).limit(1)
+        ).order_by(ExchangeRate.date.desc()).limit(1)
         
         from_rate_result = await db.execute(from_rate_query)
         from_rate = from_rate_result.scalar_one_or_none()
@@ -650,16 +650,17 @@ async def convert_currency(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No exchange rate found for {from_currency.code} on or before {conversion_date}"
             )
-        from_rate_to_base = from_rate.rate_to_base
+        from_rate_to_base = from_rate.rate
     
     if not to_currency.is_base_currency:
         to_rate_query = select(ExchangeRate).where(
             and_(
-                ExchangeRate.currency_id == to_currency_id,
+                ExchangeRate.from_currency == to_currency.code,
+                ExchangeRate.to_currency == 'IRR',  # Assuming IRR is base currency
                 ExchangeRate.is_active == True,
-                ExchangeRate.rate_date <= conversion_date
+                ExchangeRate.date <= conversion_date
             )
-        ).order_by(ExchangeRate.rate_date.desc()).limit(1)
+        ).order_by(ExchangeRate.date.desc()).limit(1)
         
         to_rate_result = await db.execute(to_rate_query)
         to_rate = to_rate_result.scalar_one_or_none()
@@ -669,7 +670,7 @@ async def convert_currency(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No exchange rate found for {to_currency.code} on or before {conversion_date}"
             )
-        to_rate_to_base = to_rate.rate_to_base
+        to_rate_to_base = to_rate.rate
     
     # Convert to base currency first, then to target currency
     base_amount = amount * from_rate_to_base

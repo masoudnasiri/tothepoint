@@ -43,6 +43,7 @@ import {
 import { currencyAPI } from '../services/api.ts';
 import { CurrencyWithRates, CurrencyCreate, ExchangeRateCreate, CurrencyConversion } from '../types/index.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
+import { useTranslation } from 'react-i18next';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -66,6 +67,7 @@ function TabPanel(props: TabPanelProps) {
 }
 
 export const CurrencyManagementPage: React.FC = () => {
+  const { t } = useTranslation();
   const [currencies, setCurrencies] = useState<CurrencyWithRates[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -106,10 +108,11 @@ export const CurrencyManagementPage: React.FC = () => {
   
   // Conversion calculator states
   const [conversionAmount, setConversionAmount] = useState<number>(0);
-  const [fromCurrency, setFromCurrency] = useState<number>(0);
-  const [toCurrency, setToCurrency] = useState<number>(0);
+  const [fromCurrency, setFromCurrency] = useState<number | ''>('');
+  const [toCurrency, setToCurrency] = useState<number | ''>('');
   const [conversionResult, setConversionResult] = useState<CurrencyConversion | null>(null);
   const [converting, setConverting] = useState(false);
+  
 
   useEffect(() => {
     fetchCurrencies();
@@ -182,7 +185,10 @@ export const CurrencyManagementPage: React.FC = () => {
   // NEW: Fetch exchange rates
   const fetchExchangeRates = async () => {
     try {
+      console.log('Fetching exchange rates...');
       const response = await currencyAPI.listExchangeRates();
+      console.log('Exchange rates response:', response.data);
+      console.log('Number of rates:', response.data.length);
       setExchangeRates(response.data);
     } catch (err: any) {
       console.error('Failed to load exchange rates:', err);
@@ -236,13 +242,25 @@ export const CurrencyManagementPage: React.FC = () => {
 
   // NEW: Handle deleting exchange rate
   const handleDeleteRate = async (rateId: number) => {
+    console.log('Delete button clicked for rate ID:', rateId);
+    console.log('Rate ID type:', typeof rateId);
+    
     if (window.confirm('Are you sure you want to delete this exchange rate?')) {
       try {
-        await currencyAPI.deleteExchangeRate(rateId);
+        console.log('Making API call to delete rate:', rateId);
+        const response = await currencyAPI.deleteExchangeRate(rateId);
+        console.log('Delete API response:', response);
         setSuccess('Exchange rate deleted successfully');
-        fetchExchangeRates();
-        fetchCurrencies();
+        console.log('Success message set:', 'Exchange rate deleted successfully');
+        await fetchExchangeRates();
+        await fetchCurrencies();
+        console.log('Data refresh completed');
+        
+        // Force a re-render by updating a dummy state
+        setExchangeRates(prev => [...prev]);
       } catch (err: any) {
+        console.error('Delete rate error:', err);
+        console.error('Error details:', err.response?.data);
         setError(formatApiError(err, 'Failed to delete exchange rate'));
       }
     }
@@ -272,8 +290,20 @@ export const CurrencyManagementPage: React.FC = () => {
     
     try {
       setConverting(true);
-      const response = await currencyAPI.convert(conversionAmount, fromCurrency, toCurrency);
-      setConversionResult(response.data);
+      
+      // Use the backend API for local conversion
+      const response = await currencyAPI.convert(conversionAmount, fromCurrency as number, toCurrency as number);
+      
+      // Ensure numeric values are properly converted
+      const result = {
+        ...response.data,
+        original_amount: Number(response.data.original_amount),
+        converted_amount: Number(response.data.converted_amount),
+        from_rate: Number(response.data.from_rate),
+        to_rate: Number(response.data.to_rate)
+      };
+      
+      setConversionResult(result);
     } catch (err: any) {
       setError(formatApiError(err, 'Failed to convert currency'));
     } finally {
@@ -281,9 +311,22 @@ export const CurrencyManagementPage: React.FC = () => {
     }
   };
 
-  const formatCurrencyAmount = (amount: number, currency: CurrencyWithRates) => {
-    const formatted = amount.toFixed(currency.decimal_places);
-    return `${currency.symbol}${formatted}`;
+  const formatCurrencyAmount = (amount: number | string | null | undefined, currency: CurrencyWithRates | null | undefined) => {
+    // Check if currency is valid
+    if (!currency || !currency.decimal_places) {
+      return '0.00';
+    }
+    
+    // Convert to number safely
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+    
+    // Check if the conversion resulted in a valid number
+    if (isNaN(numAmount) || numAmount === null || numAmount === undefined) {
+      return `${currency.symbol || ''}0.00`;
+    }
+    
+    const formatted = numAmount.toFixed(currency.decimal_places);
+    return `${currency.symbol || ''}${formatted}`;
   };
 
   const formatRate = (rate: number | null | undefined) => {
@@ -311,14 +354,14 @@ export const CurrencyManagementPage: React.FC = () => {
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">
           <CurrencyExchangeIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-          Currency Management
+          {t('finance.currencyManagement')}
         </Typography>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setCurrencyDialogOpen(true)}
         >
-          Add Currency
+          {t('finance.addCurrency')}
         </Button>
       </Box>
 
@@ -333,6 +376,7 @@ export const CurrencyManagementPage: React.FC = () => {
           {success}
         </Alert>
       )}
+      {console.log('Rendering success message:', success)}
 
       <Paper sx={{ width: '100%' }}>
         <Tabs
@@ -340,9 +384,9 @@ export const CurrencyManagementPage: React.FC = () => {
           onChange={(_, newValue) => setTabValue(newValue)}
           aria-label="currency management tabs"
         >
-          <Tab label="Currencies" />
-          <Tab label="Exchange Rates" />
-          <Tab label="Currency Converter" />
+          <Tab label={t('finance.currencies')} />
+          <Tab label={t('finance.exchangeRates')} />
+          <Tab label={t('finance.currencyConverter')} />
         </Tabs>
 
         {/* Currencies Tab */}
@@ -351,13 +395,13 @@ export const CurrencyManagementPage: React.FC = () => {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Code</TableCell>
-                  <TableCell>Name</TableCell>
-                  <TableCell>Symbol</TableCell>
-                  <TableCell align="center">Base Currency</TableCell>
-                  <TableCell align="right">Latest Rate</TableCell>
-                  <TableCell align="center">Status</TableCell>
-                  <TableCell align="center">Actions</TableCell>
+                  <TableCell>{t('finance.code')}</TableCell>
+                  <TableCell>{t('finance.name')}</TableCell>
+                  <TableCell>{t('finance.symbol')}</TableCell>
+                  <TableCell align="center">{t('finance.baseCurrency')}</TableCell>
+                  <TableCell align="right">{t('finance.latestRate')}</TableCell>
+                  <TableCell align="center">{t('finance.status')}</TableCell>
+                  <TableCell align="center">{t('finance.actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -382,12 +426,12 @@ export const CurrencyManagementPage: React.FC = () => {
                         <Typography variant="body2">
                           {formatRate(currency.rate_to_base)}
                           <Typography component="span" variant="caption" color="text.secondary">
-                            {' '}IRR
+                            {' '}{t('finance.irr')}
                           </Typography>
                         </Typography>
                       ) : (
                         <Typography variant="caption" color="text.secondary">
-                          No rate
+                          {t('finance.noRate')}
                         </Typography>
                       )}
                     </TableCell>
@@ -444,7 +488,7 @@ export const CurrencyManagementPage: React.FC = () => {
         {/* Exchange Rates Tab */}
         <TabPanel value={tabValue} index={1}>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-            <Typography variant="h5">Exchange Rates Management</Typography>
+            <Typography variant="h5">{t('finance.exchangeRatesManagement')}</Typography>
             <Button
               variant="contained"
               startIcon={<AddIcon />}
@@ -459,7 +503,7 @@ export const CurrencyManagementPage: React.FC = () => {
                 setRateDialogOpen(true);
               }}
             >
-              Add Exchange Rate
+              {t('finance.addExchangeRate')}
             </Button>
           </Box>
 
@@ -467,12 +511,12 @@ export const CurrencyManagementPage: React.FC = () => {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>From Currency</TableCell>
-                  <TableCell>To Currency</TableCell>
-                  <TableCell align="right">Exchange Rate</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell align="center">Actions</TableCell>
+                  <TableCell>{t('finance.date')}</TableCell>
+                  <TableCell>{t('finance.fromCurrency')}</TableCell>
+                  <TableCell>{t('finance.toCurrency')}</TableCell>
+                  <TableCell align="right">{t('finance.exchangeRate')}</TableCell>
+                  <TableCell>{t('finance.status')}</TableCell>
+                  <TableCell align="center">{t('finance.actions')}</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -480,7 +524,7 @@ export const CurrencyManagementPage: React.FC = () => {
                   <TableRow>
                     <TableCell colSpan={6} align="center">
                       <Typography variant="body2" color="text.secondary" sx={{ py: 4 }}>
-                        No exchange rates available. Click "Add Exchange Rate" to create one.
+                        {t('finance.noExchangeRatesAvailable')}
                       </Typography>
                     </TableCell>
                   </TableRow>
@@ -518,7 +562,11 @@ export const CurrencyManagementPage: React.FC = () => {
                         <IconButton
                           size="small"
                           color="error"
-                          onClick={() => handleDeleteRate(rate.id)}
+                          onClick={() => {
+                            console.log('Delete button clicked, rate object:', rate);
+                            console.log('Rate ID:', rate.id);
+                            handleDeleteRate(rate.id);
+                          }}
                           title="Delete rate"
                         >
                           <DeleteIcon />
@@ -533,9 +581,7 @@ export const CurrencyManagementPage: React.FC = () => {
 
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography variant="body2">
-              <strong>Note:</strong> Exchange rates can be edited for each specific date. 
-              If you add a rate for a date that already exists, it will update the existing rate.
-              The system uses the closest available rate on or before the transaction date for conversions.
+              {t('finance.exchangeRatesNote')}
             </Typography>
           </Alert>
         </TabPanel>
@@ -548,11 +594,12 @@ export const CurrencyManagementPage: React.FC = () => {
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
                     <AttachMoneyIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                    Currency Converter
+                    {t('finance.currencyConverter')}
                   </Typography>
                   
+                  
                   <TextField
-                    label="Amount"
+                    label={t('finance.amount')}
                     type="number"
                     fullWidth
                     value={conversionAmount}
@@ -561,11 +608,16 @@ export const CurrencyManagementPage: React.FC = () => {
                   />
                   
                   <FormControl fullWidth sx={{ mb: 2 }}>
-                    <InputLabel>From Currency</InputLabel>
+                    <InputLabel>{t('finance.fromCurrency')}</InputLabel>
                     <Select
                       value={fromCurrency}
-                      onChange={(e) => setFromCurrency(Number(e.target.value))}
+                      onChange={(e) => {
+                        setFromCurrency(e.target.value === '' ? '' : Number(e.target.value));
+                      }}
                     >
+                      <MenuItem value="">
+                        <em>Select a currency</em>
+                      </MenuItem>
                       {currencies.filter(c => c.is_active).map((currency) => (
                         <MenuItem key={currency.id} value={currency.id}>
                           {currency.symbol} {currency.code} - {currency.name}
@@ -575,11 +627,16 @@ export const CurrencyManagementPage: React.FC = () => {
                   </FormControl>
                   
                   <FormControl fullWidth sx={{ mb: 2 }}>
-                    <InputLabel>To Currency</InputLabel>
+                    <InputLabel>{t('finance.toCurrency')}</InputLabel>
                     <Select
                       value={toCurrency}
-                      onChange={(e) => setToCurrency(Number(e.target.value))}
+                      onChange={(e) => {
+                        setToCurrency(e.target.value === '' ? '' : Number(e.target.value));
+                      }}
                     >
+                      <MenuItem value="">
+                        <em>Select a currency</em>
+                      </MenuItem>
                       {currencies.filter(c => c.is_active).map((currency) => (
                         <MenuItem key={currency.id} value={currency.id}>
                           {currency.symbol} {currency.code} - {currency.name}
@@ -592,10 +649,14 @@ export const CurrencyManagementPage: React.FC = () => {
                     variant="contained"
                     fullWidth
                     onClick={handleConversion}
-                    disabled={converting || !conversionAmount || !fromCurrency || !toCurrency}
+                    disabled={
+                      converting || 
+                      !conversionAmount || 
+                      !fromCurrency || !toCurrency
+                    }
                     startIcon={converting ? <CircularProgress size={20} /> : <CurrencyExchangeIcon />}
                   >
-                    Convert
+                    {t('finance.convert')}
                   </Button>
                 </CardContent>
               </Card>
@@ -606,21 +667,37 @@ export const CurrencyManagementPage: React.FC = () => {
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Conversion Result
+                      {t('finance.conversionResult')}
                     </Typography>
                     <Box textAlign="center">
                       <Typography variant="h4" color="primary" gutterBottom>
-                        {formatCurrencyAmount(
-                          conversionResult.converted_amount,
-                          currencies.find(c => c.id === toCurrency)!
-                        )}
+                        {conversionResult ? 
+                          `${conversionResult.converted_amount.toLocaleString()} ${currencies.find(c => c.id === toCurrency)?.code || ''}` :
+                          '0.00'
+                        }
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Exchange rate: {conversionResult.from_rate.toFixed(2)} → {conversionResult.to_rate.toFixed(2)}
+                        {conversionResult ? 
+                          `${t('finance.exchangeRateLabel')} ${Number(conversionResult.from_rate).toFixed(2)} → ${Number(conversionResult.to_rate).toFixed(2)}` :
+                          ''
+                        }
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        Date: {new Date(conversionResult.conversion_date).toLocaleDateString()}
+                        {conversionResult ? 
+                          `${t('finance.dateLabel')} ${new Date(conversionResult.conversion_date).toLocaleDateString()}` :
+                          ''
+                        }
                       </Typography>
+                      {conversionResult && (
+                        <Box sx={{ mt: 1 }}>
+                          <Chip 
+                            label="Local Exchange Rate" 
+                            size="small" 
+                            color="default"
+                            variant="outlined"
+                          />
+                        </Box>
+                      )}
                     </Box>
                   </CardContent>
                 </Card>
@@ -633,11 +710,11 @@ export const CurrencyManagementPage: React.FC = () => {
       {/* Currency Dialog */}
       <Dialog open={currencyDialogOpen} onClose={() => setCurrencyDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
-          {editingCurrency ? 'Edit Currency' : 'Add New Currency'}
+          {editingCurrency ? t('finance.editCurrency') : t('finance.addNewCurrency')}
         </DialogTitle>
         <DialogContent>
           <TextField
-            label="Currency Code"
+            label={t('finance.currencyCode')}
             fullWidth
             value={currencyForm.code}
             onChange={(e) => setCurrencyForm({ ...currencyForm, code: e.target.value.toUpperCase() })}
@@ -645,7 +722,7 @@ export const CurrencyManagementPage: React.FC = () => {
             placeholder="e.g., USD, EUR"
           />
           <TextField
-            label="Currency Name"
+            label={t('finance.currencyName')}
             fullWidth
             value={currencyForm.name}
             onChange={(e) => setCurrencyForm({ ...currencyForm, name: e.target.value })}
@@ -653,7 +730,7 @@ export const CurrencyManagementPage: React.FC = () => {
             placeholder="e.g., US Dollar"
           />
           <TextField
-            label="Currency Symbol"
+            label={t('finance.currencySymbol')}
             fullWidth
             value={currencyForm.symbol}
             onChange={(e) => setCurrencyForm({ ...currencyForm, symbol: e.target.value })}
@@ -661,7 +738,7 @@ export const CurrencyManagementPage: React.FC = () => {
             placeholder="e.g., $, €, ﷼"
           />
           <TextField
-            label="Decimal Places"
+            label={t('finance.decimalPlaces')}
             type="number"
             fullWidth
             value={currencyForm.decimal_places}
@@ -675,7 +752,7 @@ export const CurrencyManagementPage: React.FC = () => {
                 onChange={(e) => setCurrencyForm({ ...currencyForm, is_base_currency: e.target.checked })}
               />
             }
-            label="Base Currency"
+            label={t('finance.baseCurrency')}
           />
           <br />
           <FormControlLabel
@@ -685,13 +762,13 @@ export const CurrencyManagementPage: React.FC = () => {
                 onChange={(e) => setCurrencyForm({ ...currencyForm, is_active: e.target.checked })}
               />
             }
-            label="Active"
+            label={t('finance.active')}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCurrencyDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setCurrencyDialogOpen(false)}>{t('finance.cancel')}</Button>
           <Button onClick={handleCurrencySubmit} variant="contained">
-            {editingCurrency ? 'Update' : 'Create'}
+            {editingCurrency ? t('finance.update') : t('finance.create')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -699,11 +776,11 @@ export const CurrencyManagementPage: React.FC = () => {
       {/* NEW: Exchange Rate Dialog */}
       <Dialog open={rateDialogOpen} onClose={() => setRateDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
-          {editingRate ? 'Edit Exchange Rate' : 'Add Exchange Rate'}
+          {editingRate ? t('finance.editExchangeRate') : t('finance.addExchangeRate')}
         </DialogTitle>
         <DialogContent>
           <TextField
-            label="Date"
+            label={t('finance.date')}
             type="date"
             fullWidth
             value={newRateForm.date}
@@ -711,11 +788,11 @@ export const CurrencyManagementPage: React.FC = () => {
             sx={{ mb: 2, mt: 1 }}
             InputLabelProps={{ shrink: true }}
             disabled={!!editingRate}
-            helperText={editingRate ? 'Date cannot be changed when editing' : 'Select the date for this exchange rate'}
+            helperText={editingRate ? t('finance.dateCannotBeChanged') : t('finance.selectDateForExchangeRate')}
           />
           
           <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>From Currency</InputLabel>
+            <InputLabel>{t('finance.fromCurrency')}</InputLabel>
             <Select
               value={newRateForm.from_currency}
               onChange={(e) => setNewRateForm({ ...newRateForm, from_currency: e.target.value })}
@@ -730,25 +807,25 @@ export const CurrencyManagementPage: React.FC = () => {
           </FormControl>
           
           <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>To Currency</InputLabel>
+            <InputLabel>{t('finance.toCurrency')}</InputLabel>
             <Select
               value={newRateForm.to_currency}
               onChange={(e) => setNewRateForm({ ...newRateForm, to_currency: e.target.value })}
               disabled={!!editingRate}
             >
-              <MenuItem value="IRR">﷼ IRR - Iranian Rial (Base Currency)</MenuItem>
+              <MenuItem value="IRR">﷼ {t('finance.irrIranianRialBaseCurrency')}</MenuItem>
             </Select>
           </FormControl>
           
           <TextField
-            label="Exchange Rate"
+            label={t('finance.exchangeRate')}
             type="number"
             fullWidth
             value={newRateForm.rate}
             onChange={(e) => setNewRateForm({ ...newRateForm, rate: Number(e.target.value) })}
             sx={{ mb: 2 }}
             placeholder="e.g., 47600"
-            helperText={`How many ${newRateForm.to_currency} equals 1 ${newRateForm.from_currency}`}
+            helperText={t('finance.howManyToCurrencyEqualsOneFromCurrency', { toCurrency: newRateForm.to_currency, fromCurrency: newRateForm.from_currency })}
             InputProps={{
               inputProps: { step: 0.01, min: 0 }
             }}
@@ -757,7 +834,7 @@ export const CurrencyManagementPage: React.FC = () => {
           {newRateForm.from_currency && newRateForm.rate > 0 && (
             <Alert severity="info" sx={{ mb: 2 }}>
               <Typography variant="body2">
-                <strong>Example:</strong> 1 {newRateForm.from_currency} = {newRateForm.rate.toLocaleString()} {newRateForm.to_currency}
+                <strong>{t('finance.example')}</strong> 1 {newRateForm.from_currency} = {newRateForm.rate.toLocaleString()} {newRateForm.to_currency}
               </Typography>
             </Alert>
           )}
@@ -767,10 +844,10 @@ export const CurrencyManagementPage: React.FC = () => {
             setRateDialogOpen(false);
             setEditingRate(null);
           }}>
-            Cancel
+            {t('finance.cancel')}
           </Button>
           <Button onClick={handleAddRate} variant="contained">
-            {editingRate ? 'Update Rate' : 'Add Rate'}
+            {editingRate ? t('finance.updateRate') : t('finance.addRate')}
           </Button>
         </DialogActions>
       </Dialog>

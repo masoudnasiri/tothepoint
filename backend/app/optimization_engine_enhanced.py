@@ -243,20 +243,30 @@ class EnhancedProcurementOptimizer:
         variables_created = 0
         
         for item in self.project_items:
-            delivery_options = item.delivery_options_rel if item.delivery_options_rel else []
+            # Use JSON delivery_options field instead of relationship
+            delivery_options = []
+            if item.delivery_options:
+                try:
+                    import json
+                    delivery_options = json.loads(item.delivery_options) if isinstance(item.delivery_options, str) else item.delivery_options
+                except:
+                    pass
+            
             if not delivery_options:
                 logger.warning(f"❌ Item {item.item_code} has NO delivery options - SKIPPING")
                 continue
             
             # FIXED: Use actual delivery dates converted to day offsets from today
-            from datetime import date
+            from datetime import date, datetime
             today = date.today()
             valid_times = []
             for delivery_option in delivery_options:
-                delivery_date = delivery_option.delivery_date
-                days_from_today = (delivery_date - today).days
-                if days_from_today > 0:  # Only future dates
-                    valid_times.append(days_from_today)
+                if 'delivery_date' in delivery_option:
+                    delivery_date_str = delivery_option['delivery_date']
+                    delivery_date = datetime.fromisoformat(delivery_date_str.replace('Z', '+00:00')).date()
+                    days_from_today = (delivery_date - today).days
+                    if days_from_today > 0:  # Only future dates
+                        valid_times.append(days_from_today)
             
             if not valid_times:
                 logger.warning(f"❌ Item {item.item_code} has NO valid future delivery dates - SKIPPING")
@@ -654,10 +664,8 @@ class EnhancedProcurementOptimizer:
         
         # Load project items with delivery options relationship
         # ONLY load items that are finalized by PMO (is_finalized == True)
-        from sqlalchemy.orm import selectinload
         items_result = await self.db.execute(
             select(ProjectItem)
-            .options(selectinload(ProjectItem.delivery_options_rel))
             .where(
                 ProjectItem.project_id.in_(self.projects.keys()),
                 ProjectItem.is_finalized == True  # Only finalized items
@@ -754,7 +762,7 @@ class EnhancedProcurementOptimizer:
         valid_items = 0
         for item in self.project_items[:10]:  # Check first 10 items
             item_options = [opt for opt in self.procurement_options.values() if opt.item_code == item.item_code]
-            delivery_options_count = len(item.delivery_options_rel) if item.delivery_options_rel else 0
+            delivery_options_count = len(item.delivery_options) if item.delivery_options else 0
             logger.info(f"Item {item.item_code}: {len(item_options)} finalized options, {delivery_options_count} delivery options")
             
             if len(item_options) == 0:
@@ -831,10 +839,16 @@ class EnhancedProcurementOptimizer:
         for key, vars_list in item_groups.items():
             logger.info(f"  Item {key}: {len(vars_list)} options")
         
+        # Check if we have any feasible options
+        if len(variables) == 0:
+            logger.error("No feasible variables found - optimization will fail")
+            return
+        
         # Allow partial optimization: each item can be purchased at most once (<= 1)
         # This allows the optimizer to skip items when budget is insufficient
         for vars_list in item_groups.values():
-            model.Add(sum(vars_list) <= 1)
+            if len(vars_list) > 0:  # Only add constraints for items with options
+                model.Add(sum(vars_list) <= 1)
     
     def _add_cpsat_budget_constraints(self, model: cp_model.CpModel, variables: Dict, max_time_slots: int):
         """Add soft budget constraints for CP-SAT with slack variables"""
@@ -849,6 +863,11 @@ class EnhancedProcurementOptimizer:
             
             option = self.procurement_options[option_id]
             purchase_time = delivery_time - option.lomc_lead_time
+            
+            # Skip options with impossible lead times (purchase time in the past or too far in the past)
+            if purchase_time < 0:
+                logger.debug(f"Skipping option {option_id} for {item_code}: purchase_time={purchase_time} (negative)")
+                continue
             
             if purchase_time not in time_groups:
                 time_groups[purchase_time] = []
@@ -937,10 +956,13 @@ class EnhancedProcurementOptimizer:
             
             # Calculate business value (revenue from item)
             business_value = 0
-            if hasattr(item, 'delivery_options_rel') and item.delivery_options_rel:
-                # Use the first delivery option's invoice amount
-                first_delivery = item.delivery_options_rel[0]
-                business_value = float(first_delivery.invoice_amount_per_unit) * item.quantity
+            if hasattr(item, 'delivery_options') and item.delivery_options:
+                # Use the first delivery option's invoice amount from JSON field
+                delivery_options = item.delivery_options if isinstance(item.delivery_options, list) else []
+                if delivery_options:
+                    first_delivery = delivery_options[0]
+                    if isinstance(first_delivery, dict) and 'invoice_amount_per_unit' in first_delivery:
+                        business_value = float(first_delivery['invoice_amount_per_unit']) * item.quantity
             
             # If no delivery option, use 200% markup as default to ensure profitability
             if business_value == 0:
@@ -1011,7 +1033,7 @@ class EnhancedProcurementOptimizer:
         logger.info(f"Total cost terms: {len(cost_terms)}")
         logger.info(f"Total value terms: {len(value_terms)}")
         logger.info(f"Budget penalty: {budget_penalty}")
-        logger.info(f"Final objective: {objective_value}")
+        logger.info(f"Final objective: [CP-SAT Expression]")
         
         model.Minimize(objective_value)
     

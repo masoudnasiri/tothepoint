@@ -338,12 +338,12 @@ class ProjectItemFinalize(BaseModel):
 # Procurement Option Schemas
 class PaymentTermsCash(BaseModel):
     type: Literal["cash"] = "cash"
-    discount_percent: Optional[Decimal] = Field(None, ge=0, le=100)
+    discount_percent: Optional[Decimal] = Field(None, ge=0, le=100, description="Discount percentage for cash payment")
 
 
 class PaymentTermsInstallments(BaseModel):
     type: Literal["installments"] = "installments"
-    schedule: List[Dict[str, Union[int, Decimal]]] = Field(..., min_items=1)
+    schedule: List[Dict[str, Union[int, Decimal]]] = Field(..., min_items=1, description="Payment schedule")
     
     @validator('schedule')
     def validate_schedule(cls, v):
@@ -609,6 +609,7 @@ class FinalizedDecision(FinalizedDecisionBase):
     finalized_by_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    is_final_invoice: bool = Field(default=False, description="Is this the final invoice for this item?")
     
     model_config = {"from_attributes": True}
 
@@ -800,6 +801,142 @@ class ProjectSummary(BaseModel):
     estimated_cost: Optional[Decimal] = None
     estimated_revenue: Optional[Decimal] = None
 
+
+# Invoice and Payment Schemas
+class InvoiceBase(BaseModel):
+    invoice_number: str = Field(..., min_length=1, max_length=100)
+    invoice_date: str = Field(..., description="Invoice date in ISO format")
+    invoice_amount: Decimal = Field(..., ge=0, description="Invoice amount")
+    currency: str = Field(default="IRR", max_length=3)
+    due_date: str = Field(..., description="Due date in ISO format")
+    payment_terms: Optional[str] = Field(None, max_length=100)
+    is_final_invoice: bool = Field(default=False, description="Is this the final invoice for this item?")
+    notes: Optional[str] = None
+
+class InvoiceCreate(InvoiceBase):
+    decision_id: int = Field(..., description="ID of the finalized decision")
+
+class InvoiceUpdate(BaseModel):
+    invoice_number: Optional[str] = Field(None, min_length=1, max_length=100)
+    invoice_date: Optional[str] = Field(None, description="Invoice date in ISO format")
+    invoice_amount: Optional[Decimal] = Field(None, ge=0)
+    currency: Optional[str] = Field(None, max_length=3)
+    due_date: Optional[str] = Field(None, description="Due date in ISO format")
+    status: Optional[str] = Field(None, description="Invoice status")
+    payment_terms: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+class InvoiceResponse(InvoiceBase):
+    id: int
+    decision_id: int
+    item_code: str
+    project_name: str
+    supplier_name: str
+    status: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+# Payment Schemas
+class PaymentBase(BaseModel):
+    payment_date: str = Field(..., description="Payment date in ISO format")
+    payment_amount: Decimal = Field(..., ge=0, description="Payment amount")
+    currency: str = Field(default="IRR", max_length=3)
+    payment_method: str = Field(..., description="Payment method")
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+
+class PaymentCreate(PaymentBase):
+    invoice_id: int = Field(..., description="ID of the invoice")
+
+class PaymentUpdate(BaseModel):
+    payment_date: Optional[str] = Field(None, description="Payment date in ISO format")
+    payment_amount: Optional[Decimal] = Field(None, ge=0)
+    currency: Optional[str] = Field(None, max_length=3)
+    payment_method: Optional[str] = Field(None, description="Payment method")
+    reference_number: Optional[str] = Field(None, max_length=100)
+    status: Optional[str] = Field(None, description="Payment status")
+    notes: Optional[str] = None
+
+class PaymentResponse(PaymentBase):
+    id: int
+    invoice_id: int
+    decision_id: int
+    item_code: str
+    project_name: str
+    supplier_name: str
+    status: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+# Summary Schema
+class InvoicePaymentSummary(BaseModel):
+    total_invoices: int
+    total_payments: int
+    paid_invoices: int
+    pending_invoices: int
+    overdue_invoices: int
+    total_invoice_amount: float
+    total_payment_amount: float
+    pending_payment_amount: float
+
+# Bulk Operations
+class BulkStatusUpdate(BaseModel):
+    ids: List[int] = Field(..., description="List of IDs to update")
+    status: str = Field(..., description="New status")
+
+class BulkDelete(BaseModel):
+    ids: List[int] = Field(..., description="List of IDs to delete")
+
+# Supplier Payment Schemas
+class SupplierPaymentBase(BaseModel):
+    decision_id: int = Field(..., description="ID of the finalized decision")
+    supplier_name: str = Field(..., min_length=1, max_length=200, description="Supplier name")
+    item_code: str = Field(..., min_length=1, max_length=100, description="Item code")
+    project_id: int = Field(..., description="Project ID")
+    payment_date: date = Field(..., description="Payment date")
+    payment_amount: Decimal = Field(..., gt=0, description="Payment amount")
+    currency: str = Field(..., min_length=3, max_length=10, description="Currency code")
+    payment_method: Literal["cash", "bank_transfer", "check", "credit_card"] = Field(..., description="Payment method")
+    reference_number: Optional[str] = Field(None, max_length=100, description="Reference number")
+    notes: Optional[str] = Field(None, description="Additional notes")
+    status: Literal["pending", "completed", "failed", "cancelled"] = Field(default="completed", description="Payment status")
+
+
+class SupplierPaymentCreate(SupplierPaymentBase):
+    pass
+
+
+class SupplierPaymentUpdate(BaseModel):
+    supplier_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    payment_date: Optional[date] = None
+    payment_amount: Optional[Decimal] = Field(None, gt=0)
+    currency: Optional[str] = Field(None, min_length=3, max_length=10)
+    payment_method: Optional[Literal["cash", "bank_transfer", "check", "credit_card"]] = None
+    reference_number: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = None
+    status: Optional[Literal["pending", "completed", "failed", "cancelled"]] = None
+
+
+class SupplierPayment(SupplierPaymentBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SupplierPaymentResponse(SupplierPayment):
+    project_name: Optional[str] = None
+    supplier_name: str
+    item_code: str
 
 # Resolve forward references for Pydantic v2
 # This fixes circular dependencies between Currency and ExchangeRate schemas

@@ -523,8 +523,8 @@ async def get_dashboard_stats(db: AsyncSession) -> Dict[str, Any]:
         select(func.count(ProcurementOption.id)).where(ProcurementOption.is_active == True)
     )
     
-    # Sum total budget
-    total_budget = await db.scalar(select(func.sum(BudgetData.available_budget)))
+    # Sum total budget from projects (not monthly budget data)
+    total_budget = await db.scalar(select(func.sum(Project.budget_amount)))
     total_budget = total_budget or 0
     
     # Get last optimization timestamp

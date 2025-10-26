@@ -31,5 +31,9 @@ async def get_db() -> AsyncSession:
 
 async def init_db():
     """Initialize database tables"""
+    # Import models here to avoid circular imports
+    import app.models
+    import app.models_invoice_payment
+    
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
