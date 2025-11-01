@@ -10,7 +10,7 @@ import logging
 
 from app.config import settings
 from app.database import init_db
-from app.routers import auth, users, projects, items, items_master, procurement, procurement_plan, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
+from app.routers import auth, users, projects, items, items_master, procurement, procurement_plan, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies, invoice_payment_simple, supplier_payments, brs_api, suppliers  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +50,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=settings.get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,6 +94,10 @@ app.include_router(analytics.router)
 app.include_router(reports.router)
 app.include_router(files.router)
 app.include_router(currencies.router)
+app.include_router(brs_api.router)
+app.include_router(suppliers.router)
+app.include_router(invoice_payment_simple.router)
+app.include_router(supplier_payments.router)
 # app.include_router(exchange_rates.router)  # Temporarily disabled due to Pydantic recursion
 
 

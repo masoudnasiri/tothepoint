@@ -20,6 +20,10 @@ import {
   CircularProgress,
   Slider,
   Chip,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -27,12 +31,15 @@ import {
   Delete as DeleteIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { weightsAPI } from '../services/api.ts';
+import { weightsAPI, projectsAPI, procurementAPI } from '../services/api.ts';
 import { DecisionFactorWeight } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
 
 export const WeightsPage: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [weights, setWeights] = useState<DecisionFactorWeight[]>([]);
+  const [availableFactors, setAvailableFactors] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -45,7 +52,68 @@ export const WeightsPage: React.FC = () => {
 
   useEffect(() => {
     fetchWeights();
+    discoverAvailableFactors();
   }, []);
+
+  const discoverAvailableFactors = async () => {
+    try {
+      // Get all project items and procurement options to discover available factors
+      const [projectsResponse, procurementResponse] = await Promise.all([
+        projectsAPI.list(),
+        procurementAPI.listOptions()
+      ]);
+
+      const factors = new Set<string>();
+      
+      // Add factors from project items
+      projectsResponse.data.forEach((project: any) => {
+        if (project.project_items) {
+          project.project_items.forEach((item: any) => {
+            // Add item-specific factors
+            if (item.item_code) factors.add(`item_${item.item_code}`);
+            if (item.category) factors.add(`category_${item.category}`);
+            if (item.unit) factors.add(`unit_${item.unit}`);
+          });
+        }
+      });
+
+      // Add factors from procurement options
+      procurementResponse.data.forEach((option: any) => {
+        if (option.supplier_name) factors.add(`supplier_${option.supplier_name}`);
+        if (option.cost_currency) factors.add(`currency_${option.cost_currency}`);
+        if (option.payment_terms) {
+          const terms = typeof option.payment_terms === 'string' 
+            ? JSON.parse(option.payment_terms) 
+            : option.payment_terms;
+          if (terms.type) factors.add(`payment_${terms.type}`);
+        }
+        if (option.expected_delivery_date) factors.add('delivery_timing');
+        if (option.discount_bundle_percent) factors.add('bundle_discount');
+        if (option.shipping_cost && option.shipping_cost > 0) factors.add('shipping_cost');
+      });
+
+      // Add common optimization factors
+      factors.add('cost_minimization');
+      factors.add('delivery_speed');
+      factors.add('supplier_reliability');
+      factors.add('payment_terms_flexibility');
+      factors.add('currency_risk');
+      factors.add('budget_utilization');
+
+      setAvailableFactors(Array.from(factors).sort());
+    } catch (err) {
+      console.error('Failed to discover available factors:', err);
+      // Fallback to common factors
+      setAvailableFactors([
+        'cost_minimization',
+        'delivery_speed', 
+        'supplier_reliability',
+        'payment_terms_flexibility',
+        'currency_risk',
+        'budget_utilization'
+      ]);
+    }
+  };
 
   const fetchWeights = async () => {
     try {
@@ -64,7 +132,7 @@ export const WeightsPage: React.FC = () => {
     setEditingWeight(null);
     setFormData({
       factor_name: '',
-      weight: 5,
+      weight: 1, // Default weight of 1 as requested
       description: '',
     });
     setDialogOpen(true);
@@ -97,19 +165,19 @@ export const WeightsPage: React.FC = () => {
       setError('');
       fetchWeights();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save weight');
+      setError(err.response?.data?.detail || t('weights.failedToSaveWeight'));
     }
   };
 
   const handleDelete = async (weightId: number) => {
-    if (!window.confirm('Are you sure you want to delete this decision factor weight?')) return;
+    if (!window.confirm(t('weights.confirmDeleteWeight'))) return;
     
     try {
       await weightsAPI.delete(weightId);
       setError('');
       fetchWeights();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete weight');
+      setError(err.response?.data?.detail || t('weights.failedToDeleteWeight'));
     }
   };
 
@@ -133,7 +201,7 @@ export const WeightsPage: React.FC = () => {
     return (
       <Box>
         <Alert severity="error">
-          Access Denied: Only administrators can manage decision factor weights.
+          {t('weights.accessDenied')}
         </Alert>
       </Box>
     );
@@ -143,9 +211,9 @@ export const WeightsPage: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4">Decision Factor Weights</Typography>
+          <Typography variant="h4">{t('weights.title')}</Typography>
           <Typography variant="body2" color="text.secondary" mt={1}>
-            Configure optimization factor priorities for the decision support system
+            {t('weights.configureOptimizationFactors')}
           </Typography>
         </Box>
         <Button
@@ -153,7 +221,7 @@ export const WeightsPage: React.FC = () => {
           startIcon={<AddIcon />}
           onClick={handleOpenCreate}
         >
-          Add Weight
+{t('weights.addWeight')}
         </Button>
       </Box>
 
@@ -163,14 +231,24 @@ export const WeightsPage: React.FC = () => {
         </Alert>
       )}
 
+      {/* Available Factors Info */}
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Typography variant="body2">
+          <strong>{t('weights.availableFactors')}</strong> {availableFactors.length} {t('weights.factorsDiscovered')}
+          {availableFactors.filter(factor => !weights.some(w => w.factor_name === factor)).length > 0 && (
+            <span> {availableFactors.filter(factor => !weights.some(w => w.factor_name === factor)).length} {t('weights.factorsNotConfigured')}</span>
+          )}
+        </Typography>
+      </Alert>
+
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Factor Name</TableCell>
-              <TableCell align="center">Weight</TableCell>
-              <TableCell>Description</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell>{t('weights.factorName')}</TableCell>
+              <TableCell align="center">{t('weights.weight')}</TableCell>
+              <TableCell>{t('weights.description')}</TableCell>
+              <TableCell align="center">{t('weights.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -178,7 +256,7 @@ export const WeightsPage: React.FC = () => {
               <TableRow>
                 <TableCell colSpan={4} align="center">
                   <Typography variant="body2" color="text.secondary" py={3}>
-                    No decision factor weights configured. Click "Add Weight" to create one.
+                    {t('weights.noWeightsConfigured')}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -232,18 +310,26 @@ export const WeightsPage: React.FC = () => {
           {editingWeight ? 'Edit Decision Factor Weight' : 'Add Decision Factor Weight'}
         </DialogTitle>
         <DialogContent>
-          <TextField
-            autoFocus
-            fullWidth
-            label="Factor Name"
-            value={formData.factor_name}
-            onChange={(e) => setFormData({ ...formData, factor_name: e.target.value })}
-            margin="normal"
-            placeholder="e.g., cost_minimization"
-            helperText="Use lowercase with underscores (e.g., supplier_rating)"
-            required
-            disabled={!!editingWeight}
-          />
+          <FormControl fullWidth margin="normal" required>
+            <InputLabel>{t('weights.factorName')}</InputLabel>
+            <Select
+              value={formData.factor_name}
+              onChange={(e) => setFormData({ ...formData, factor_name: e.target.value })}
+              label={t('weights.factorName')}
+              disabled={!!editingWeight}
+            >
+              {availableFactors
+                .filter(factor => !weights.some(w => w.factor_name === factor))
+                .map((factor) => (
+                  <MenuItem key={factor} value={factor}>
+                    {factor.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </MenuItem>
+                ))}
+            </Select>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+              {t('weights.weightHelp')}
+            </Typography>
+          </FormControl>
           
           <Box sx={{ mt: 3, mb: 2 }}>
             <Typography gutterBottom>
@@ -263,29 +349,29 @@ export const WeightsPage: React.FC = () => {
               color="primary"
             />
             <Typography variant="caption" color="text.secondary">
-              Higher values indicate greater importance in optimization
+              {t('weights.higherValuesImportance')}
             </Typography>
           </Box>
 
           <TextField
             fullWidth
-            label="Description"
+            label={t('weights.description')}
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             margin="normal"
             multiline
             rows={3}
-            placeholder="Describe what this factor represents..."
+            placeholder={t('weights.describeFactor')}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
+          <Button onClick={handleClose}>{t('weights.cancel')}</Button>
           <Button 
             onClick={handleSubmit} 
             variant="contained"
             disabled={!formData.factor_name || formData.weight < 1 || formData.weight > 10}
           >
-            {editingWeight ? 'Update' : 'Create'}
+            {editingWeight ? t('weights.update') : t('weights.create')}
           </Button>
         </DialogActions>
       </Dialog>

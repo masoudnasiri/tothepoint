@@ -1,0 +1,132 @@
+/* Persian Font Face Definitions */
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 01 Hairline.eot');
+  src: url('./Yekan Bakh FaNum 01 Hairline.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 01 Hairline.woff') format('woff'),
+       url('./Yekan Bakh FaNum 01 Hairline.ttf') format('truetype');
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 02 Thin.eot');
+  src: url('./Yekan Bakh FaNum 02 Thin.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 02 Thin.woff') format('woff'),
+       url('./Yekan Bakh FaNum 02 Thin.ttf') format('truetype');
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 03 Light.eot');
+  src: url('./Yekan Bakh FaNum 03 Light.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 03 Light.woff') format('woff'),
+       url('./Yekan Bakh FaNum 03 Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 04 Regular.eot');
+  src: url('./Yekan Bakh FaNum 04 Regular.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 04 Regular.woff') format('woff'),
+       url('./Yekan Bakh FaNum 04 Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 05 Medium.eot');
+  src: url('./Yekan Bakh FaNum 05 Medium.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 05 Medium.woff') format('woff'),
+       url('./Yekan Bakh FaNum 05 Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 06 Bold.eot');
+  src: url('./Yekan Bakh FaNum 06 Bold.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 06 Bold.woff') format('woff'),
+       url('./Yekan Bakh FaNum 06 Bold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 07 Heavy.eot');
+  src: url('./Yekan Bakh FaNum 07 Heavy.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 07 Heavy.woff') format('woff'),
+       url('./Yekan Bakh FaNum 07 Heavy.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Yekan Bakh FaNum';
+  src: url('./Yekan Bakh FaNum 08 Fat.eot');
+  src: url('./Yekan Bakh FaNum 08 Fat.eot?#iefix') format('embedded-opentype'),
+       url('./Yekan Bakh FaNum 08 Fat.woff') format('woff'),
+       url('./Yekan Bakh FaNum 08 Fat.ttf') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Persian font styles */
+.persian-text {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+  direction: rtl;
+  text-align: right;
+}
+
+/* Override Material-UI components for Persian */
+.persian-theme * {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}
+
+/* Persian typography overrides */
+.persian-theme .MuiTypography-root {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}
+
+.persian-theme .MuiButton-root {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}
+
+.persian-theme .MuiTextField-root input {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}
+
+.persian-theme .MuiTableCell-root {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}
+
+.persian-theme .MuiTableHead-root .MuiTableCell-root {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+  font-weight: 600;
+}
+
+/* Chart text for Persian */
+.persian-theme .recharts-text {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}
+
+/* Tooltip text for Persian */
+.persian-theme .recharts-tooltip-wrapper {
+  font-family: 'Yekan Bakh FaNum', 'Tahoma', 'Arial', sans-serif !important;
+}

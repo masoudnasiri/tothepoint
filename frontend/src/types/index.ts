@@ -132,6 +132,7 @@ export interface ItemMaster {
   company: string;
   item_name: string;
   model?: string;
+  part_number?: string;
   specifications?: any;
   category?: string;
   unit: string;
@@ -146,6 +147,7 @@ export interface ItemMasterCreate {
   company: string;
   item_name: string;
   model?: string;
+  part_number?: string;
   specifications?: any;
   category?: string;
   unit?: string;
@@ -156,11 +158,33 @@ export interface ItemMasterUpdate {
   company?: string;
   item_name?: string;
   model?: string;
+  part_number?: string;
   specifications?: any;
   category?: string;
   unit?: string;
   description?: string;
   is_active?: boolean;
+}
+
+// Sub-items under Items Master
+export interface ItemSubItem {
+  id: number;
+  item_master_id: number;
+  name: string;
+  description?: string;
+  part_number?: string;
+}
+
+export interface ItemSubItemCreate {
+  name: string;
+  description?: string;
+  part_number?: string;
+}
+
+export interface ItemSubItemUpdate {
+  name?: string;
+  description?: string;
+  part_number?: string;
 }
 
 export type ProjectItemStatus = 
@@ -198,6 +222,8 @@ export interface ProjectItem {
   // Procurement workflow fields (computed from backend)
   procurement_options_count?: number;
   has_finalized_decision?: boolean;
+  // Sub-items breakdown returned from backend
+  sub_items?: Array<{ sub_item_id: number; name?: string; part_number?: string; quantity: number }>;
 }
 
 export interface ProjectItemCreate {
@@ -209,6 +235,7 @@ export interface ProjectItemCreate {
   delivery_options: string[];  // Array of possible delivery dates (at least 1)
   external_purchase?: boolean;
   description?: string;  // Project-specific context
+  sub_items?: Array<{ sub_item_id: number; quantity: number }>; // quantities per sub-item
 }
 
 export interface ProjectItemUpdate {
@@ -225,6 +252,7 @@ export interface ProjectItemUpdate {
   invoice_submission_date?: string;
   expected_cash_in_date?: string;
   actual_cash_in_date?: string;
+  sub_items?: Array<{ sub_item_id: number; quantity: number }>;
 }
 
 export interface PaymentTermsCash {
@@ -249,6 +277,9 @@ export interface ProcurementOption {
   base_cost: number;
   currency_id: number;
   lomc_lead_time: number;
+  purchase_date?: string; // When to place the order (purchase date)
+  expected_delivery_date?: string; // Expected delivery date from supplier
+  delivery_option_id?: number; // Add delivery option ID field
   discount_bundle_threshold: number | null;
   discount_bundle_percent: number | null;
   payment_terms: PaymentTerms;
@@ -413,6 +444,10 @@ export interface ProcurementPlanItem {
   actual_payment_date?: string;
   payment_entered_by_id?: number;
   payment_entered_at?: string;
+  
+  // Payment In and Payment Out statuses
+  payment_in_status?: 'not_paid' | 'partially_paid' | 'fully_paid';
+  payment_out_status?: 'not_paid' | 'partially_paid' | 'fully_paid';
   
   // PM fields
   is_accepted_by_pm?: boolean;

@@ -64,6 +64,9 @@ class BudgetAnalysisService:
         procurement_options = await self._load_procurement_options()
         budgets = await self._load_budgets(start_date, end_date)
         
+        # Calculate total project budgets by currency
+        self._total_project_budgets = await self._calculate_total_project_budgets(projects)
+        
         if not items:
             result.status = "WARNING"
             result.recommendations.append("⚠️  No project items found for analysis")
@@ -210,8 +213,13 @@ class BudgetAnalysisService:
                 delivery_date = date.today()
                 procurement_period = datetime.now().strftime("%Y-%m")
             
-            # Add procurement cost as OUTFLOW
-            cash_flow_by_period[procurement_period][procurement_currency]['outflow'] += total_procurement_cost
+            # Add procurement cost as OUTFLOW (convert to IRR for unified comparison)
+            if procurement_currency == 'IRR':
+                cash_flow_by_period[procurement_period]['IRR']['outflow'] += total_procurement_cost
+            else:
+                # For now, assume 1:1 conversion for other currencies to IRR
+                # In production, this should use real exchange rates
+                cash_flow_by_period[procurement_period]['IRR']['outflow'] += total_procurement_cost
             
             if delivery_options:
                 # Use the first delivery option's invoice data
@@ -234,8 +242,13 @@ class BudgetAnalysisService:
                 
                 invoice_period = invoice_date.strftime("%Y-%m")
                 
-                # Add invoice as INFLOW
-                cash_flow_by_period[invoice_period][invoice_currency]['inflow'] += total_invoice
+                # Add invoice as INFLOW (convert to IRR for unified comparison)
+                if invoice_currency == 'IRR':
+                    cash_flow_by_period[invoice_period]['IRR']['inflow'] += total_invoice
+                else:
+                    # For now, assume 1:1 conversion for other currencies to IRR
+                    # In production, this should use real exchange rates
+                    cash_flow_by_period[invoice_period]['IRR']['inflow'] += total_invoice
         
         return dict(cash_flow_by_period)
     
@@ -244,34 +257,53 @@ class BudgetAnalysisService:
         budgets: List[BudgetData]
     ) -> Dict[str, Dict[str, Decimal]]:
         """
-        Calculate cumulative available budget by period and currency
-        Budget accumulates over time (not reset each month)
+        Calculate available budget by period and currency
+        Use monthly budget data from Budget Management instead of project budgets
         
         Returns:
-            Dict[period, Dict[currency, cumulative_amount]]
+            Dict[period, Dict[currency, amount]]
         """
-        # Sort budgets by date
-        sorted_budgets = sorted(budgets, key=lambda b: b.budget_date)
-        
-        # Track cumulative budget by currency
-        cumulative_by_currency = defaultdict(Decimal)
         available_by_period = {}
         
-        for budget in sorted_budgets:
+        # Use monthly budget data from Budget Management
+        for budget in budgets:
             period = budget.budget_date.strftime("%Y-%m")
             
-            # Add base budget (IRR) to cumulative
-            cumulative_by_currency['IRR'] += budget.available_budget or Decimal(0)
-            
-            # Add multi-currency budgets to cumulative
-            if budget.multi_currency_budget:
-                for currency, amount in budget.multi_currency_budget.items():
-                    cumulative_by_currency[currency] += Decimal(str(amount))
-            
-            # Store cumulative budget for this period
-            available_by_period[period] = dict(cumulative_by_currency)
+            # Use the available_budget from monthly budget data
+            available_by_period[period] = {
+                'IRR': Decimal(str(budget.available_budget or 0))
+            }
+        
+        # If no budget data, return empty
+        if not available_by_period:
+            from datetime import datetime
+            current_period = datetime.now().strftime("%Y-%m")
+            available_by_period[current_period] = {'IRR': Decimal(0)}
         
         return available_by_period
+    
+    def _get_total_project_budgets(self) -> Dict[str, Decimal]:
+        """Get total project budgets by currency"""
+        # This will be populated by the calling method
+        return getattr(self, '_total_project_budgets', {})
+    
+    async def _calculate_total_project_budgets(self, projects: List[Project]) -> Dict[str, Decimal]:
+        """Calculate total project budgets by currency, converting all to IRR for comparison"""
+        total_by_currency = defaultdict(Decimal)
+        
+        for project in projects:
+            budget_amount = Decimal(str(project.budget_amount or 0))
+            budget_currency = project.budget_currency or 'IRR'
+            
+            # Convert all currencies to IRR for unified comparison
+            if budget_currency == 'IRR':
+                total_by_currency['IRR'] += budget_amount
+            else:
+                # For now, assume 1:1 conversion for other currencies to IRR
+                # In production, this should use real exchange rates
+                total_by_currency['IRR'] += budget_amount
+        
+        return dict(total_by_currency)
     
     async def _analyze_gaps(
         self,

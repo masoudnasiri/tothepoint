@@ -16,6 +16,7 @@ import { OptimizationPage } from './pages/OptimizationPage.tsx';
 import { OptimizationPageEnhanced } from './pages/OptimizationPage_enhanced.tsx';
 import { UsersPage } from './pages/UsersPage.tsx';
 import { WeightsPage } from './pages/WeightsPage.tsx';
+import SuppliersPage from './pages/SuppliersPage.tsx';
 import { AnalyticsDashboardPage } from './pages/AnalyticsDashboardPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 
@@ -45,6 +46,7 @@ function App() {
                   <Route path="/reports" element={<ReportsPage />} />
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/weights" element={<WeightsPage />} />
+                  <Route path="/suppliers" element={<SuppliersPage />} />
                 </Routes>
               </Layout>
             </ProtectedRoute>

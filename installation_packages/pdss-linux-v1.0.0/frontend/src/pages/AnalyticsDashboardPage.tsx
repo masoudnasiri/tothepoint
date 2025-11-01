@@ -48,6 +48,15 @@ import {
 } from 'recharts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { analyticsAPI, projectsAPI } from '../services/api.ts';
+import { useTranslation } from 'react-i18next';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+} from '@mui/material';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -64,8 +73,118 @@ function TabPanel(props: TabPanelProps) {
   );
 }
 
+interface ItemFollowUpTabProps {
+  data: any[];
+  loading: boolean;
+  selectedProjectId: number | 'all';
+}
+
+const ItemFollowUpTab: React.FC<ItemFollowUpTabProps> = ({ data, loading, selectedProjectId }) => {
+  const { t, i18n } = useTranslation();
+
+  console.log('DEBUG: ItemFollowUpTab received data:', data);
+  console.log('DEBUG: ItemFollowUpTab loading:', loading);
+  console.log('DEBUG: ItemFollowUpTab selectedProjectId:', selectedProjectId);
+
+  const getStatusChip = (status: string) => {
+    const statusConfig = {
+      'CREATED': { color: 'default', label: t('itemFollowUp.status.created') },
+      'DELIVERY_ADDED': { color: 'info', label: t('itemFollowUp.status.deliveryAdded') },
+      'FINALIZED': { color: 'primary', label: t('itemFollowUp.status.finalized') },
+      'PROCUREMENT_OPTIONS': { color: 'secondary', label: t('itemFollowUp.status.procurementOptions') },
+      'READY_FOR_OPTIMIZATION': { color: 'warning', label: t('itemFollowUp.status.readyForOptimization') },
+      'PROPOSED': { color: 'warning', label: t('itemFollowUp.status.proposed') },
+      'LOCKED': { color: 'success', label: t('itemFollowUp.status.locked') },
+      'PROCUREMENT_PLAN': { color: 'info', label: t('itemFollowUp.status.procurementPlan') },
+      'CONFIRMED_BY_PROCUREMENT': { color: 'warning', label: t('itemFollowUp.status.confirmedByProcurement') },
+      'DELIVERY_COMPLETE': { color: 'success', label: t('itemFollowUp.status.deliveryComplete') },
+      'ORDERED': { color: 'secondary', label: t('itemFollowUp.status.ordered') },
+      'DELIVERED': { color: 'success', label: t('itemFollowUp.status.delivered') },
+    };
+    
+    const config = statusConfig[status as keyof typeof statusConfig] || { color: 'default', label: status };
+    return <Chip label={config.label} color={config.color as any} size="small" />;
+  };
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <Alert severity="info">
+        {t('itemFollowUp.noData')}
+      </Alert>
+    );
+  }
+
+  return (
+    <Box>
+      <Typography variant="h6" gutterBottom>
+        {t('itemFollowUp.title')}
+      </Typography>
+      
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>{t('itemFollowUp.itemName')}</TableCell>
+              <TableCell>{t('itemFollowUp.quantity')}</TableCell>
+              <TableCell>{t('itemFollowUp.leadTime')}</TableCell>
+              <TableCell>{t('itemFollowUp.deliveryTime')}</TableCell>
+              <TableCell>{t('itemFollowUp.statusLabel')}</TableCell>
+              <TableCell>{t('itemFollowUp.procurementOptions')}</TableCell>
+              <TableCell>{t('itemFollowUp.notes')}</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {data.map((item, index) => (
+              <TableRow key={index}>
+                <TableCell>{item.item_name}</TableCell>
+                <TableCell>{item.quantity}</TableCell>
+                <TableCell>
+                  {item.lead_time_date 
+                    ? new Date(item.lead_time_date).toLocaleDateString(i18n.language === 'fa' ? 'fa-IR' : 'en-US')
+                    : '-'
+                  }
+                </TableCell>
+                <TableCell>
+                  {item.delivery_time_date 
+                    ? new Date(item.delivery_time_date).toLocaleDateString(i18n.language === 'fa' ? 'fa-IR' : 'en-US')
+                    : '-'
+                  }
+                </TableCell>
+                <TableCell>{getStatusChip(item.status)}</TableCell>
+                <TableCell>
+                  {item.procurement_options_count > 0 ? (
+                    <Chip 
+                      label={`${item.procurement_options_count} ${item.procurement_options_finalized ? t('itemFollowUp.finalized') : t('itemFollowUp.pending')}`}
+                      color={item.procurement_options_finalized ? 'success' : 'warning'}
+                      size="small"
+                    />
+                  ) : (
+                    <Chip label={t('itemFollowUp.none')} color="default" size="small" />
+                  )}
+                </TableCell>
+                <TableCell>{item.notes || '-'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Box>
+  );
+};
+
 export const AnalyticsDashboardPage: React.FC = () => {
   const { user } = useAuth();
+  const { t, i18n } = useTranslation();
+  
+  
   const [tabValue, setTabValue] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<number | 'all'>('all');
@@ -80,6 +199,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
   const [cashflowData, setCashflowData] = useState<any>(null);
   const [riskData, setRiskData] = useState<any>(null);
   const [projectsSummary, setProjectsSummary] = useState<any>(null);
+  const [itemFollowUpData, setItemFollowUpData] = useState<any[]>([]);
   
   // Multi-currency data (same pattern as Dashboard)
   const [evaByCurrency, setEvaByCurrency] = useState<{[key: string]: any}>({});
@@ -91,8 +211,10 @@ export const AnalyticsDashboardPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    console.log('DEBUG: useEffect triggered with selectedProjectId:', selectedProjectId, 'currencyDisplayMode:', currencyDisplayMode);
     if (selectedProjectId) {
       fetchProjectAnalytics();
+      fetchItemFollowUp();
     }
   }, [selectedProjectId, currencyDisplayMode]); // Re-fetch when project or currency mode changes
 
@@ -197,6 +319,26 @@ export const AnalyticsDashboardPage: React.FC = () => {
     }
   };
 
+  const fetchItemFollowUp = async () => {
+    if (!selectedProjectId) {
+      console.log('DEBUG: No selectedProjectId, skipping fetchItemFollowUp');
+      return;
+    }
+    
+    try {
+      console.log('DEBUG: Fetching item follow-up for project:', selectedProjectId);
+      console.log('DEBUG: About to call analyticsAPI.getItemFollowUp');
+      const response = await analyticsAPI.getItemFollowUp(selectedProjectId);
+      console.log('DEBUG: Item follow-up response:', response);
+      console.log('DEBUG: Item follow-up data:', response.data);
+      setItemFollowUpData(response.data);
+    } catch (err: any) {
+      console.error('Failed to load item follow-up data:', err);
+      console.error('Error details:', err.response?.data);
+      setItemFollowUpData([]);
+    }
+  };
+
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       minimumFractionDigits: 0,
@@ -271,22 +413,22 @@ export const AnalyticsDashboardPage: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4">Project Analytics & Forecast</Typography>
+          <Typography variant="h4">{t('analytics.title')}</Typography>
           <Typography variant="subtitle2" color="textSecondary">
-            Earned Value Management, Cash Flow Forecasting, and Risk Analytics
+            {t('analytics.subtitle')}
           </Typography>
         </Box>
         <FormControl sx={{ minWidth: 300 }}>
-          <InputLabel>Select Project</InputLabel>
+          <InputLabel>{t('analytics.selectProject')}</InputLabel>
           <Select
             value={selectedProjectId || 'all'}
             onChange={(e) => setSelectedProjectId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-            label="Select Project"
+            label={t('analytics.selectProject')}
           >
             {/* Show "All Projects" only for PMO, Admin, Finance (not PM) */}
             {user?.role !== 'pm' && (
               <MenuItem value="all">
-                <strong>📊 All Projects (Portfolio View)</strong>
+                <strong>📊 {t('analytics.allProjects')} ({t('analytics.portfolioView')})</strong>
               </MenuItem>
             )}
             {projects.map((project) => {
@@ -318,14 +460,14 @@ export const AnalyticsDashboardPage: React.FC = () => {
         {/* Currency Display Mode Selector (same as Dashboard) */}
         <Box display="flex" gap={1}>
           <Chip
-            label="UNIFIED (IRR)"
+            label={t('analytics.unifiedIRR')}
             variant={currencyDisplayMode === 'unified' ? 'filled' : 'outlined'}
             color={currencyDisplayMode === 'unified' ? 'primary' : 'default'}
             onClick={() => setCurrencyDisplayMode('unified')}
             clickable
           />
           <Chip
-            label="ORIGINAL CURRENCIES"
+            label={t('analytics.originalCurrencies')}
             variant={currencyDisplayMode === 'original' ? 'filled' : 'outlined'}
             color={currencyDisplayMode === 'original' ? 'primary' : 'default'}
             onClick={() => setCurrencyDisplayMode('original')}
@@ -339,12 +481,12 @@ export const AnalyticsDashboardPage: React.FC = () => {
         <Box display="flex" justifyContent="space-between" alignItems="center">
           <Box>
             <Typography variant="h6" gutterBottom>
-              Currency Display
+              {t('analytics.currencyDisplay')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {currencyDisplayMode === 'unified' 
-                ? 'Showing all financial data converted to IRR for consistent analysis and insights.'
-                : 'Showing financial data in original currencies (USD, EUR, IRR, etc.) for detailed breakdown.'
+                ? t('analytics.showingAllFinancialData')
+                : t('analytics.showingFinancialDataOriginal')
               }
             </Typography>
           </Box>
@@ -359,11 +501,12 @@ export const AnalyticsDashboardPage: React.FC = () => {
 
       <Paper sx={{ mb: 3 }}>
         <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)} aria-label="analytics tabs">
-          <Tab label="Earned Value Analytics (EVA)" icon={<AssessmentIcon />} iconPosition="start" />
+          <Tab label={t('analytics.earnedValueAnalytics')} icon={<AssessmentIcon />} iconPosition="start" />
+          <Tab label={t('analytics.itemFollowUp')} icon={<ScheduleIcon />} iconPosition="start" />
           {user?.role !== 'pm' && user?.role !== 'pmo' && (
-            <Tab label="Cash Flow Forecast" icon={<AccountBalanceIcon />} iconPosition="start" />
+            <Tab label={t('analytics.cashFlowForecast')} icon={<AccountBalanceIcon />} iconPosition="start" />
           )}
-          <Tab label="Risk Analysis" icon={<WarningIcon />} iconPosition="start" />
+          <Tab label={t('analytics.riskAnalysis')} icon={<WarningIcon />} iconPosition="start" />
         </Tabs>
       </Paper>
 
@@ -383,13 +526,13 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <Box display="flex" alignItems="center" justifyContent="space-between">
                           <Box>
                             <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                              CPI (Cost Performance)
+                              {t('analytics.cpiCostPerformance')}
                             </Typography>
                             <Typography variant="h4">
                               {evaData.metrics.cpi.toFixed(2)}
                             </Typography>
                             <Chip
-                              label={evaData.health_status.cost_performance}
+                              label={t(`analytics.${evaData.health_status.cost_performance.toLowerCase()}`)}
                               color={evaData.metrics.cpi >= 1.0 ? 'success' : evaData.metrics.cpi >= 0.9 ? 'warning' : 'error'}
                               size="small"
                               sx={{ mt: 1 }}
@@ -407,13 +550,13 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <Box display="flex" alignItems="center" justifyContent="space-between">
                           <Box>
                             <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                              SPI (Schedule Performance)
+                              {t('analytics.spiSchedulePerformance')}
                             </Typography>
                             <Typography variant="h4">
                               {evaData.metrics.spi.toFixed(2)}
                             </Typography>
                             <Chip
-                              label={evaData.health_status.schedule_performance}
+                              label={t(`analytics.${evaData.health_status.schedule_performance.toLowerCase()}`)}
                               color={evaData.metrics.spi >= 1.0 ? 'success' : evaData.metrics.spi >= 0.9 ? 'warning' : 'error'}
                               size="small"
                               sx={{ mt: 1 }}
@@ -431,7 +574,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <Box display="flex" alignItems="center" justifyContent="space-between">
                           <Box>
                             <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                              Cost Variance (CV)
+                              {t('analytics.costVariance')}
                             </Typography>
                             <Typography variant="h5">
                               {formatCurrency(evaData.metrics.cv)}
@@ -443,7 +586,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                                 <TrendingDownIcon color="error" fontSize="small" />
                               )}
                               <Typography variant="caption" sx={{ ml: 0.5 }}>
-                                {evaData.metrics.cv >= 0 ? 'Under budget' : 'Over budget'}
+                                {evaData.metrics.cv >= 0 ? t('analytics.underBudget') : t('analytics.overBudget')}
                               </Typography>
                             </Box>
                           </Box>
@@ -458,7 +601,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <Box display="flex" alignItems="center" justifyContent="space-between">
                           <Box>
                             <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                              Schedule Variance (SV)
+                              {t('analytics.scheduleVariance')}
                             </Typography>
                             <Typography variant="h5">
                               {formatCurrency(evaData.metrics.sv)}
@@ -470,7 +613,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                                 <TrendingDownIcon color="error" fontSize="small" />
                               )}
                               <Typography variant="caption" sx={{ ml: 0.5 }}>
-                                {evaData.metrics.sv >= 0 ? 'Ahead' : 'Behind'}
+                                {evaData.metrics.sv >= 0 ? t('analytics.ahead') : t('analytics.behind')}
                               </Typography>
                             </Box>
                           </Box>
@@ -483,7 +626,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Budget at Completion (BAC)
+                          {t('analytics.budgetAtCompletion')}
                         </Typography>
                         <Typography variant="h5">{formatCurrency(evaData.metrics.bac)}</Typography>
                       </CardContent>
@@ -494,11 +637,11 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Estimate at Completion (EAC)
+                          {t('analytics.estimateAtCompletion')}
                         </Typography>
                         <Typography variant="h5">{formatCurrency(evaData.metrics.eac)}</Typography>
                         <Typography variant="caption" color="textSecondary">
-                          VAC: {formatCurrency(evaData.metrics.vac)}
+                          {t('analytics.vac')}: {formatCurrency(evaData.metrics.vac)}
                         </Typography>
                       </CardContent>
                     </Card>
@@ -508,12 +651,12 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Project Health
+                          {t('analytics.projectHealth')}
                         </Typography>
                         <Box display="flex" alignItems="center" gap={1}>
                           {getHealthIcon(evaData.health_status.overall)}
                           <Chip
-                            label={evaData.health_status.overall.toUpperCase()}
+                            label={t(`analytics.${evaData.health_status.overall.toLowerCase()}`)}
                             color={getHealthColor(evaData.health_status.overall)}
                             size="small"
                           />
@@ -527,12 +670,12 @@ export const AnalyticsDashboardPage: React.FC = () => {
                 <Card sx={{ mb: 3 }}>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Project Progress
+                      {t('analytics.projectProgress')}
                     </Typography>
                     <Grid container spacing={2}>
                       <Grid item xs={12} md={6}>
                         <Typography variant="body2" color="textSecondary" gutterBottom>
-                          Completion Progress: {evaData.progress.percent_complete}%
+                          {t('analytics.completionProgress')}: {evaData.progress.percent_complete}%
                         </Typography>
                         <LinearProgress 
                           variant="determinate" 
@@ -540,12 +683,12 @@ export const AnalyticsDashboardPage: React.FC = () => {
                           sx={{ height: 10, borderRadius: 5 }}
                         />
                         <Typography variant="caption" color="textSecondary">
-                          {evaData.progress.items_completed} of {evaData.progress.total_items} items completed
+                          {evaData.progress.items_completed} {t('analytics.of')} {evaData.progress.total_items} {t('analytics.itemsCompleted')}
                         </Typography>
                       </Grid>
                       <Grid item xs={12} md={6}>
                         <Typography variant="body2" color="textSecondary" gutterBottom>
-                          Planned Progress: {evaData.progress.percent_planned}%
+                          {t('analytics.plannedProgress')}: {evaData.progress.percent_planned}%
                         </Typography>
                         <LinearProgress 
                           variant="determinate" 
@@ -554,7 +697,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                           sx={{ height: 10, borderRadius: 5 }}
                         />
                         <Typography variant="caption" color="textSecondary">
-                          {evaData.progress.items_planned} items should be done by now
+                          {evaData.progress.items_planned} {t('analytics.itemsShouldBeDone')}
                         </Typography>
                       </Grid>
                     </Grid>
@@ -565,7 +708,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                 <Card sx={{ mb: 3 }}>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Earned Value Trends
+                      {t('analytics.earnedValueTrends')}
                     </Typography>
                     <ResponsiveContainer width="100%" height={400}>
                       <LineChart data={evaData.time_series}>
@@ -574,9 +717,9 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <YAxis />
                         <Tooltip formatter={(value: any) => formatCurrency(value)} />
                         <Legend />
-                        <Line type="monotone" dataKey="pv" stroke="#2196f3" name="Planned Value (PV)" strokeWidth={2} />
-                        <Line type="monotone" dataKey="ev" stroke="#4caf50" name="Earned Value (EV)" strokeWidth={2} />
-                        <Line type="monotone" dataKey="ac" stroke="#f44336" name="Actual Cost (AC)" strokeWidth={2} />
+                        <Line type="monotone" dataKey="pv" stroke="#2196f3" name={t('analytics.plannedValue')} strokeWidth={2} />
+                        <Line type="monotone" dataKey="ev" stroke="#4caf50" name={t('analytics.earnedValue')} strokeWidth={2} />
+                        <Line type="monotone" dataKey="ac" stroke="#f44336" name={t('analytics.actualCost')} strokeWidth={2} />
                       </LineChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -586,7 +729,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Performance Index Trends
+                      {t('analytics.performanceIndexTrend')}
                     </Typography>
                     <ResponsiveContainer width="100%" height={300}>
                       <LineChart data={evaData.time_series}>
@@ -595,14 +738,14 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <YAxis domain={[0.5, 1.5]} />
                         <Tooltip formatter={(value: any) => value.toFixed(3)} />
                         <Legend />
-                        <Line type="monotone" dataKey="cpi" stroke="#ff9800" name="CPI (Cost Performance)" strokeWidth={2} />
-                        <Line type="monotone" dataKey="spi" stroke="#9c27b0" name="SPI (Schedule Performance)" strokeWidth={2} />
+                        <Line type="monotone" dataKey="cpi" stroke="#ff9800" name={t('analytics.costPerformance')} strokeWidth={2} />
+                        <Line type="monotone" dataKey="spi" stroke="#9c27b0" name={t('analytics.schedulePerformance')} strokeWidth={2} />
                         <Line 
                           type="monotone" 
                           dataKey={() => 1.0} 
                           stroke="#666" 
                           strokeDasharray="5 5" 
-                          name="Target (1.0)"
+                          name={t('analytics.target')}
                           strokeWidth={1}
                         />
                       </LineChart>
@@ -613,9 +756,18 @@ export const AnalyticsDashboardPage: React.FC = () => {
             )}
           </TabPanel>
 
+          {/* Item Follow-up Tab */}
+          <TabPanel value={tabValue} index={1}>
+            <ItemFollowUpTab 
+              data={itemFollowUpData} 
+              loading={loading}
+              selectedProjectId={selectedProjectId}
+            />
+          </TabPanel>
+
           {/* Cash Flow Forecast Tab - Hidden for PM/PMO */}
           {user?.role !== 'pm' && user?.role !== 'pmo' && (
-            <TabPanel value={tabValue} index={1}>
+            <TabPanel value={tabValue} index={2}>
             {cashflowData && (
               <Box>
                 {/* Summary Cards */}
@@ -624,13 +776,13 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Final Balance (Forecast)
+                          {t('analytics.finalBalanceForecast')}
                         </Typography>
                         <Typography variant="h5">
                           {formatCurrency(cashflowData.summary.final_balance)}
                         </Typography>
                         <Chip
-                          label={cashflowData.summary.final_balance >= 0 ? 'Positive' : 'Negative'}
+                          label={cashflowData.summary.final_balance >= 0 ? t('analytics.positive') : t('analytics.negative')}
                           color={cashflowData.summary.final_balance >= 0 ? 'success' : 'error'}
                           size="small"
                           sx={{ mt: 1 }}
@@ -643,13 +795,13 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Maximum Deficit
+                          {t('analytics.maximumDeficit')}
                         </Typography>
                         <Typography variant="h5">
                           {formatCurrency(cashflowData.summary.max_deficit)}
                         </Typography>
                         {cashflowData.summary.max_deficit < 0 && (
-                          <Chip label="Gap Detected" color="warning" size="small" sx={{ mt: 1 }} />
+                          <Chip label={t('analytics.gapDetected')} color="warning" size="small" sx={{ mt: 1 }} />
                         )}
                       </CardContent>
                     </Card>
@@ -659,14 +811,14 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Financing Needed
+                          {t('analytics.financingNeeded')}
                         </Typography>
                         <Typography variant="h5">
                           {formatCurrency(cashflowData.summary.financing_needed)}
                         </Typography>
                         {cashflowData.summary.financing_needed > 0 && (
                           <Typography variant="caption" color="error">
-                            Bridge financing required
+                            {t('analytics.bridgeFinancingRequired')}
                           </Typography>
                         )}
                       </CardContent>
@@ -677,7 +829,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card>
                       <CardContent>
                         <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                          Total Inflow (Forecast)
+                          {t('analytics.totalInflowForecast')}
                         </Typography>
                         <Typography variant="h5">
                           {formatCurrency(cashflowData.summary.total_inflow_forecast)}
@@ -691,7 +843,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                 <Card sx={{ mb: 3 }}>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Cash Flow: Inflow vs Outflow
+                      {t('analytics.cashFlowInflowVsOutflow')}
                     </Typography>
                     <ResponsiveContainer width="100%" height={400}>
                       <ComposedChart data={cashflowData.forecast_data}>
@@ -700,10 +852,10 @@ export const AnalyticsDashboardPage: React.FC = () => {
                         <YAxis />
                         <Tooltip formatter={(value: any) => formatCurrency(value)} />
                         <Legend />
-                        <Bar dataKey="inflow_forecast" fill="#4caf50" name="Inflow (Forecast)" />
-                        <Bar dataKey="outflow_forecast" fill="#f44336" name="Outflow (Forecast)" />
-                        <Bar dataKey="inflow_actual" fill="#2e7d32" name="Inflow (Actual)" />
-                        <Bar dataKey="outflow_actual" fill="#c62828" name="Outflow (Actual)" />
+                        <Bar dataKey="inflow_forecast" fill="#4caf50" name={t('analytics.inflowForecast')} />
+                        <Bar dataKey="outflow_forecast" fill="#f44336" name={t('analytics.outflowForecast')} />
+                        <Bar dataKey="inflow_actual" fill="#2e7d32" name={t('analytics.inflowActual')} />
+                        <Bar dataKey="outflow_actual" fill="#c62828" name={t('analytics.outflowActual')} />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </CardContent>
@@ -713,7 +865,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Cumulative Net Balance
+                      {t('analytics.cumulativeNetBalance')}
                     </Typography>
                     <ResponsiveContainer width="100%" height={300}>
                       <AreaChart data={cashflowData.forecast_data}>
@@ -728,14 +880,14 @@ export const AnalyticsDashboardPage: React.FC = () => {
                           stroke="#2196f3" 
                           fill="#2196f3"
                           fillOpacity={0.3}
-                          name="Cumulative Balance"
+                          name={t('analytics.cumulativeBalance')}
                         />
                         <Line 
                           type="monotone" 
                           dataKey={() => 0} 
                           stroke="#f44336" 
                           strokeDasharray="5 5" 
-                          name="Break-even"
+                          name={t('analytics.breakEven')}
                           strokeWidth={2}
                         />
                       </AreaChart>
@@ -758,7 +910,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
           )}
 
           {/* Risk Analysis Tab */}
-          <TabPanel value={tabValue} index={user?.role === 'pm' || user?.role === 'pmo' ? 1 : 2}>
+          <TabPanel value={tabValue} index={user?.role === 'pm' || user?.role === 'pmo' ? 2 : 3}>
             {riskData && riskData.metrics && riskData.risk_level && (
               <Box>
                 {/* Risk Level Cards */}
@@ -767,7 +919,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card sx={{ bgcolor: riskData.risk_level.time_risk === 'high' ? 'error.light' : riskData.risk_level.time_risk === 'medium' ? 'warning.light' : 'success.light' }}>
                       <CardContent>
                         <Typography variant="subtitle2" gutterBottom>
-                          Time Risk
+                          {t('analytics.timeRisk')}
                         </Typography>
                         <Typography variant="h4">
                           {riskData.risk_level.time_risk.toUpperCase()}
@@ -786,7 +938,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card sx={{ bgcolor: riskData.risk_level.cost_risk === 'high' ? 'error.light' : riskData.risk_level.cost_risk === 'medium' ? 'warning.light' : 'success.light' }}>
                       <CardContent>
                         <Typography variant="subtitle2" gutterBottom>
-                          Cost Risk
+                          {t('analytics.costRisk')}
                         </Typography>
                         <Typography variant="h4">
                           {riskData.risk_level.cost_risk.toUpperCase()}
@@ -805,13 +957,13 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <Card sx={{ bgcolor: riskData.risk_level.overall_risk === 'high' ? 'error.light' : riskData.risk_level.overall_risk === 'medium' ? 'warning.light' : 'success.light' }}>
                       <CardContent>
                         <Typography variant="subtitle2" gutterBottom>
-                          Overall Risk
+                          {t('analytics.overallRisk')}
                         </Typography>
                         <Typography variant="h4">
                           {riskData.risk_level.overall_risk.toUpperCase()}
                         </Typography>
                         <Typography variant="body2" sx={{ mt: 1 }}>
-                          Completion Shift
+                          {t('analytics.completionShift')}
                         </Typography>
                         <Typography variant="caption" color="textSecondary">
                           {riskData.forecast.expected_completion_shift}
@@ -825,12 +977,12 @@ export const AnalyticsDashboardPage: React.FC = () => {
                 <Card sx={{ mb: 3 }}>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Completion Delay Forecast
+                      {t('analytics.completionDelayForecast')}
                     </Typography>
                     <Box sx={{ p: 2 }}>
                       <Box display="flex" alignItems="center" mb={2}>
                         <Typography variant="body2" sx={{ width: 100 }}>
-                          P50 (Median):
+                          {t('analytics.p50Median')}:
                         </Typography>
                         <Box sx={{ flexGrow: 1, mx: 2 }}>
                           <LinearProgress 
@@ -847,7 +999,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
 
                       <Box display="flex" alignItems="center">
                         <Typography variant="body2" sx={{ width: 100 }}>
-                          P90 (90%):
+                          {t('analytics.p90')}:
                         </Typography>
                         <Box sx={{ flexGrow: 1, mx: 2 }}>
                           <LinearProgress 
@@ -872,7 +1024,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                       <Card>
                         <CardContent>
                           <Typography variant="h6" gutterBottom>
-                            Time Delay Distribution
+                            {t('analytics.timeDelayDistribution')}
                           </Typography>
                           <ResponsiveContainer width="100%" height={250}>
                             <BarChart data={
@@ -893,7 +1045,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                               <XAxis dataKey="bucket" />
                               <YAxis />
                               <Tooltip />
-                              <Bar dataKey="count" fill="#2196f3" name="Frequency" />
+                              <Bar dataKey="count" fill="#2196f3" name={t('analytics.frequency')} />
                             </BarChart>
                           </ResponsiveContainer>
                         </CardContent>
@@ -904,7 +1056,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                       <Card>
                         <CardContent>
                           <Typography variant="h6" gutterBottom>
-                            Cost Overrun Distribution
+                            {t('analytics.costOverrunDistribution')}
                           </Typography>
                           <ResponsiveContainer width="100%" height={250}>
                             <BarChart data={
@@ -925,7 +1077,7 @@ export const AnalyticsDashboardPage: React.FC = () => {
                               <XAxis dataKey="bucket" />
                               <YAxis />
                               <Tooltip />
-                              <Bar dataKey="count" fill="#ff9800" name="Frequency" />
+                              <Bar dataKey="count" fill="#ff9800" name={t('analytics.frequency')} />
                             </BarChart>
                           </ResponsiveContainer>
                         </CardContent>
@@ -949,11 +1101,10 @@ export const AnalyticsDashboardPage: React.FC = () => {
               <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
                 <Alert severity="info" sx={{ maxWidth: 600 }}>
                   <Typography variant="h6" gutterBottom>
-                    No Risk Data Available
+                    {t('analytics.noRiskDataAvailable')}
                   </Typography>
                   <Typography variant="body2">
-                    Risk analysis requires completed procurement decisions with actual payment data.
-                    Start by creating projects, procurement options, and finalized decisions to see risk metrics.
+                    {t('analytics.riskAnalysisRequires')}
                   </Typography>
                 </Alert>
               </Box>

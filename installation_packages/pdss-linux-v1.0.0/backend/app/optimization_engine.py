@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from app.models import (
     Project, ProjectItem, ProcurementOption, BudgetData, 
-    OptimizationResult, FinalizedDecision
+    OptimizationResult, FinalizedDecision, DecisionFactorWeight
 )
 from app.schemas import OptimizationRunRequest, OptimizationRunResponse
 from app.currency_conversion_service import CurrencyConversionService
@@ -191,13 +191,47 @@ class ProcurementOptimizer:
         logger.info(f"Excluded {len(all_items) - len(self.project_items)} locked items from optimization")
         
         # Load procurement options - ONLY FINALIZED OPTIONS for optimization
+        # Group by project_item_id to ensure project-specific isolation
         options_result = await self.db.execute(
             select(ProcurementOption).where(
                 ProcurementOption.is_active == True,
                 ProcurementOption.is_finalized == True
-            )
+            ).options(selectinload(ProcurementOption.project_item))
         )
-        self.procurement_options = {opt.id: opt for opt in options_result.scalars().all()}
+        
+        # Filter to only include options that match project_items
+        project_item_ids = {item.id for item in self.project_items}
+        options_list = [opt for opt in options_result.scalars().all() 
+                       if opt.project_item_id in project_item_ids]
+        
+        # Group procurement options by project_item_id for proper isolation
+        self.procurement_options_by_item = {}
+        for opt in options_list:
+            if opt.project_item_id not in self.procurement_options_by_item:
+                self.procurement_options_by_item[opt.project_item_id] = []
+            self.procurement_options_by_item[opt.project_item_id].append(opt)
+        
+        # Also keep original dict for backward compatibility
+        self.procurement_options = {opt.id: opt for opt in options_list}
+        
+        # Calculate company-wide quantities for bundling optimization
+        self.company_wide_quantities = {}
+        for item in self.project_items:
+            item_code = item.item_code
+            if item_code not in self.company_wide_quantities:
+                self.company_wide_quantities[item_code] = 0
+            self.company_wide_quantities[item_code] += item.quantity
+        
+        # Debug: Log procurement options by project item
+        logger.info(f"Procurement options by project item:")
+        for project_item_id, options in self.procurement_options_by_item.items():
+            item = next((i for i in self.project_items if i.id == project_item_id), None)
+            if item:
+                logger.info(f"  Project item {project_item_id} ({item.item_code}): {len(options)} options")
+                for opt in options:
+                    logger.info(f"    Option {opt.id}: {opt.supplier_name}, cost: {opt.cost_amount} {opt.cost_currency}")
+        
+        logger.info(f"Company-wide quantities for bundling: {self.company_wide_quantities}")
         
         if not self.procurement_options:
             raise ValueError(
@@ -211,11 +245,14 @@ class ProcurementOptimizer:
             )
         
         # Filter project items to only include those with finalized procurement options
-        item_codes_with_finalized_options = {opt.item_code for opt in self.procurement_options.values()}
+        items_with_options = set()
+        for project_item_id, options in self.procurement_options_by_item.items():
+            items_with_options.add(project_item_id)
+        
         items_before_filter = len(self.project_items)
         self.project_items = [
             item for item in self.project_items
-            if item.item_code in item_codes_with_finalized_options
+            if item.id in items_with_options
         ]
         
         if not self.project_items:
@@ -265,7 +302,71 @@ class ProcurementOptimizer:
         
         # Debug: Log item details
         for item in self.project_items:
-            logger.info(f"Item {item.item_code}: {len([opt for opt in self.procurement_options.values() if opt.item_code == item.item_code])} finalized options")
+            opt_count = len(self.procurement_options_by_item.get(item.id, []))
+            logger.info(f"Item {item.item_code} (project_item_id={item.id}): {opt_count} finalized options")
+        
+        # Load decision factor weights
+        await self._load_decision_weights()
+    
+    async def _load_decision_weights(self):
+        """Load decision factor weights and discover available factors"""
+        # Load configured weights
+        weights_result = await self.db.execute(select(DecisionFactorWeight))
+        configured_weights = {w.factor_name: w.weight for w in weights_result.scalars().all()}
+        
+        # Discover available factors from current data
+        available_factors = set()
+        
+        # Add factors from project items
+        for item in self.project_items:
+            if item.item_code:
+                available_factors.add(f"item_{item.item_code}")
+            # Check if category attribute exists before accessing it
+            if hasattr(item, 'category') and item.category:
+                available_factors.add(f"category_{item.category}")
+            # Check if unit attribute exists before accessing it
+            if hasattr(item, 'unit') and item.unit:
+                available_factors.add(f"unit_{item.unit}")
+        
+        # Add factors from procurement options
+        for option in self.procurement_options.values():
+            if option.supplier_name:
+                available_factors.add(f"supplier_{option.supplier_name}")
+            if option.cost_currency:
+                available_factors.add(f"currency_{option.cost_currency}")
+            if option.payment_terms:
+                try:
+                    terms = option.payment_terms if isinstance(option.payment_terms, dict) else eval(option.payment_terms)
+                    if terms.get('type'):
+                        available_factors.add(f"payment_{terms['type']}")
+                except:
+                    pass
+            if option.expected_delivery_date:
+                available_factors.add('delivery_timing')
+            if option.discount_bundle_percent:
+                available_factors.add('bundle_discount')
+            if option.shipping_cost and option.shipping_cost > 0:
+                available_factors.add('shipping_cost')
+        
+        # Add common optimization factors
+        common_factors = [
+            'cost_minimization',
+            'delivery_speed',
+            'supplier_reliability',
+            'payment_terms_flexibility',
+            'currency_risk',
+            'budget_utilization'
+        ]
+        available_factors.update(common_factors)
+        
+        # Create final weights dictionary with default weight 1 for unconfigured factors
+        self.decision_weights = {}
+        for factor in available_factors:
+            self.decision_weights[factor] = configured_weights.get(factor, 1)  # Default weight 1
+        
+        logger.info(f"✅ Loaded {len(self.decision_weights)} decision factors")
+        logger.info(f"Configured weights: {len(configured_weights)}")
+        logger.info(f"Default weights (1): {len(available_factors) - len(configured_weights)}")
     
     async def _build_model(self, max_time_slots: int):
         """Build the CP-SAT optimization model"""
@@ -289,6 +390,8 @@ class ProcurementOptimizer:
             if not delivery_options:
                 logger.warning(f"Item {item_code} has no delivery options, skipping")
                 continue
+            
+            logger.info(f"Item {item_code}: Found {len(delivery_options)} delivery options")
             
             # Convert delivery dates to time slots
             # Use actual delivery dates from delivery options
@@ -320,14 +423,19 @@ class ProcurementOptimizer:
                 logger.warning(f"Item {item_code} has no valid future delivery dates, skipping")
                 continue
                 
-            # Find procurement options for this item
-            item_options = [opt for opt in self.procurement_options.values() 
-                          if opt.item_code == item_code]
+            logger.info(f"Item {item_code}: Valid delivery times: {valid_times}")
+                
+            # Find procurement options for this item using project-specific lookup
+            item_options = self.procurement_options_by_item.get(item.id, [])
             
             if not item_options:
+                logger.warning(f"Item {item_code} (project_item_id={item.id}) has no procurement options")
                 continue
             
+            logger.info(f"Item {item_code}: Found {len(item_options)} procurement options")
+            
             # Create variables for each valid (project, item, option, time) combination
+            # Each variable represents buying this specific project item with this option at this time
             for option in item_options:
                 for delivery_time in valid_times:
                     purchase_time = delivery_time - option.lomc_lead_time
@@ -336,7 +444,8 @@ class ProcurementOptimizer:
                     if purchase_time < 1:
                         continue
                     
-                    var_name = f"buy_{project_id}_{item_code}_{option.id}_{delivery_time}"
+                    # Use project_item_id instead of item_code for unique identification
+                    var_name = f"buy_{project_id}_{item.id}_{option.id}_{delivery_time}"
                     self.variables[var_name] = self.model.NewBoolVar(var_name)
         
         # Add constraints
@@ -352,36 +461,38 @@ class ProcurementOptimizer:
         processed_items = set()
         for var_name in self.variables.keys():
             parts = var_name.split('_')
-            item_code = parts[2]
-            processed_items.add(item_code)
+            project_item_id = int(parts[2])
+            item = next((i for i in self.project_items if i.id == project_item_id), None)
+            if item:
+                processed_items.add(f"{item.item_code}({project_item_id})")
         
-        logger.info(f"Processing {len(processed_items)} unique items: {list(processed_items)}")
+        logger.info(f"Processing {len(processed_items)} unique project items: {list(processed_items)}")
     
     def _add_demand_fulfillment_constraints(self):
         """Add constraints to allow partial procurement (when budget is insufficient)"""
-        # Group variables by (project_id, item_code)
+        # Group variables by (project_id, project_item_id) for proper project isolation
         item_groups = {}
         
         for var_name, var in self.variables.items():
             parts = var_name.split('_')
             project_id = int(parts[1])
-            item_code = parts[2]
-            key = (project_id, item_code)
+            project_item_id = int(parts[2])
+            key = (project_id, project_item_id)
             
             if key not in item_groups:
                 item_groups[key] = []
             item_groups[key].append(var)
         
-        # Add constraint: each item can be procured at most once (allows skipping items)
+        # Add constraint: each project item can be procured at most once (allows skipping items)
         # This enables the optimizer to work within tight budget constraints
-        for (project_id, item_code), vars_list in item_groups.items():
+        for (project_id, project_item_id), vars_list in item_groups.items():
             self.model.Add(sum(vars_list) <= 1)
             
-            # Find the required quantity for this item
+            # Find the required quantity for this project item
             item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+                        if i.project_id == project_id and i.id == project_item_id), None)
             if item:
-                logger.debug(f"Item {item_code} in project {project_id} requires quantity {item.quantity}")
+                logger.debug(f"Project item {project_item_id} (item_code: {item.item_code}) in project {project_id} requires quantity {item.quantity}")
     
     async def _add_budget_constraints(self):
         """Add soft budget constraints with slack variables
@@ -398,7 +509,7 @@ class ProcurementOptimizer:
             delivery_time = int(parts[4])
             option_id = int(parts[3])
             project_id = int(parts[1])
-            item_code = parts[2]
+            project_item_id = int(parts[2])
             
             # Calculate purchase time
             option = self.procurement_options[option_id]
@@ -407,9 +518,9 @@ class ProcurementOptimizer:
             if purchase_time not in time_groups:
                 time_groups[purchase_time] = []
             
-            # Find the item to get quantity
+            # Find the project item to get quantity
             item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+                        if i.project_id == project_id and i.id == project_item_id), None)
             
             if item:
                 time_groups[purchase_time].append((var, option, item))
@@ -484,11 +595,14 @@ class ProcurementOptimizer:
             discount = option.payment_terms.get('discount_percent', 0)
             base_cost = base_cost * (1 - Decimal(discount) / 100)
         
-        # Apply bundling discount if applicable
+        # Apply bundling discount if applicable - use company-wide quantity for bundling
+        company_quantity = self.company_wide_quantities.get(item.item_code, item.quantity)
         if (option.discount_bundle_threshold and 
-            item.quantity >= option.discount_bundle_threshold and 
+            company_quantity >= option.discount_bundle_threshold and 
             option.discount_bundle_percent):
-            base_cost = base_cost * (1 - option.discount_bundle_percent / 100)
+            discount_amount = base_cost * (option.discount_bundle_percent / 100)
+            logger.debug(f"Applied bundling discount: {option.discount_bundle_percent}% on {company_quantity} units (threshold: {option.discount_bundle_threshold})")
+            base_cost = base_cost - discount_amount
         
         # Convert to base currency (IRR) using the purchase date
         try:
@@ -521,11 +635,11 @@ class ProcurementOptimizer:
             parts = var_name.split('_')
             option_id = int(parts[3])
             project_id = int(parts[1])
-            item_code = parts[2]
+            project_item_id = int(parts[2])
             
             option = self.procurement_options[option_id]
             item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+                        if i.project_id == project_id and i.id == project_item_id), None)
             
             if item:
                 # Calculate procurement cost using actual purchase date
@@ -539,10 +653,28 @@ class ProcurementOptimizer:
                 # Calculate business value (revenue from selling the item)
                 # Use the invoice_amount_per_unit from delivery options relationship
                 business_value = 0
+                invoice_priority_multiplier = 1.0  # Default priority
+                
                 if hasattr(item, 'delivery_options_rel') and item.delivery_options_rel:
-                    # Use the first delivery option's invoice amount
-                    first_delivery = item.delivery_options_rel[0]
-                    business_value = float(first_delivery.invoice_amount_per_unit) * item.quantity
+                    # Find the delivery option that matches this procurement option
+                    matching_delivery = None
+                    for delivery in item.delivery_options_rel:
+                        if delivery.id == option.delivery_option_id:
+                            matching_delivery = delivery
+                            break
+                    
+                    if matching_delivery:
+                        business_value = float(matching_delivery.invoice_amount_per_unit) * item.quantity
+                        # Apply invoice priority (preference_rank: 1=highest, 2=lower)
+                        if matching_delivery.preference_rank:
+                            # Higher preference_rank (1) gets higher multiplier
+                            invoice_priority_multiplier = 2.0 - (matching_delivery.preference_rank - 1) * 0.5
+                        else:
+                            # Use the first delivery option's invoice amount
+                            first_delivery = item.delivery_options_rel[0]
+                            business_value = float(first_delivery.invoice_amount_per_unit) * item.quantity
+                            if first_delivery.preference_rank:
+                                invoice_priority_multiplier = 2.0 - (first_delivery.preference_rank - 1) * 0.5
                 
                 # If no delivery option found, use 20% markup as default
                 if business_value == 0:
@@ -555,7 +687,117 @@ class ProcurementOptimizer:
                 # Apply priority weighting to value (higher priority = higher effective value)
                 # High priority (10) gets multiplier 1.5, low priority (1) gets multiplier 0.6
                 priority_multiplier = 0.5 + (priority_weight / 10.0)
-                weighted_value = business_value * priority_multiplier
+                
+                # Apply invoice priority multiplier
+                business_value *= invoice_priority_multiplier
+                
+                # Apply decision factor weights
+                factor_weight = 1.0  # Default weight
+                
+                # Check for item-specific factors
+                item_factor = f"item_{item.item_code}"
+                if item_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[item_factor]
+                
+                # Check for category factors
+                if hasattr(item, 'category') and item.category:
+                    category_factor = f"category_{item.category}"
+                    if category_factor in self.decision_weights:
+                        factor_weight *= self.decision_weights[category_factor]
+                
+                # Check for supplier factors
+                supplier_factor = f"supplier_{option.supplier_name}"
+                if supplier_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[supplier_factor]
+                
+                # Check for currency factors
+                currency_factor = f"currency_{option.cost_currency}"
+                if currency_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[currency_factor]
+                
+                # Check for payment terms factors
+                if option.payment_terms:
+                    try:
+                        terms = option.payment_terms if isinstance(option.payment_terms, dict) else eval(option.payment_terms)
+                        if terms.get('type'):
+                            payment_factor = f"payment_{terms['type']}"
+                            if payment_factor in self.decision_weights:
+                                factor_weight *= self.decision_weights[payment_factor]
+                    except:
+                        pass
+                
+                # Check for delivery timing factors
+                if option.expected_delivery_date:
+                    if 'delivery_timing' in self.decision_weights:
+                        factor_weight *= self.decision_weights['delivery_timing']
+                
+                # Check for bundle discount factors
+                if option.discount_bundle_percent:
+                    if 'bundle_discount' in self.decision_weights:
+                        factor_weight *= self.decision_weights['bundle_discount']
+                
+                # Check for supplier factors
+                supplier_factor = f"supplier_{option.supplier_name}"
+                if supplier_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[supplier_factor]
+                
+                # Check for currency factors
+                currency_factor = f"currency_{option.cost_currency}"
+                if currency_factor in self.decision_weights:
+                    factor_weight *= self.decision_weights[currency_factor]
+                
+                # Apply core decision factors from Decision Weights page
+                if 'cost_minimization' in self.decision_weights:
+                    # Higher cost_minimization weight = prefer lower cost options
+                    cost_factor = 1.0 / (self.decision_weights['cost_minimization'] / 10.0)
+                    factor_weight *= cost_factor
+                
+                if 'payment_terms_flexibility' in self.decision_weights:
+                    # Higher payment_terms_flexibility weight = prefer flexible payment terms
+                    payment_factor = self.decision_weights['payment_terms_flexibility'] / 10.0
+                    factor_weight *= payment_factor
+                
+                if 'delivery_speed' in self.decision_weights:
+                    # Faster delivery gets higher weight
+                    lead_time_factor = max(1, 30 - option.lomc_lead_time) / 30  # Normalize to 0-1
+                    factor_weight *= (1 + lead_time_factor * (self.decision_weights['delivery_speed'] - 1))
+                
+                if 'supplier_reliability' in self.decision_weights:
+                    # This could be enhanced with actual supplier ratings
+                    factor_weight *= self.decision_weights['supplier_reliability']
+                
+                if 'payment_terms_flexibility' in self.decision_weights:
+                    # More flexible payment terms get higher weight
+                    flexibility_factor = 1.0
+                    if option.payment_terms:
+                        try:
+                            terms = option.payment_terms if isinstance(option.payment_terms, dict) else eval(option.payment_terms)
+                            if terms.get('type') == 'credit':
+                                flexibility_factor = 1.2  # Credit terms are more flexible
+                            elif terms.get('type') == 'cash':
+                                flexibility_factor = 0.8  # Cash is less flexible
+                        except:
+                            pass
+                    factor_weight *= (1 + (flexibility_factor - 1) * (self.decision_weights['payment_terms_flexibility'] - 1))
+                
+                if 'currency_risk' in self.decision_weights:
+                    # Lower risk currencies get higher weight
+                    risk_factor = 1.0
+                    if option.cost_currency == 'IRR':
+                        risk_factor = 1.2  # IRR is local currency, lower risk
+                    elif option.cost_currency in ['USD', 'EUR']:
+                        risk_factor = 1.0  # Major currencies, medium risk
+                    else:
+                        risk_factor = 0.8  # Other currencies, higher risk
+                    factor_weight *= (1 + (risk_factor - 1) * (self.decision_weights['currency_risk'] - 1))
+                
+                if 'budget_utilization' in self.decision_weights:
+                    # Items that better utilize budget get higher weight
+                    # This could be enhanced with more sophisticated budget utilization logic
+                    factor_weight *= self.decision_weights['budget_utilization']
+                
+                # Apply all weights to the value
+                weighted_value = business_value * priority_multiplier * factor_weight
                 
                 # Scale to dollars (divide by 1000 for numerical stability)
                 # This converts $62,000 to 62, making the solver more efficient
@@ -580,6 +822,13 @@ class ProcurementOptimizer:
         # Each purchase that brings more value than cost will be favored
         # But the solver will try to stay within budget due to the penalty
         self.model.Minimize(sum(cost_terms) - sum(value_terms) + budget_penalty)
+        
+        # Log decision factor weights being used
+        logger.info(f"Decision factor weights applied: {len(self.decision_weights)} factors")
+        for factor, weight in sorted(self.decision_weights.items()):
+            if weight != 1:  # Only log non-default weights
+                logger.info(f"  {factor}: {weight}")
+        
         logger.info(f"Set objective: Minimize(Cost - Value + Budget_Penalty) with {len(cost_terms)} decision variables")
     
     async def _save_results(self, solver):
@@ -590,13 +839,13 @@ class ProcurementOptimizer:
             if solver.Value(var) == 1:  # Variable is selected
                 parts = var_name.split('_')
                 project_id = int(parts[1])
-                item_code = parts[2]
+                project_item_id = int(parts[2])
                 option_id = int(parts[3])
                 delivery_time = int(parts[4])
                 
                 option = self.procurement_options[option_id]
                 item = next((i for i in self.project_items 
-                            if i.project_id == project_id and i.item_code == item_code), None)
+                            if i.project_id == project_id and i.id == project_item_id), None)
                 
                 if item:
                     purchase_time = delivery_time - option.lomc_lead_time
@@ -606,7 +855,7 @@ class ProcurementOptimizer:
                     result = OptimizationResult(
                         run_id=uuid.UUID(self.run_id),
                         project_id=project_id,
-                        item_code=item_code,
+                        item_code=item.item_code,
                         procurement_option_id=option_id,
                         purchase_time=purchase_time,
                         delivery_time=delivery_time,
@@ -630,12 +879,12 @@ class ProcurementOptimizer:
                 parts = var_name.split('_')
                 option_id = int(parts[3])
                 project_id = int(parts[1])
-                item_code = parts[2]
+                project_item_id = int(parts[2])
                 delivery_time = int(parts[4])  # Extract delivery time from variable name
                 
                 option = self.procurement_options[option_id]
                 item = next((i for i in self.project_items 
-                            if i.project_id == project_id and i.item_code == item_code), None)
+                            if i.project_id == project_id and i.id == project_item_id), None)
                 
                 if item:
                     # Calculate purchase date from delivery time and lead time

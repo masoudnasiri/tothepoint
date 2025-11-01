@@ -30,6 +30,7 @@ import {
   FormControlLabel,
   Pagination,
   Grid,
+  Autocomplete,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -43,9 +44,10 @@ import {
   DoneAll as DoneAllIcon,
   RemoveDone as RemoveDoneIcon,
   Search as SearchIcon,
+  Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import api, { procurementAPI, excelAPI, deliveryOptionsAPI, itemsAPI } from '../services/api.ts';
+import api, { procurementAPI, excelAPI, deliveryOptionsAPI, itemsAPI, suppliersAPI, projectsAPI } from '../services/api.ts';
 import { ProcurementOption, ProcurementOptionCreate } from '../types/index.ts';
 import { CurrencySelector } from '../components/CurrencySelector.tsx';
 import { useTranslation } from 'react-i18next';
@@ -63,20 +65,48 @@ interface ItemWithDetails {
   description: string;
   project_id: number;
   project_item_id: number;
+  quantity?: number;
+  status?: string;
+  external_purchase?: boolean;
+  file_path?: string;
+  file_name?: string;
+  decision_date?: string;
+  procurement_date?: string;
+  payment_date?: string;
+  invoice_submission_date?: string;
+  expected_cash_in_date?: string;
+  actual_cash_in_date?: string;
+  is_finalized?: boolean;
+  finalized_by?: number;
+  finalized_at?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface Supplier {
+  id: number;
+  supplier_id: string;
+  company_name: string;
 }
 
 export const ProcurementPage: React.FC = () => {
   const { user } = useAuth();
   const { t } = useTranslation();
+  const [projectsMap, setProjectsMap] = useState<Record<number, string>>({});
   const [itemCodes, setItemCodes] = useState<string[]>([]);
   const [itemsWithDetails, setItemsWithDetails] = useState<ItemWithDetails[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedItemDetails, setSelectedItemDetails] = useState<ItemWithDetails | null>(null);
   const [procurementOptions, setProcurementOptions] = useState<ProcurementOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [viewItemDialogOpen, setViewItemDialogOpen] = useState(false);
+  const [itemSubItems, setItemSubItems] = useState<Array<{ sub_item_id: number; name?: string; part_number?: string; quantity: number }>>([]);
   const [selectedOption, setSelectedOption] = useState<ProcurementOption | null>(null);
+  const [projectInfo, setProjectInfo] = useState<any>(null);
+  const [itemDeliveryOptions, setItemDeliveryOptions] = useState<DeliveryOption[]>([]);
   const [selectedItemCode, setSelectedItemCode] = useState<string>('');
   const [availableDeliveryOptions, setAvailableDeliveryOptions] = useState<DeliveryOption[]>([]);
   const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<string>('');
@@ -84,20 +114,69 @@ export const ProcurementPage: React.FC = () => {
   const [formData, setFormData] = useState<any>({
     item_code: '',
     supplier_name: '',
+    supplier_id: null,
     base_cost: 0,
     currency_id: '',
     shipping_cost: 0,
     delivery_option_id: null,
     lomc_lead_time: 0,
+    purchase_date: '',
     expected_delivery_date: '',
+    project_item_id: null, // Add project_item_id field
     discount_bundle_threshold: undefined,
     discount_bundle_percent: undefined,
     payment_terms: { type: 'cash', discount_percent: 0 },
     is_finalized: false,
   });
   const [bulkUpdating, setBulkUpdating] = useState<string | null>(null);
+  // Load all active projects to map id -> name for headers
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await projectsAPI.list();
+        const map: Record<number, string> = {};
+        (res.data || []).forEach((p: any) => { map[p.id] = p.name || p.project_code; });
+        setProjectsMap(map);
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
   const [loadedItemOptions, setLoadedItemOptions] = useState<Record<string, ProcurementOption[]>>({});
   const [loadingItemOptions, setLoadingItemOptions] = useState<Record<string, boolean>>({});
+
+  // Helper function to format number with thousand separators
+  const formatNumberWithCommas = (value: string | number): string => {
+    if (!value) return '';
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    if (isNaN(numValue)) return '';
+    return numValue.toLocaleString('en-US', { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    });
+  };
+
+  // Helper function to parse formatted number back to raw value
+  const parseFormattedNumber = (formattedValue: string): string => {
+    return formattedValue.replace(/,/g, '');
+  };
+
+  // Helper function to add commas while typing
+  const addCommasWhileTyping = (value: string): string => {
+    // Remove all non-digit characters except decimal point
+    const cleanValue = value.replace(/[^\d.]/g, '');
+    
+    // Split by decimal point
+    const parts = cleanValue.split('.');
+    const integerPart = parts[0];
+    const decimalPart = parts[1];
+    
+    // Add commas to integer part
+    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    
+    // Combine with decimal part if exists
+    return decimalPart ? `${formattedInteger}.${decimalPart}` : formattedInteger;
+  };
   const [expandedAccordion, setExpandedAccordion] = useState<string | false>(false);
   const [page, setPage] = useState(0);
   const ITEMS_PER_PAGE = 50;
@@ -125,13 +204,33 @@ export const ProcurementPage: React.FC = () => {
         item_name: item.item_name,
         description: item.description || '',
         project_id: item.project_id,
-        project_item_id: item.id
+        project_item_id: item.id,
+        quantity: item.quantity,
+        status: item.status,
+        external_purchase: item.external_purchase,
+        file_path: item.file_path,
+        file_name: item.file_name,
+        decision_date: item.decision_date,
+        procurement_date: item.procurement_date,
+        payment_date: item.payment_date,
+        invoice_submission_date: item.invoice_submission_date,
+        expected_cash_in_date: item.expected_cash_in_date,
+        actual_cash_in_date: item.actual_cash_in_date,
+        is_finalized: item.is_finalized,
+        finalized_by: item.finalized_by,
+        finalized_at: item.finalized_at,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
       }));
       
       setItemsWithDetails(itemsWithDetails);
       setItemCodes(itemsWithDetails.map((item: ItemWithDetails) => item.item_code));
       // Don't load all options at once - will fetch per item when needed
       setProcurementOptions([]);
+      
+      // Load suppliers for dropdown
+      const suppliersResponse = await procurementAPI.getSuppliers();
+      setSuppliers(suppliersResponse.data);
       
       // Calculate summary statistics with the newly loaded items
       calculateSummaryStats(itemsWithDetails);
@@ -174,7 +273,7 @@ export const ProcurementPage: React.FC = () => {
       // For each finalized item, get its procurement options
       for (const item of itemsToProcess) {
         try {
-          const optionsResponse = await procurementAPI.listByItemCode(item.item_code);
+          const optionsResponse = await procurementAPI.listByProjectItem(item.project_item_id);
           const options = optionsResponse.data;
           
           totalOptions += options.length;
@@ -212,9 +311,9 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const fetchOptionsByItemCode = async (itemCode: string) => {
+  const fetchOptionsByProjectItem = async (projectItemId: number) => {
     try {
-      const response = await procurementAPI.listByItemCode(itemCode);
+      const response = await procurementAPI.listByProjectItem(projectItemId);
       return response.data;
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load options');
@@ -225,33 +324,34 @@ export const ProcurementPage: React.FC = () => {
   const handleAccordionChange = (itemKey: string) => async (event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedAccordion(isExpanded ? itemKey : false);
     
-    // Extract itemCode from the key (format: "itemCode-projectItemId")
+    // Extract itemCode and projectItemId from the key (format: "itemCode-projectItemId")
     // Split by last dash to get itemCode (itemCode may contain dashes like DELL-LAT1)
     const lastDashIndex = itemKey.lastIndexOf('-');
     const itemCode = lastDashIndex !== -1 ? itemKey.substring(0, lastDashIndex) : itemKey;
+    const projectItemId = lastDashIndex !== -1 ? parseInt(itemKey.substring(lastDashIndex + 1)) : null;
     
     // If expanding and options not loaded yet, fetch them
-    if (isExpanded && !loadedItemOptions[itemCode]) {
+    if (isExpanded && projectItemId && !loadedItemOptions[itemKey]) {
       try {
         // Set loading state
-        setLoadingItemOptions(prev => ({ ...prev, [itemCode]: true }));
+        setLoadingItemOptions(prev => ({ ...prev, [itemKey]: true }));
         
-        const options = await fetchOptionsByItemCode(itemCode);
+        const options = await fetchOptionsByProjectItem(projectItemId);
         setLoadedItemOptions(prev => ({
           ...prev,
-          [itemCode]: options
+          [itemKey]: options
         }));
         
         // Clear loading state
-        setLoadingItemOptions(prev => ({ ...prev, [itemCode]: false }));
+        setLoadingItemOptions(prev => ({ ...prev, [itemKey]: false }));
       } catch (err) {
         console.error('Failed to load options for', itemCode, err);
         // Clear loading state on error
-        setLoadingItemOptions(prev => ({ ...prev, [itemCode]: false }));
+        setLoadingItemOptions(prev => ({ ...prev, [itemKey]: false }));
         // Set empty array to prevent repeated loading attempts
         setLoadedItemOptions(prev => ({
           ...prev,
-          [itemCode]: []
+          [itemKey]: []
         }));
       }
     }
@@ -279,8 +379,9 @@ export const ProcurementPage: React.FC = () => {
     return filtered;
   };
 
-  const getFilteredOptions = (itemCode: string) => {
-    const options = loadedItemOptions[itemCode] || [];
+  const getFilteredOptions = (itemCode: string, projectItemId: number) => {
+    const itemKey = `${itemCode}-${projectItemId}`;
+    const options = loadedItemOptions[itemKey] || [];
     let filtered = options;
 
     // Supplier filter
@@ -303,13 +404,9 @@ export const ProcurementPage: React.FC = () => {
     return filtered;
   };
 
-  const fetchDeliveryOptions = async (itemCode: string, projectId?: number) => {
+  const fetchDeliveryOptions = async (projectItemId: number) => {
     try {
-      // If project_id is available, pass it to get project-specific delivery options
-      const url = projectId 
-        ? `/delivery-options/by-item-code/${itemCode}?project_id=${projectId}`
-        : `/delivery-options/by-item-code/${itemCode}`;
-      const response = await api.get(url);
+      const response = await deliveryOptionsAPI.listByItem(projectItemId);
       setAvailableDeliveryOptions(response.data);
       setSelectedDeliveryDate(''); // Reset selection
     } catch (err: any) {
@@ -326,13 +423,23 @@ export const ProcurementPage: React.FC = () => {
     setSelectedItemDetails(itemDetails || null);
     
     if (itemCode && itemDetails) {
-      // Pass the project_id to get project-specific delivery options
-      await fetchDeliveryOptions(itemCode, itemDetails.project_id);
+      // Pass the project_item_id to get project-item-specific delivery options
+      await fetchDeliveryOptions(itemDetails.project_item_id);
     } else {
       setAvailableDeliveryOptions([]);
       setSelectedDeliveryDate('');
       setSelectedItemDetails(null);
     }
+  };
+
+  // Calculate lead time from delivery date
+  const calculateLeadTime = (deliveryDate: string): number => {
+    if (!deliveryDate) return 0;
+    const today = new Date();
+    const delivery = new Date(deliveryDate);
+    const diffTime = delivery.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays); // Return 0 if delivery date is in the past
   };
 
   const handleCreateOption = async () => {
@@ -350,11 +457,16 @@ export const ProcurementPage: React.FC = () => {
       resetForm();
       
       // Refresh the options for this specific item
-      const updatedOptions = await fetchOptionsByItemCode(itemCode);
-      setLoadedItemOptions(prev => ({
-        ...prev,
-        [itemCode]: updatedOptions
-      }));
+      if (selectedItemDetails) {
+        const updatedOptionsResponse = await procurementAPI.listByProjectItem(selectedItemDetails.project_item_id);
+        if (updatedOptionsResponse.data) {
+          const key = `${itemCode}-${selectedItemDetails.project_item_id}`;
+          setLoadedItemOptions(prevOptions => ({
+            ...prevOptions,
+            [key]: updatedOptionsResponse.data,
+          }));
+        }
+      }
       
       // Also refresh the items list
       fetchData();
@@ -391,11 +503,16 @@ export const ProcurementPage: React.FC = () => {
       resetForm();
       
       // Refresh the options for this specific item
-      const updatedOptions = await fetchOptionsByItemCode(itemCode);
-      setLoadedItemOptions(prev => ({
-        ...prev,
-        [itemCode]: updatedOptions
-      }));
+      if (selectedItemDetails) {
+        const updatedOptionsResponse = await procurementAPI.listByProjectItem(selectedItemDetails.project_item_id);
+        if (updatedOptionsResponse.data) {
+          const key = `${itemCode}-${selectedItemDetails.project_item_id}`;
+          setLoadedItemOptions(prevOptions => ({
+            ...prevOptions,
+            [key]: updatedOptionsResponse.data,
+          }));
+        }
+      }
       
       // Also refresh the items list
       fetchData();
@@ -419,18 +536,21 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const handleDeleteOption = async (optionId: number, itemCode: string) => {
+  const handleDeleteOption = async (optionId: number, itemCode: string, projectItemId: number) => {
     if (!window.confirm('Are you sure you want to delete this procurement option?')) return;
     
     try {
       await procurementAPI.delete(optionId);
       
       // Refresh the options for this specific item
-      const updatedOptions = await fetchOptionsByItemCode(itemCode);
-      setLoadedItemOptions(prev => ({
-        ...prev,
-        [itemCode]: updatedOptions
-      }));
+      const updatedOptionsResponse = await procurementAPI.listByProjectItem(projectItemId);
+      if (updatedOptionsResponse.data) {
+        const key = `${itemCode}-${projectItemId}`;
+        setLoadedItemOptions(prevOptions => ({
+          ...prevOptions,
+          [key]: updatedOptionsResponse.data,
+        }));
+      }
       
       // Also refresh the items list
       fetchData();
@@ -444,7 +564,7 @@ export const ProcurementPage: React.FC = () => {
       return; // Prevent if already updating
     }
     
-    const currentPageItems = itemCodes.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
+    const currentPageItems = itemsWithDetails.slice(page * ITEMS_PER_PAGE, (page + 1) * ITEMS_PER_PAGE);
     
     if (!window.confirm(`Are you sure you want to finalize ALL options for all ${currentPageItems.length} items on this page?\n\nThis will mark all procurement options as ready for optimization.`)) {
       return;
@@ -458,15 +578,16 @@ export const ProcurementPage: React.FC = () => {
     let itemsProcessed = 0;
     
     try {
-      for (const itemCode of currentPageItems) {
+      for (const item of currentPageItems) {
         itemsProcessed++;
         
         try {
           // Load options if not already loaded
-          let itemOptions = loadedItemOptions[itemCode] || [];
+          const itemKey = `${item.item_code}-${item.project_item_id}`;
+          let itemOptions = loadedItemOptions[itemKey] || [];
           
           if (itemOptions.length === 0) {
-            itemOptions = await fetchOptionsByItemCode(itemCode);
+            itemOptions = await fetchOptionsByProjectItem(item.project_item_id);
           }
           
           // Finalize all options for this item
@@ -480,14 +601,14 @@ export const ProcurementPage: React.FC = () => {
           }
           
           // Reload and cache the updated options
-          const updatedOptions = await fetchOptionsByItemCode(itemCode);
+          const updatedOptions = await fetchOptionsByProjectItem(item.project_item_id);
           setLoadedItemOptions(prev => ({
             ...prev,
-            [itemCode]: updatedOptions
+            [itemKey]: updatedOptions
           }));
           
         } catch (err) {
-          console.error(`Failed to process item ${itemCode}:`, err);
+          console.error(`Failed to process item ${item.item_code}:`, err);
         }
       }
       
@@ -505,24 +626,25 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const handleBulkFinalizeToggle = async (itemCode: string, shouldFinalize: boolean) => {
-    if (bulkUpdating === itemCode) {
+  const handleBulkFinalizeToggle = async (itemCode: string, shouldFinalize: boolean, projectItemId: number) => {
+    const itemKey = `${itemCode}-${projectItemId}`;
+    if (bulkUpdating === itemKey) {
       return; // Prevent double-click
     }
     
-    setBulkUpdating(itemCode);
+    setBulkUpdating(itemKey);
     setError('');
     
     try {
       // Auto-load options if not already loaded
-      let itemOptions = loadedItemOptions[itemCode] || [];
+      let itemOptions = loadedItemOptions[itemKey] || [];
       
       if (itemOptions.length === 0) {
         // Load options first
-        itemOptions = await fetchOptionsByItemCode(itemCode);
+        itemOptions = await fetchOptionsByProjectItem(projectItemId);
         setLoadedItemOptions(prev => ({
           ...prev,
-          [itemCode]: itemOptions
+          [itemKey]: itemOptions
         }));
       }
       
@@ -552,10 +674,10 @@ export const ProcurementPage: React.FC = () => {
       }
       
       // Reload options for this specific item
-      const updatedOptions = await fetchOptionsByItemCode(itemCode);
+      const updatedOptions = await fetchOptionsByProjectItem(projectItemId);
       setLoadedItemOptions(prev => ({
         ...prev,
-        [itemCode]: updatedOptions
+        [itemKey]: updatedOptions
       }));
       
       if (failedCount > 0) {
@@ -584,12 +706,15 @@ export const ProcurementPage: React.FC = () => {
     setFormData({
       item_code: selectedItemCode,
       supplier_name: '',
+      supplier_id: null,
       base_cost: 0,
       currency_id: '',
       shipping_cost: 0,
       delivery_option_id: null,
       lomc_lead_time: 0,
+      purchase_date: '',
       expected_delivery_date: '',
+      project_item_id: null, // Add project_item_id field
       discount_bundle_threshold: undefined,
       discount_bundle_percent: undefined,
       payment_terms: { type: 'cash', discount_percent: 0 },
@@ -940,7 +1065,7 @@ export const ProcurementPage: React.FC = () => {
           .map((item) => {
         const itemCode = item.item_code;
         const itemDetails = item;
-        const itemOptions = getFilteredOptions(itemCode);
+        const itemOptions = getFilteredOptions(itemCode, itemDetails.project_item_id);
         
         
         return (
@@ -954,16 +1079,58 @@ export const ProcurementPage: React.FC = () => {
               <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', pr: 2 }}>
                 <Box>
                   <Typography variant="h6">
-                    {itemCode} {loadedItemOptions[itemCode] ? `(${itemOptions.length} options)` : '(click to load options)'}
+                    {itemCode} {loadedItemOptions[`${itemCode}-${itemDetails.project_item_id}`] ? `(${itemOptions.length} options)` : '(click to load options)'}
                   </Typography>
                   {itemDetails && (itemDetails.item_name || itemDetails.description) && (
                     <Typography variant="caption" color="text.secondary">
                       {itemDetails.item_name}
+                      {projectsMap[itemDetails.project_id] && ` — ${projectsMap[itemDetails.project_id]}`}
                       {itemDetails.item_name && itemDetails.description && ' - '}
                       {itemDetails.description && itemDetails.description.substring(0, 80)}
                       {itemDetails.description && itemDetails.description.length > 80 && '...'}
                     </Typography>
                   )}
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <IconButton
+                    size="small"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setSelectedItemDetails(itemDetails);
+                      
+                      // Fetch project information
+                      try {
+                        const projectResponse = await projectsAPI.get(itemDetails.project_id);
+                        setProjectInfo(projectResponse.data);
+                      } catch (err) {
+                        console.error('Failed to fetch project info:', err);
+                      }
+                      
+                      // Fetch delivery options for this specific project item
+                      try {
+                        const deliveryResponse = await deliveryOptionsAPI.listByItem(itemDetails.project_item_id);
+                        setItemDeliveryOptions(deliveryResponse.data);
+                      } catch (err) {
+                        console.error('Failed to fetch delivery options:', err);
+                        setItemDeliveryOptions([]);
+                      }
+
+                      // Fetch sub-items breakdown for this project item
+                      try {
+                        const itemResponse = await itemsAPI.get(itemDetails.project_item_id);
+                        setItemSubItems(itemResponse.data?.sub_items || []);
+                      } catch (err) {
+                        console.error('Failed to fetch sub-items:', err);
+                        setItemSubItems([]);
+                      }
+                      
+                      setViewItemDialogOpen(true);
+                    }}
+                    title={t('procurement.viewItemDetails')}
+                    color="primary"
+                  >
+                    <VisibilityIcon />
+                  </IconButton>
                 </Box>
               </Box>
             </AccordionSummary>
@@ -974,7 +1141,8 @@ export const ProcurementPage: React.FC = () => {
                   <TableRow>
                     <TableCell>{t('procurement.supplier')}</TableCell>
                     <TableCell align="right">{t('procurement.baseCost')}</TableCell>
-                    <TableCell align="center">{t('procurement.leadTime')}</TableCell>
+                    <TableCell align="center">{t('procurement.purchaseDate')}</TableCell>
+                    <TableCell align="center">{t('procurement.deliveryDate')}</TableCell>
                     <TableCell align="center">{t('procurement.bundleDiscount')}</TableCell>
                     <TableCell>{t('procurement.paymentTerms')}</TableCell>
                     <TableCell align="center">{t('procurement.status')}</TableCell>
@@ -982,7 +1150,7 @@ export const ProcurementPage: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {loadingItemOptions[itemCode] ? (
+                  {loadingItemOptions[`${itemCode}-${itemDetails.project_item_id}`] ? (
                     <TableRow>
                       <TableCell colSpan={7} align="center">
                         <CircularProgress size={24} /> {t('procurement.loadingOptions')}
@@ -1008,7 +1176,26 @@ export const ProcurementPage: React.FC = () => {
                           {formatCurrency(option.base_cost)}
                         </TableCell>
                         <TableCell align="center">
-                          <Chip label={`${option.lomc_lead_time} ${t('procurement.periods')}`} size="small" />
+                          {option.purchase_date ? (
+                            <Chip 
+                              label={new Date(option.purchase_date).toLocaleDateString()} 
+                              size="small" 
+                              color="secondary"
+                            />
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">-</Typography>
+                          )}
+                        </TableCell>
+                        <TableCell align="center">
+                          {option.expected_delivery_date ? (
+                            <Chip 
+                              label={new Date(option.expected_delivery_date).toLocaleDateString()} 
+                              size="small" 
+                              color="primary"
+                            />
+                          ) : (
+                            <Chip label={`${option.lomc_lead_time} ${t('procurement.periods')}`} size="small" />
+                          )}
                         </TableCell>
                         <TableCell align="center">
                           {option.discount_bundle_threshold && option.discount_bundle_percent ? (
@@ -1053,12 +1240,15 @@ export const ProcurementPage: React.FC = () => {
                                   setFormData({
                                     item_code: option.item_code,
                                     supplier_name: option.supplier_name,
+                                    supplier_id: (option as any).supplier_id || null,
                                     base_cost: option.base_cost,
                                     currency_id: option.currency_id || 0,
                                     shipping_cost: (option as any).shipping_cost || 0,
                                     delivery_option_id: (option as any).delivery_option_id || null,
                                     lomc_lead_time: option.lomc_lead_time,
+                                    purchase_date: (option as any).purchase_date || '',
                                     expected_delivery_date: (option as any).expected_delivery_date || '',
+                                    project_item_id: (option as any).project_item_id || null, // Add project_item_id
                                     discount_bundle_threshold: option.discount_bundle_threshold,
                                     discount_bundle_percent: option.discount_bundle_percent,
                                     payment_terms: option.payment_terms,
@@ -1067,12 +1257,11 @@ export const ProcurementPage: React.FC = () => {
                                   // Set item details for display
                                   const itemDetails = itemsWithDetails.find(item => item.item_code === option.item_code);
                                   setSelectedItemDetails(itemDetails || null);
-                                  // Fetch delivery options for this item with project ID
+                                  // Fetch delivery options for this specific project item
                                   if (option.item_code && itemDetails) {
                                     try {
-                                      const url = `/delivery-options/by-item-code/${option.item_code}?project_id=${itemDetails.project_id}`;
-                                      const response = await api.get(url);
-                                      const deliveryOptions = response.data;
+                                      const deliveryResponse = await deliveryOptionsAPI.listByItem(itemDetails.project_item_id);
+                                      const deliveryOptions = deliveryResponse.data;
                                       setAvailableDeliveryOptions(deliveryOptions);
                                       
                                       // Check if the current delivery_option_id is valid in the new options
@@ -1098,7 +1287,7 @@ export const ProcurementPage: React.FC = () => {
                               </IconButton>
                               <IconButton
                                 size="small"
-                                onClick={() => handleDeleteOption(option.id, itemCode)}
+                                onClick={() => handleDeleteOption(option.id, itemCode, itemDetails.project_item_id)}
                                 title={t('procurement.deleteOption')}
                                 color="error"
                               >
@@ -1125,21 +1314,30 @@ export const ProcurementPage: React.FC = () => {
                     setFormData({
                       item_code: itemCode,
                       supplier_name: '',
+                      supplier_id: null,
                       base_cost: 0,
                       currency_id: '',
                       shipping_cost: 0,
                       lomc_lead_time: 0,
+                      project_item_id: itemDetails.project_item_id, // Set project_item_id
                       discount_bundle_threshold: undefined,
                       discount_bundle_percent: undefined,
                       payment_terms: { type: 'cash', discount_percent: 0 },
                       is_finalized: false,
                     });
                     setSelectedItemDetails(itemDetails || null);
-                    // Pass project_id to get project-specific delivery options
-                    if (itemDetails) {
-                      fetchDeliveryOptions(itemCode, itemDetails.project_id);
+                    if (itemDetails?.project_item_id) {
+                      itemsAPI.get(itemDetails.project_item_id).then(res => {
+                        setItemSubItems(res.data?.sub_items || []);
+                      }).catch(() => setItemSubItems([]));
                     } else {
-                      fetchDeliveryOptions(itemCode);
+                      setItemSubItems([]);
+                    }
+                    // Pass project_item_id to get project-item-specific delivery options
+                    if (itemDetails) {
+                      fetchDeliveryOptions(itemDetails.project_item_id);
+                    } else {
+                      setAvailableDeliveryOptions([]);
                     }
                     setCreateDialogOpen(true);
                   }}
@@ -1150,13 +1348,13 @@ export const ProcurementPage: React.FC = () => {
                 {/* Bulk Finalize/Unfinalize Button */}
                 {itemOptions.length > 0 && (() => {
                   const allFinalized = itemOptions.every((opt) => opt.is_finalized);
-                  const isUpdating = bulkUpdating === itemCode;
+                  const isUpdating = bulkUpdating === `${itemCode}-${itemDetails.project_item_id}`;
                   return (
                     <Button
                       variant={allFinalized ? "outlined" : "contained"}
                       color={allFinalized ? "warning" : "success"}
                       startIcon={allFinalized ? <RemoveDoneIcon /> : <DoneAllIcon />}
-                      onClick={() => handleBulkFinalizeToggle(itemCode, !allFinalized)}
+                      onClick={() => handleBulkFinalizeToggle(itemCode, !allFinalized, itemDetails.project_item_id)}
                       disabled={isUpdating}
                     >
                       {isUpdating ? t('procurement.updating') : (allFinalized ? t('procurement.unfinalizeAll') : t('procurement.finalizeAll'))}
@@ -1209,34 +1407,73 @@ export const ProcurementPage: React.FC = () => {
             )}
           </Paper>
 
-          <TextField
-            margin="dense"
-            label={t('procurement.supplierName')}
+          <Autocomplete
             fullWidth
-            variant="outlined"
-            value={formData.supplier_name}
-            onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
-            sx={{ mb: 2 }}
+            options={suppliers}
+            getOptionLabel={(option) => `${option.company_name} (${option.supplier_id})`}
+            value={suppliers.find(s => s.id === formData.supplier_id) || null}
+            onChange={(event, newValue) => {
+              setFormData({ 
+                ...formData, 
+                supplier_id: newValue ? newValue.id : null,
+                supplier_name: newValue ? newValue.company_name : ''
+              });
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={t('procurement.supplierName')}
+                placeholder={t('procurement.selectSupplier')}
+                margin="dense"
+                sx={{ mb: 2 }}
+              />
+            )}
+            renderOption={(props, option) => (
+              <li {...props}>
+                {option.company_name} ({option.supplier_id})
+              </li>
+            )}
+            isOptionEqualToValue={(option, value) => option.id === value?.id}
+            noOptionsText={t('procurement.noSuppliersFound')}
           />
           <TextField
             margin="dense"
             label={t('procurement.baseCost')}
-            type="number"
+            type="text"
             fullWidth
             variant="outlined"
-            value={formData.base_cost}
-            onChange={(e) => setFormData({ ...formData, base_cost: parseFloat(e.target.value) || 0 })}
+            value={formData.base_cost ? addCommasWhileTyping(formData.base_cost.toString()) : ''}
+            onChange={(e) => {
+              const rawValue = parseFormattedNumber(e.target.value);
+              const numericValue = parseFloat(rawValue) || 0;
+              setFormData({ ...formData, base_cost: numericValue });
+            }}
+            inputProps={{ 
+              step: 0.01, 
+              min: 0,
+              placeholder: '0.00'
+            }}
+            helperText={t('procurement.baseCostHelper')}
             sx={{ mb: 2 }}
           />
           <TextField
             margin="dense"
             label={t('procurement.shippingCost')}
-            type="number"
+            type="text"
             fullWidth
             variant="outlined"
-            value={formData.shipping_cost}
-            onChange={(e) => setFormData({ ...formData, shipping_cost: parseFloat(e.target.value) || 0 })}
-            helperText="Shipping cost in the same currency as base cost"
+            value={formData.shipping_cost ? addCommasWhileTyping(formData.shipping_cost.toString()) : ''}
+            onChange={(e) => {
+              const rawValue = parseFormattedNumber(e.target.value);
+              const numericValue = parseFloat(rawValue) || 0;
+              setFormData({ ...formData, shipping_cost: numericValue });
+            }}
+            inputProps={{ 
+              step: 0.01, 
+              min: 0,
+              placeholder: '0.00'
+            }}
+            helperText={t('procurement.shippingCostHelper')}
             sx={{ mb: 2 }}
           />
           <CurrencySelector
@@ -1255,11 +1492,12 @@ export const ProcurementPage: React.FC = () => {
               onChange={(e) => {
                 const deliveryOptionId = e.target.value;
                 const selectedOption = availableDeliveryOptions.find(opt => opt.id === deliveryOptionId);
+                const leadTime = selectedOption ? calculateLeadTime(selectedOption.delivery_date) : 0;
                 setFormData({ 
                   ...formData, 
                   delivery_option_id: deliveryOptionId,
                   expected_delivery_date: selectedOption?.delivery_date || '',
-                  lomc_lead_time: 0 // Reset lead time when using delivery option
+                  lomc_lead_time: leadTime // Calculate actual lead time from delivery date
                 });
                 setSelectedDeliveryOptionId(deliveryOptionId);
               }}
@@ -1271,7 +1509,6 @@ export const ProcurementPage: React.FC = () => {
                 availableDeliveryOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id}>
                     {option.delivery_date} - Slot {option.delivery_slot}
-                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} ${t('procurement.perUnit')})`}
                   </MenuItem>
                 ))
               )}
@@ -1282,6 +1519,22 @@ export const ProcurementPage: React.FC = () => {
               </Typography>
             )}
           </FormControl>
+
+          {/* Purchase Date */}
+          <TextField
+            margin="dense"
+            label={t('procurement.purchaseDate')}
+            type="date"
+            fullWidth
+            variant="outlined"
+            value={formData.purchase_date}
+            onChange={(e) => setFormData({ 
+              ...formData, 
+              purchase_date: e.target.value 
+            })}
+            helperText={t('procurement.purchaseDateHelper')}
+            sx={{ mb: 2 }}
+          />
 
           {/* Expected Delivery Date (auto-filled) */}
           <TextField
@@ -1494,9 +1747,9 @@ export const ProcurementPage: React.FC = () => {
                 setFormData({ ...formData, item_code: newItemCode });
                 const itemDetails = itemsWithDetails.find(item => item.item_code === newItemCode);
                 setSelectedItemDetails(itemDetails || null);
-                // Fetch delivery options for the selected item with project ID
+                // Fetch delivery options for the selected project item
                 if (newItemCode && itemDetails) {
-                  fetchDeliveryOptions(newItemCode, itemDetails.project_id);
+                  fetchDeliveryOptions(itemDetails.project_item_id);
                 } else {
                   setAvailableDeliveryOptions([]);
                 }
@@ -1534,34 +1787,73 @@ export const ProcurementPage: React.FC = () => {
             </Paper>
           )}
 
-          <TextField
-            margin="dense"
-            label={t('procurement.supplierName')}
+          <Autocomplete
             fullWidth
-            variant="outlined"
-            value={formData.supplier_name}
-            onChange={(e) => setFormData({ ...formData, supplier_name: e.target.value })}
-            sx={{ mb: 2 }}
+            options={suppliers}
+            getOptionLabel={(option) => `${option.company_name} (${option.supplier_id})`}
+            value={suppliers.find(s => s.id === formData.supplier_id) || null}
+            onChange={(event, newValue) => {
+              setFormData({ 
+                ...formData, 
+                supplier_id: newValue ? newValue.id : null,
+                supplier_name: newValue ? newValue.company_name : ''
+              });
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label={t('procurement.supplierName')}
+                placeholder={t('procurement.selectSupplier')}
+                margin="dense"
+                sx={{ mb: 2 }}
+              />
+            )}
+            renderOption={(props, option) => (
+              <li {...props}>
+                {option.company_name} ({option.supplier_id})
+              </li>
+            )}
+            isOptionEqualToValue={(option, value) => option.id === value?.id}
+            noOptionsText={t('procurement.noSuppliersFound')}
           />
           <TextField
             margin="dense"
             label={t('procurement.baseCost')}
-            type="number"
+            type="text"
             fullWidth
             variant="outlined"
-            value={formData.base_cost}
-            onChange={(e) => setFormData({ ...formData, base_cost: parseFloat(e.target.value) || 0 })}
+            value={formData.base_cost ? addCommasWhileTyping(formData.base_cost.toString()) : ''}
+            onChange={(e) => {
+              const rawValue = parseFormattedNumber(e.target.value);
+              const numericValue = parseFloat(rawValue) || 0;
+              setFormData({ ...formData, base_cost: numericValue });
+            }}
+            inputProps={{ 
+              step: 0.01, 
+              min: 0,
+              placeholder: '0.00'
+            }}
+            helperText={t('procurement.baseCostHelper')}
             sx={{ mb: 2 }}
           />
           <TextField
             margin="dense"
             label={t('procurement.shippingCost')}
-            type="number"
+            type="text"
             fullWidth
             variant="outlined"
-            value={formData.shipping_cost}
-            onChange={(e) => setFormData({ ...formData, shipping_cost: parseFloat(e.target.value) || 0 })}
-            helperText="Shipping cost in the same currency as base cost"
+            value={formData.shipping_cost ? addCommasWhileTyping(formData.shipping_cost.toString()) : ''}
+            onChange={(e) => {
+              const rawValue = parseFormattedNumber(e.target.value);
+              const numericValue = parseFloat(rawValue) || 0;
+              setFormData({ ...formData, shipping_cost: numericValue });
+            }}
+            inputProps={{ 
+              step: 0.01, 
+              min: 0,
+              placeholder: '0.00'
+            }}
+            helperText={t('procurement.shippingCostHelper')}
             sx={{ mb: 2 }}
           />
           <CurrencySelector
@@ -1580,11 +1872,12 @@ export const ProcurementPage: React.FC = () => {
               onChange={(e) => {
                 const deliveryOptionId = e.target.value;
                 const selectedOption = availableDeliveryOptions.find(opt => opt.id === deliveryOptionId);
+                const leadTime = selectedOption ? calculateLeadTime(selectedOption.delivery_date) : 0;
                 setFormData({ 
                   ...formData, 
                   delivery_option_id: deliveryOptionId,
                   expected_delivery_date: selectedOption?.delivery_date || '',
-                  lomc_lead_time: 0 // Reset lead time when using delivery option
+                  lomc_lead_time: leadTime // Calculate actual lead time from delivery date
                 });
                 setSelectedDeliveryOptionId(deliveryOptionId);
               }}
@@ -1596,7 +1889,6 @@ export const ProcurementPage: React.FC = () => {
                 availableDeliveryOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id}>
                     {option.delivery_date} - Slot {option.delivery_slot}
-                    {option.invoice_amount_per_unit && ` (${option.invoice_amount_per_unit} ${t('procurement.perUnit')})`}
                   </MenuItem>
                 ))
               )}
@@ -1607,6 +1899,22 @@ export const ProcurementPage: React.FC = () => {
               </Typography>
             )}
           </FormControl>
+
+          {/* Purchase Date */}
+          <TextField
+            margin="dense"
+            label={t('procurement.purchaseDate')}
+            type="date"
+            fullWidth
+            variant="outlined"
+            value={formData.purchase_date}
+            onChange={(e) => setFormData({ 
+              ...formData, 
+              purchase_date: e.target.value 
+            })}
+            helperText={t('procurement.purchaseDateHelper')}
+            sx={{ mb: 2 }}
+          />
 
           {/* Expected Delivery Date (auto-filled) */}
           <TextField
@@ -1804,6 +2112,175 @@ export const ProcurementPage: React.FC = () => {
             {t('procurement.updateOption')}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* View Item Detail Dialog */}
+      <Dialog open={viewItemDialogOpen} onClose={() => setViewItemDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogContent sx={{ p: 0 }}>
+          {selectedItemDetails && (
+            <Box sx={{ p: 3 }}>
+              {/* Item Details Section */}
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h4" sx={{ mb: 2, fontWeight: 600, color: '#333' }}>
+                  {t('procurement.itemDetails')}
+                </Typography>
+                
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+                  <Box sx={{ 
+                    width: 40, 
+                    height: 40, 
+                    backgroundColor: '#8B4513', 
+                    borderRadius: 1, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center',
+                    mr: 2
+                  }}>
+                    <Typography sx={{ color: 'white', fontSize: '20px' }}>📦</Typography>
+                  </Box>
+                  <Box>
+                    <Typography variant="h5" sx={{ color: '#1976d2', fontWeight: 600 }}>
+                      {selectedItemDetails.item_code}
+                    </Typography>
+                    <Typography variant="body1" sx={{ color: '#666' }}>
+                      {selectedItemDetails.item_name || t('procurement.notSpecified')}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                {/* Quantity Card */}
+                <Paper sx={{ p: 2, backgroundColor: '#f5f5f5', borderRadius: 2 }}>
+                  <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                    {t('procurement.quantity')}
+                  </Typography>
+                  <Typography variant="h4" sx={{ fontWeight: 700, color: '#333' }}>
+                    {selectedItemDetails.quantity || 0}
+                  </Typography>
+                </Paper>
+
+                {/* Project Information */}
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                    {t('procurement.projectName')}
+                  </Typography>
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: '#333' }}>
+                    {projectInfo?.name || t('procurement.loading')}
+                  </Typography>
+                </Box>
+
+                {/* Description */}
+                {selectedItemDetails.description && (
+                  <Box sx={{ mt: 3 }}>
+                    <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                      {t('procurement.description')}
+                    </Typography>
+                    <Typography variant="body1" sx={{ color: '#333' }}>
+                      {selectedItemDetails.description}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+
+              {/* Sub-Items Breakdown */}
+              {itemSubItems && itemSubItems.length > 0 && (
+                <Box sx={{ mt: 2, mb: 3 }}>
+                  <Typography variant="h5" sx={{ mb: 1, fontWeight: 600, color: '#333' }}>
+                    {t('procurement.subItems') || 'Sub-Items'}
+                  </Typography>
+                  {itemSubItems.map(si => (
+                    <Paper key={si.sub_item_id} sx={{ p: 1.5, mb: 1 }}>
+                      <Typography variant="body2" fontWeight="medium">{si.name || '-'}</Typography>
+                      <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                      <Typography variant="body2">{t('procurement.quantity')}: {si.quantity}</Typography>
+                    </Paper>
+                  ))}
+                </Box>
+              )}
+
+              {/* Delivery & Invoice Options Section */}
+              <Box>
+                <Typography variant="h4" sx={{ mb: 2, fontWeight: 600, color: '#333' }}>
+                  {t('procurement.deliveryInvoiceOptions')}
+                </Typography>
+                
+                {itemDeliveryOptions.length > 0 ? (
+                  itemDeliveryOptions.map((option, index) => (
+                    <Paper key={option.id} sx={{ p: 2, backgroundColor: '#f5f5f5', borderRadius: 2, mb: 2 }}>
+                      <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: '#333' }}>
+                        {t('procurement.option')} {index + 1} - {t('procurement.slot')} {option.delivery_slot || 'N/A'}
+                      </Typography>
+                      
+                      <Grid container spacing={3}>
+                        <Grid item xs={6}>
+                          <Box>
+                            <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                              {t('procurement.deliveryDate')}:
+                            </Typography>
+                            <Typography variant="body1" sx={{ fontWeight: 500, color: '#333' }}>
+                              {option.delivery_date ? new Date(option.delivery_date).toLocaleDateString() : t('procurement.notSpecified')}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                        <Grid item xs={6}>
+                          <Box>
+                            <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                              {t('procurement.item')}:
+                            </Typography>
+                            <Typography variant="body1" sx={{ fontWeight: 500, color: '#333' }}>
+                              {selectedItemDetails.item_name || t('procurement.notSpecified')}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <Box>
+                            <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                              {t('procurement.description')}:
+                            </Typography>
+                            <Typography variant="body1" sx={{ color: '#333' }}>
+                              {selectedItemDetails.description || t('procurement.notSpecified')}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                        {option.notes && (
+                          <Grid item xs={12}>
+                            <Box>
+                              <Typography variant="body2" sx={{ color: '#666', mb: 1 }}>
+                                {t('procurement.optionalNotes')}:
+                              </Typography>
+                              <Typography variant="body1" sx={{ color: '#333' }}>
+                                {option.notes}
+                              </Typography>
+                            </Box>
+                          </Grid>
+                        )}
+                      </Grid>
+                    </Paper>
+                  ))
+                ) : (
+                  <Paper sx={{ p: 3, backgroundColor: '#f5f5f5', borderRadius: 2, textAlign: 'center' }}>
+                    <Typography variant="body1" sx={{ color: '#666' }}>
+                      {t('procurement.noDeliveryOptions')}
+                    </Typography>
+                  </Paper>
+                )}
+              </Box>
+
+              {/* Close Button */}
+              <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button 
+                  onClick={() => setViewItemDialogOpen(false)} 
+                  variant="contained"
+                  sx={{ 
+                    backgroundColor: '#1976d2',
+                    '&:hover': { backgroundColor: '#1565c0' }
+                  }}
+                >
+                  {t('procurement.close')}
+                </Button>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
       </Dialog>
     </Box>
   );

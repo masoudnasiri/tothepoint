@@ -107,6 +107,7 @@ class ItemMasterBase(BaseModel):
     company: str = Field(..., min_length=1, max_length=100)
     item_name: str = Field(..., min_length=1, max_length=200)
     model: Optional[str] = Field(None, max_length=100)
+    part_number: Optional[str] = None
     specifications: Optional[Dict[str, Any]] = None
     category: Optional[str] = Field(None, max_length=100)
     unit: str = Field(default='piece', max_length=50)
@@ -121,6 +122,7 @@ class ItemMasterUpdate(BaseModel):
     company: Optional[str] = Field(None, min_length=1, max_length=100)
     item_name: Optional[str] = Field(None, min_length=1, max_length=200)
     model: Optional[str] = Field(None, max_length=100)
+    part_number: Optional[str] = None
     specifications: Optional[Dict[str, Any]] = None
     category: Optional[str] = Field(None, max_length=100)
     unit: Optional[str] = Field(None, max_length=50)
@@ -136,6 +138,32 @@ class ItemMaster(ItemMasterBase):
     created_by_id: Optional[int] = None
     is_active: bool
     
+    model_config = {"from_attributes": True}
+
+
+# Sub-Item Schemas (under Items Master)
+class ItemSubItemBase(BaseModel):
+    name: str = Field(..., min_length=1)
+    description: Optional[str] = None
+    part_number: Optional[str] = None
+
+
+class ItemSubItemCreate(ItemSubItemBase):
+    pass
+
+
+class ItemSubItemUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    part_number: Optional[str] = None
+
+
+class ItemSubItem(ItemSubItemBase):
+    id: int
+    item_master_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
     model_config = {"from_attributes": True}
 
 
@@ -274,6 +302,8 @@ class ProjectItemBase(BaseModel):
     is_finalized: bool = False
     finalized_by: Optional[int] = None
     finalized_at: Optional[datetime] = None
+    # Sub-items quantities for this project item
+    sub_items: Optional[List[Dict[str, int]]] = None  # [{"sub_item_id": int, "quantity": int}]
     
     @validator('delivery_options')
     def validate_delivery_options(cls, v):
@@ -318,6 +348,7 @@ class ProjectItemUpdate(BaseModel):
     is_finalized: Optional[bool] = None
     finalized_by: Optional[int] = None
     finalized_at: Optional[datetime] = None
+    sub_items: Optional[List[Dict[str, int]]] = None
 
 
 class ProjectItem(ProjectItemBase):
@@ -364,12 +395,14 @@ class PaymentTermsInstallments(BaseModel):
 
 class ProcurementOptionBase(BaseModel):
     item_code: str = Field(..., min_length=1, max_length=50)
-    supplier_name: str = Field(..., min_length=1)
+    supplier_name: str = Field(..., min_length=1)  # Legacy field - will be deprecated
+    supplier_id: Optional[int] = Field(None, description="ID of supplier from centralized suppliers table")
     base_cost: Decimal = Field(..., gt=0)
     currency_id: int = Field(..., description="Currency ID for this procurement option")
     shipping_cost: Optional[Decimal] = Field(0, ge=0, description="Shipping cost in same currency as base_cost")
     delivery_option_id: Optional[int] = Field(None, description="Link to delivery option from project item")
     lomc_lead_time: int = Field(0, ge=0, description="Lead time in days (deprecated - use delivery_option)")
+    purchase_date: Optional[date] = Field(None, description="When to place the order (purchase date)")
     expected_delivery_date: Optional[date] = Field(None, description="Expected delivery date (auto-filled from delivery_option)")
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
@@ -378,16 +411,18 @@ class ProcurementOptionBase(BaseModel):
 
 
 class ProcurementOptionCreate(ProcurementOptionBase):
-    pass
+    project_item_id: Optional[int] = Field(None, description="ID of the project item this option belongs to")
 
 
 class ProcurementOptionUpdate(BaseModel):
     item_code: Optional[str] = Field(None, min_length=1, max_length=50)
-    supplier_name: Optional[str] = Field(None, min_length=1)
+    supplier_name: Optional[str] = Field(None, min_length=1)  # Legacy field - will be deprecated
+    supplier_id: Optional[int] = Field(None, description="ID of supplier from centralized suppliers table")
     base_cost: Optional[Decimal] = Field(None, gt=0)
     shipping_cost: Optional[Decimal] = Field(None, ge=0)
     delivery_option_id: Optional[int] = Field(None, description="Link to delivery option from project item")
     lomc_lead_time: Optional[int] = Field(None, ge=0, description="Lead time in days (deprecated)")
+    purchase_date: Optional[date] = Field(None, description="When to place the order (purchase date)")
     expected_delivery_date: Optional[date] = Field(None, description="Expected delivery date (auto-filled from delivery_option)")
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
@@ -402,6 +437,23 @@ class ProcurementOption(ProcurementOptionBase):
     updated_at: Optional[datetime] = None
     is_active: bool
     is_finalized: bool = False
+    
+    model_config = {"from_attributes": True}
+
+
+class SupplierSummary(BaseModel):
+    """Summary of supplier information for relationships"""
+    id: int
+    supplier_id: str
+    company_name: str
+
+    class Config:
+        from_attributes = True
+
+
+class ProcurementOptionWithSupplier(ProcurementOption):
+    """Procurement option with supplier information included"""
+    supplier: Optional[SupplierSummary] = None  # Include supplier details
     
     model_config = {"from_attributes": True}
 
@@ -469,6 +521,7 @@ class OptimizationDecision(BaseModel):
     final_cost: Decimal
     payment_terms: str
     priority_score: Optional[float] = None  # For bunch splitting
+    project_item_id: Optional[int] = None  # Add project_item_id to identify specific project item
 
 
 # A procurement bunch (subset of decisions)
@@ -943,3 +996,354 @@ class SupplierPaymentResponse(SupplierPayment):
 Currency.model_rebuild()
 ExchangeRate.model_rebuild()
 CurrencyWithRates.model_rebuild()
+
+
+# Supplier Management Schemas
+
+class SupplierStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    SUSPENDED = "SUSPENDED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+
+
+class ComplianceStatus(str, Enum):
+    APPROVED = "APPROVED"
+    PENDING = "PENDING"
+    REJECTED = "REJECTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+
+
+class RiskLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+# Supplier Schemas
+class SupplierBase(BaseModel):
+    company_name: str = Field(..., min_length=1, max_length=200, description="Company name")
+    legal_entity_type: Optional[str] = Field(None, max_length=50, description="Legal entity type (LLC, Ltd., JV, etc.)")
+    registration_number: Optional[str] = Field(None, max_length=100, description="Registration number")
+    tax_id: Optional[str] = Field(None, max_length=100, description="Tax ID")
+    established_year: Optional[int] = Field(None, ge=1800, le=2030, description="Established year")
+    
+    # Location Information
+    country: Optional[str] = Field(None, max_length=100, description="Country")
+    city: Optional[str] = Field(None, max_length=100, description="City")
+    address: Optional[str] = Field(None, description="Address")
+    website: Optional[str] = Field(None, max_length=200, description="Website")
+    domain: Optional[str] = Field(None, max_length=200, description="Domain")
+    
+    # Primary Contact Information
+    primary_email: Optional[str] = Field(None, max_length=200, description="Primary email address")
+    main_phone: Optional[str] = Field(None, max_length=50, description="Main phone number")
+    
+    # Social Media Links
+    linkedin_url: Optional[str] = Field(None, max_length=200, description="LinkedIn URL")
+    wechat_id: Optional[str] = Field(None, max_length=100, description="WeChat ID")
+    telegram_id: Optional[str] = Field(None, max_length=100, description="Telegram ID")
+    other_social_media: Optional[List[str]] = Field(None, description="Other social media links")
+    
+    # Business & Classification
+    category: Optional[str] = Field(None, max_length=100, description="Category (Telecom, Oil & Gas, IT Equipment, etc.)")
+    industry: Optional[str] = Field(None, max_length=100, description="Industry")
+    product_service_lines: Optional[List[str]] = Field(None, description="Product/service lines")
+    main_brands_represented: Optional[List[str]] = Field(None, description="Main brands represented")
+    main_markets_regions: Optional[List[str]] = Field(None, description="Main markets/regions")
+    certifications: Optional[List[str]] = Field(None, description="Certifications (ISO, CE, UL, etc.)")
+    ownership_type: Optional[str] = Field(None, max_length=50, description="Ownership type (Private, State-owned, Distributor, Agent, etc.)")
+    annual_revenue_range: Optional[str] = Field(None, max_length=50, description="Annual revenue range")
+    number_of_employees: Optional[str] = Field(None, max_length=50, description="Number of employees")
+    
+    # Operational Information
+    warehouse_locations: Optional[List[str]] = Field(None, description="Warehouse/logistics locations")
+    key_clients_references: Optional[List[str]] = Field(None, description="Key clients/references")
+    payment_terms: Optional[str] = Field(None, max_length=100, description="Payment terms (T/T, LC, Net 30, etc.)")
+    currency_preference: Optional[str] = Field("IRR", max_length=10, description="Currency preference")
+    shipping_methods: Optional[List[str]] = Field(None, description="Shipping methods")
+    incoterms: Optional[List[str]] = Field(None, description="Incoterms")
+    average_lead_time_days: Optional[int] = Field(None, ge=0, le=365, description="Average lead time in days")
+    
+    # Quality and Service Information
+    quality_assurance_process: Optional[str] = Field(None, description="Quality assurance process")
+    warranty_policy: Optional[str] = Field(None, description="Warranty policy")
+    after_sales_policy: Optional[str] = Field(None, description="After-sales policy")
+    delivery_accuracy_percent: Optional[Decimal] = Field(None, ge=0, le=100, description="Delivery accuracy percentage")
+    response_time_hours: Optional[int] = Field(None, ge=0, le=168, description="Response time in hours")
+    
+    # Document & Compliance Tracking
+    business_license_path: Optional[str] = Field(None, max_length=500, description="Business license file path")
+    tax_certificate_path: Optional[str] = Field(None, max_length=500, description="Tax certificate file path")
+    iso_certificates_path: Optional[str] = Field(None, max_length=500, description="ISO certificates file path")
+    financial_report_path: Optional[str] = Field(None, max_length=500, description="Financial report file path")
+    supplier_evaluation_path: Optional[str] = Field(None, max_length=500, description="Supplier evaluation file path")
+    compliance_status: ComplianceStatus = Field(ComplianceStatus.PENDING, description="Compliance status")
+    last_review_date: Optional[date] = Field(None, description="Date of last review")
+    last_audit_date: Optional[date] = Field(None, description="Date of last audit")
+    
+    # Internal Use & Meta
+    status: SupplierStatus = Field(SupplierStatus.ACTIVE, description="Supplier status")
+    risk_level: RiskLevel = Field(RiskLevel.MEDIUM, description="Risk level")
+    internal_rating: Optional[Decimal] = Field(None, ge=1, le=5, description="Internal rating (1-5 stars)")
+    performance_metrics: Optional[Dict[str, Any]] = Field(None, description="Performance metrics")
+    notes: Optional[str] = Field(None, description="Notes or comments")
+
+
+class SupplierCreate(SupplierBase):
+    supplier_id: Optional[str] = Field(None, max_length=50, description="Supplier ID (auto-generated if empty)")
+
+
+class SupplierUpdate(BaseModel):
+    company_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    legal_entity_type: Optional[str] = Field(None, max_length=50)
+    registration_number: Optional[str] = Field(None, max_length=100)
+    tax_id: Optional[str] = Field(None, max_length=100)
+    established_year: Optional[int] = Field(None, ge=1800, le=2030)
+    
+    # Location Information
+    country: Optional[str] = Field(None, max_length=100)
+    city: Optional[str] = Field(None, max_length=100)
+    address: Optional[str] = None
+    website: Optional[str] = Field(None, max_length=200)
+    domain: Optional[str] = Field(None, max_length=200)
+    
+    # Primary Contact Information
+    primary_email: Optional[str] = Field(None, max_length=200)
+    main_phone: Optional[str] = Field(None, max_length=50)
+    
+    # Social Media Links
+    linkedin_url: Optional[str] = Field(None, max_length=200)
+    wechat_id: Optional[str] = Field(None, max_length=100)
+    telegram_id: Optional[str] = Field(None, max_length=100)
+    other_social_media: Optional[List[str]] = None
+    
+    # Business & Classification
+    category: Optional[str] = Field(None, max_length=100)
+    industry: Optional[str] = Field(None, max_length=100)
+    product_service_lines: Optional[List[str]] = None
+    main_brands_represented: Optional[List[str]] = None
+    main_markets_regions: Optional[List[str]] = None
+    certifications: Optional[List[str]] = None
+    ownership_type: Optional[str] = Field(None, max_length=50)
+    annual_revenue_range: Optional[str] = Field(None, max_length=50)
+    number_of_employees: Optional[str] = Field(None, max_length=50)
+    
+    # Operational Information
+    warehouse_locations: Optional[List[str]] = None
+    key_clients_references: Optional[List[str]] = None
+    payment_terms: Optional[str] = Field(None, max_length=100)
+    currency_preference: Optional[str] = Field(None, max_length=10)
+    shipping_methods: Optional[List[str]] = None
+    incoterms: Optional[List[str]] = None
+    average_lead_time_days: Optional[int] = Field(None, ge=0, le=365)
+    
+    # Quality and Service Information
+    quality_assurance_process: Optional[str] = None
+    warranty_policy: Optional[str] = None
+    after_sales_policy: Optional[str] = None
+    delivery_accuracy_percent: Optional[Decimal] = Field(None, ge=0, le=100)
+    response_time_hours: Optional[int] = Field(None, ge=0, le=168)
+    
+    # Document & Compliance Tracking
+    business_license_path: Optional[str] = Field(None, max_length=500)
+    tax_certificate_path: Optional[str] = Field(None, max_length=500)
+    iso_certificates_path: Optional[str] = Field(None, max_length=500)
+    financial_report_path: Optional[str] = Field(None, max_length=500)
+    supplier_evaluation_path: Optional[str] = Field(None, max_length=500)
+    compliance_status: Optional[ComplianceStatus] = None
+    last_review_date: Optional[date] = None
+    last_audit_date: Optional[date] = None
+    
+    # Internal Use & Meta
+    status: Optional[SupplierStatus] = None
+    risk_level: Optional[RiskLevel] = None
+    internal_rating: Optional[Decimal] = Field(None, ge=1, le=5)
+    performance_metrics: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
+
+
+class Supplier(SupplierBase):
+    id: int
+    supplier_id: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    last_updated_by_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Supplier Contact Schemas
+class SupplierContactBase(BaseModel):
+    full_name: str = Field(..., min_length=1, max_length=200, description="Full name")
+    job_title: Optional[str] = Field(None, max_length=100, description="Job title/role")
+    role: Optional[str] = Field(None, max_length=100, description="Role (Sales Manager, Technical Support, etc.)")
+    department: Optional[str] = Field(None, max_length=100, description="Department (Sales, Technical, Finance, etc.)")
+    
+    # Communication Details
+    email: Optional[str] = Field(None, max_length=200, description="Email address")
+    phone: Optional[str] = Field(None, max_length=50, description="Phone number")
+    whatsapp_id: Optional[str] = Field(None, max_length=50, description="WhatsApp ID")
+    telegram_id: Optional[str] = Field(None, max_length=50, description="Telegram ID")
+    
+    # Preferences
+    language_preference: Optional[str] = Field("en", max_length=10, description="Language preference")
+    timezone: Optional[str] = Field(None, max_length=50, description="Timezone")
+    working_hours: Optional[str] = Field(None, max_length=100, description="Working hours")
+    
+    # Status
+    is_primary_contact: bool = Field(False, description="Is primary contact")
+    is_active: bool = Field(True, description="Is active")
+    
+    # Additional Information
+    notes: Optional[str] = Field(None, description="Relationship information (e.g., 'Main negotiator for Cisco equipment')")
+
+
+class SupplierContactCreate(SupplierContactBase):
+    contact_id: Optional[str] = Field(None, max_length=50, description="Contact ID (auto-generated if empty)")
+
+
+class SupplierContactUpdate(BaseModel):
+    full_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    job_title: Optional[str] = Field(None, max_length=100)
+    role: Optional[str] = Field(None, max_length=100)
+    department: Optional[str] = Field(None, max_length=100)
+    
+    # Communication Details
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=50)
+    whatsapp_id: Optional[str] = Field(None, max_length=50)
+    telegram_id: Optional[str] = Field(None, max_length=50)
+    
+    # Preferences
+    language_preference: Optional[str] = Field(None, max_length=10)
+    timezone: Optional[str] = Field(None, max_length=50)
+    working_hours: Optional[str] = Field(None, max_length=100)
+    
+    # Status
+    is_primary_contact: Optional[bool] = None
+    is_active: Optional[bool] = None
+    
+    # Additional Information
+    notes: Optional[str] = None
+
+
+class SupplierContact(SupplierContactBase):
+    id: int
+    contact_id: str
+    supplier_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    supplier: Optional[SupplierSummary] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Supplier Document Schemas
+class SupplierDocumentBase(BaseModel):
+    document_name: str = Field(..., min_length=1, max_length=200, description="Document name")
+    document_type: str = Field(..., min_length=1, max_length=100, description="Document type (Business License, Tax Certificate, ISO Certificate, etc.)")
+    description: Optional[str] = Field(None, description="Description")
+    document_number: Optional[str] = Field(None, max_length=100, description="Document number")
+    issued_by: Optional[str] = Field(None, max_length=200, description="Issued by")
+    issued_date: Optional[date] = Field(None, description="Issued date")
+    expiry_date: Optional[date] = Field(None, description="Expiry date")
+    
+    # Status
+    is_active: bool = Field(True, description="Is active")
+    is_verified: bool = Field(False, description="Is verified")
+    
+    # Additional Information
+    notes: Optional[str] = Field(None, description="Notes")
+
+
+class SupplierDocumentCreate(SupplierDocumentBase):
+    document_id: Optional[str] = Field(None, max_length=50, description="Document ID (auto-generated if empty)")
+    file_name: str = Field(..., min_length=1, max_length=200, description="File name")
+    file_path: str = Field(..., min_length=1, max_length=500, description="File path")
+    file_size: Optional[int] = Field(None, ge=0, description="File size in bytes")
+    mime_type: Optional[str] = Field(None, max_length=100, description="MIME type")
+
+
+class SupplierDocumentUpdate(BaseModel):
+    document_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    document_type: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    document_number: Optional[str] = Field(None, max_length=100)
+    issued_by: Optional[str] = Field(None, max_length=200)
+    issued_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    
+    # Status
+    is_active: Optional[bool] = None
+    is_verified: Optional[bool] = None
+    
+    # Additional Information
+    notes: Optional[str] = None
+
+
+class SupplierDocument(SupplierDocumentBase):
+    id: int
+    document_id: str
+    supplier_id: int
+    file_name: str
+    file_path: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+# Supplier with relationships
+class SupplierWithContacts(Supplier):
+    contacts: List[SupplierContact] = []
+
+
+class SupplierWithDocuments(Supplier):
+    documents: List[SupplierDocument] = []
+
+
+class SupplierWithRelations(Supplier):
+    contacts: List[SupplierContact] = []
+    documents: List[SupplierDocument] = []
+
+
+# Response schemas
+class SupplierListResponse(BaseModel):
+    suppliers: List[Supplier]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class SupplierListWithRelationsResponse(BaseModel):
+    suppliers: List[SupplierWithRelations]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class SupplierContactListResponse(BaseModel):
+    contacts: List[SupplierContact]
+    total: int
+    page: int
+    size: int
+    pages: int
+
+
+class SupplierDocumentListResponse(BaseModel):
+    documents: List[SupplierDocument]
+    total: int
+    page: int
+    size: int
+    pages: int

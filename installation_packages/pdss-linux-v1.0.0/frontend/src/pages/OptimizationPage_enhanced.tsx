@@ -57,6 +57,7 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { financeAPI, decisionsAPI, procurementAPI } from '../services/api.ts';
 import { BudgetAnalysis } from '../components/BudgetAnalysis.tsx';
 import { formatApiError } from '../utils/errorUtils.ts';
+import { useTranslation } from 'react-i18next';
 
 interface SolverInfo {
   type: string;
@@ -88,6 +89,7 @@ interface OptimizationDecision {
   unit_cost: number;
   final_cost: number;
   payment_terms: string;
+  project_item_id?: number; // Add project_item_id to identify specific project item
 }
 
 interface OptimizationProposal {
@@ -114,6 +116,7 @@ interface OptimizationResponse {
 
 export const OptimizationPageEnhanced: React.FC = () => {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [solverInfo, setSolverInfo] = useState<{ available_solvers: SolverInfo[], available_strategies: StrategyInfo[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [mainTabValue, setMainTabValue] = useState(0); // 0 = Optimization, 1 = Budget Analysis
@@ -134,6 +137,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
   const [removedDecisions, setRemovedDecisions] = useState<Set<string>>(new Set());
   const [addedDecisions, setAddedDecisions] = useState<OptimizationDecision[]>([]);
   const [procurementOptions, setProcurementOptions] = useState<any[]>([]);
+  const [currentItemOptions, setCurrentItemOptions] = useState<any[]>([]);
   
   const [optimizationConfig, setOptimizationConfig] = useState({
     max_time_slots: 60,  // Increased from 12 to 60 to accommodate all delivery dates (up to 60 days)
@@ -145,7 +149,6 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
   useEffect(() => {
     fetchSolverInfo();
-    fetchProcurementOptions();
     fetchExistingProposals();
   }, []);
   
@@ -223,14 +226,6 @@ export const OptimizationPageEnhanced: React.FC = () => {
     }
   };
 
-  const fetchProcurementOptions = async () => {
-    try {
-      const response = await procurementAPI.listOptions();
-      setProcurementOptions(response.data);
-    } catch (err: any) {
-      console.error('Failed to load procurement options');
-    }
-  };
 
   const handleRunOptimization = async () => {
     setOptimizing(true);
@@ -297,8 +292,22 @@ export const OptimizationPageEnhanced: React.FC = () => {
     setInfoDialogOpen(true);
   };
 
-  const handleEditDecision = (decision: OptimizationDecision) => {
+  const handleEditDecision = async (decision: OptimizationDecision) => {
     setSelectedDecision(decision);
+    
+    // Load procurement options for this specific project item
+    if (decision.project_item_id) {
+      try {
+        const response = await procurementAPI.listByProjectItem(decision.project_item_id);
+        setCurrentItemOptions(response.data);
+      } catch (err: any) {
+        console.error('Failed to load procurement options for project item:', err);
+        setCurrentItemOptions([]);
+      }
+    } else {
+      setCurrentItemOptions([]);
+    }
+    
     setEditDialogOpen(true);
   };
 
@@ -332,8 +341,8 @@ export const OptimizationPageEnhanced: React.FC = () => {
       project_code: 'NEW',
       item_code: '',
       item_name: 'New Item',
-      procurement_option_id: procurementOptions.length > 0 ? procurementOptions[0].id : 0,
-      supplier_name: procurementOptions.length > 0 ? procurementOptions[0].supplier_name : '',
+      procurement_option_id: 0,
+      supplier_name: '',
       purchase_date: new Date().toISOString().split('T')[0],
       delivery_date: new Date().toISOString().split('T')[0],
       quantity: 1,
@@ -424,6 +433,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
         decisions: decisions.map(d => ({
           project_id: d.project_id,
           item_code: d.item_code,
+          project_item_id: d.project_item_id, // Include project_item_id for accurate item identification
           procurement_option_id: d.procurement_option_id,
           purchase_date: d.purchase_date || new Date().toISOString().split('T')[0],
           delivery_date: d.delivery_date || new Date().toISOString().split('T')[0],
@@ -437,6 +447,17 @@ export const OptimizationPageEnhanced: React.FC = () => {
       console.log('LastRun object:', lastRun);
       console.log('LastRun run_id:', lastRun?.run_id);
       console.log('LastRun run_id type:', typeof lastRun?.run_id);
+      console.log('Decisions length:', decisions.length);
+      console.log('Decisions data:', decisions);
+
+      // Validate data before sending
+      if (!lastRun?.run_id) {
+        throw new Error('No optimization run ID available. Please run optimization first.');
+      }
+      
+      if (decisions.length === 0) {
+        throw new Error('No decisions to save. Please ensure optimization has generated results.');
+      }
 
       // Call the save-proposal endpoint
       const response = await decisionsAPI.saveProposal(proposalData);
@@ -563,9 +584,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4">Advanced Optimization</Typography>
+          <Typography variant="h4">{t('optimization.title')}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            Multi-solver optimization with strategy comparison
+            {t('optimization.subtitle')}
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
@@ -609,12 +630,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
         <Tabs value={mainTabValue} onChange={(e, newValue) => setMainTabValue(newValue)}>
           <Tab 
             icon={<TrendingUpIcon />} 
-            label="Optimization Results" 
+            label={t('optimization.optimizationResults')} 
             iconPosition="start"
           />
           <Tab 
             icon={<AccountBalanceIcon />} 
-            label="Budget Analysis" 
+            label={t('optimization.budgetAnalysis')} 
             iconPosition="start"
           />
         </Tabs>
@@ -633,7 +654,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               <CardContent>
                 <Box display="flex" alignItems="center" mb={2}>
                   <CircularProgress size={20} sx={{ mr: 2, color: 'inherit' }} />
-              <Typography variant="h6">Running Optimization...</Typography>
+              <Typography variant="h6">{t('optimization.running')}</Typography>
             </Box>
             <LinearProgress sx={{ mb: 1 }} />
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
@@ -691,7 +712,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   {solver.description}
                 </Typography>
                 <Chip 
-                  label={optimizationConfig.solver_type === solver.type ? 'Selected' : 'Available'} 
+                  label={optimizationConfig.solver_type === solver.type ? t('optimization.selected') : t('optimization.available')} 
                   size="small" 
                   color={optimizationConfig.solver_type === solver.type ? 'primary' : 'default'}
                   sx={{ mt: 1 }}
@@ -718,7 +739,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     Status
                   </Typography>
                   <Chip 
-                    label={lastRun.status} 
+                    label={t(`optimization.${lastRun.status.toLowerCase()}`)} 
                     color={getStatusColor(lastRun.status) as any}
                     size="small"
                     sx={{ mt: 1 }}
@@ -799,18 +820,18 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   <Box display="flex" gap={1} alignItems="center">
                     {(Object.keys(editedDecisions).length > 0 || removedDecisions.size > 0 || addedDecisions.length > 0) && (
                       <Chip 
-                        label="Has local changes"
+                        label={t('optimization.hasLocalChanges')}
                         color="warning"
                         size="small"
                       />
                     )}
                     <Chip 
-                      label={`${selectedProposal.items_count} items`}
+                      label={`${selectedProposal.items_count} ${t('optimization.items')}`}
                       color="primary"
                       variant="outlined"
                     />
                     <Chip 
-                      label={selectedProposal.status}
+                      label={t(`optimization.${selectedProposal.status.toLowerCase()}`)}
                       color={getStatusColor(selectedProposal.status) as any}
                     />
                     {(user?.role === 'finance' || user?.role === 'admin' || user?.role === 'pm') && (
@@ -892,7 +913,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                                   {displayDecision.project_code}
                                 </Typography>
                                 {isEdited && (
-                                  <Chip label="EDITED" size="small" color="warning" sx={{ ml: 1 }} />
+                                  <Chip label={t('optimization.edited')} size="small" color="warning" sx={{ ml: 1 }} />
                                 )}
                               </TableCell>
                               <TableCell>
@@ -912,7 +933,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                                 </Typography>
                               </TableCell>
                               <TableCell>
-                                <Chip label={typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : 'Payment Terms'} size="small" />
+                                <Chip label={typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : t('optimization.paymentTerms')} size="small" />
                               </TableCell>
                               <TableCell align="center">
                                 <IconButton
@@ -943,7 +964,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             <Typography variant="body2" fontWeight="medium">
                               {decision.project_code}
                             </Typography>
-                            <Chip label="NEW" size="small" color="success" sx={{ ml: 1 }} />
+                            <Chip label={t('optimization.new')} size="small" color="success" sx={{ ml: 1 }} />
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2">{decision.item_code}</Typography>
@@ -962,7 +983,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             </Typography>
                           </TableCell>
                           <TableCell>
-                            <Chip label={typeof decision.payment_terms === 'string' ? decision.payment_terms : 'Payment Terms'} size="small" />
+                            <Chip label={typeof decision.payment_terms === 'string' ? decision.payment_terms : t('optimization.paymentTerms')} size="small" />
                           </TableCell>
                           <TableCell align="center">
                             <IconButton
@@ -1042,7 +1063,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
             <InputLabel>Solver Type</InputLabel>
             <Select
               value={optimizationConfig.solver_type}
-              label="Solver Type"
+              label={t('optimization.solverType')}
               onChange={(e) => setOptimizationConfig({ ...optimizationConfig, solver_type: e.target.value })}
             >
               {solverInfo?.available_solvers.map((solver) => (
@@ -1055,7 +1076,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
           <TextField
             margin="dense"
-            label="Maximum Time Slots"
+            label={t('optimization.maximumTimeSlots')}
             type="number"
             fullWidth
             variant="outlined"
@@ -1070,7 +1091,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
           <TextField
             margin="dense"
-            label="Time Limit (seconds)"
+            label={t('optimization.timeLimit')}
             type="number"
             fullWidth
             variant="outlined"
@@ -1093,7 +1114,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                 })}
               />
             }
-            label="Generate Multiple Proposals"
+            label={t('optimization.generateMultipleProposals')}
             sx={{ mb: 2 }}
           />
 
@@ -1103,7 +1124,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               <Select
                 multiple
                 value={optimizationConfig.strategies}
-                label="Strategies (leave empty for all)"
+                label={t('optimization.strategies')}
                 onChange={(e) => setOptimizationConfig({
                   ...optimizationConfig,
                   strategies: typeof e.target.value === 'string' ? [e.target.value] : e.target.value
@@ -1214,7 +1235,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               
               <TextField
                 margin="dense"
-                label="Item Code"
+                label={t('optimization.itemCode')}
                 fullWidth
                 variant="outlined"
                 value={selectedDecision.item_code}
@@ -1244,7 +1265,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   value={selectedDecision.procurement_option_id}
                   label="Procurement Option"
                   onChange={(e) => {
-                    const option = procurementOptions.find(o => o.id === Number(e.target.value));
+                    const option = currentItemOptions.find(o => o.id === Number(e.target.value));
                     if (option) {
                       setSelectedDecision({
                         ...selectedDecision,
@@ -1256,14 +1277,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     }
                   }}
                 >
-                  {/* Filter procurement options to show only those for the current item code */}
-                  {procurementOptions
-                    .filter(option => option.item_code === selectedDecision.item_code)
-                    .map(option => (
-                      <MenuItem key={option.id} value={option.id}>
-                        {option.supplier_name} - {formatCurrency(option.base_cost)} (Lead: {option.lomc_lead_time} periods)
-                      </MenuItem>
-                    ))}
+                  {/* Show procurement options for the current project item */}
+                  {currentItemOptions.map(option => (
+                    <MenuItem key={option.id} value={option.id}>
+                      {option.supplier_name} - {formatCurrency(option.base_cost)} (Lead: {option.lomc_lead_time} periods)
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
 

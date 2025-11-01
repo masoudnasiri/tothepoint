@@ -1,4 +1,7 @@
 import axios from 'axios';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Minimal shim to satisfy type checking in environments without @types/node
+declare const process: any;
 
 // Configure axios
 // Note: In development, the proxy in package.json handles routing to the backend
@@ -90,6 +93,14 @@ export const itemsMasterAPI = {
     return api.get('/items-master/preview/code', { params });
   },
   getByCode: (itemCode: string) => api.get(`/items-master/search/by-code/${itemCode}`),
+  // Sub-items nested under items master
+  listSubItems: (itemId: number) => api.get(`/items-master/${itemId}/subitems`),
+  createSubItem: (itemId: number, data: { name: string; description?: string; part_number?: string }) =>
+    api.post(`/items-master/${itemId}/subitems`, data),
+  updateSubItem: (itemId: number, subItemId: number, data: { name?: string; description?: string; part_number?: string }) =>
+    api.put(`/items-master/${itemId}/subitems/${subItemId}`, data),
+  deleteSubItem: (itemId: number, subItemId: number) =>
+    api.delete(`/items-master/${itemId}/subitems/${subItemId}`),
 };
 
 // Project Items API
@@ -198,16 +209,21 @@ export const analyticsAPI = {
   getRisk: (projectId: number | 'all') => 
     projectId === 'all' ? api.get('/analytics/portfolio/risk') : api.get(`/analytics/risk/${projectId}`),
   getAllProjectsSummary: () => api.get('/analytics/all-projects-summary'),
+  getItemFollowUp: (projectId: number | 'all') => 
+    projectId === 'all' ? api.get('/analytics/portfolio/item-follow-up') : api.get(`/analytics/item-follow-up/${projectId}`),
 };
 
 // Procurement API
 export const procurementAPI = {
   getItemCodes: () => api.get('/procurement/item-codes'),
   getItemsWithDetails: () => api.get('/procurement/items-with-details'),
+  getSuppliers: () => api.get('/procurement/suppliers'),
   listOptions: (params?: { skip?: number; limit?: number; item_code?: string }) =>
     api.get('/procurement/options', { params }),
   listByItemCode: (itemCode: string) =>
     api.get(`/procurement/options/${itemCode}`),
+  listByProjectItem: (projectItemId: number) =>
+    api.get(`/procurement/options/by-project-item/${projectItemId}`),
   get: (id: number) => api.get(`/procurement/option/${id}`),
   create: (option: any) => api.post('/procurement/options', option),
   update: (id: number, option: any) => api.put(`/procurement/option/${id}`, option),
@@ -314,7 +330,12 @@ export const deliveryOptionsAPI = {
   create: (option: any) => api.post('/delivery-options/', option),
   update: (id: number, option: any) => api.put(`/delivery-options/${id}`, option),
   delete: (id: number) => api.delete(`/delivery-options/${id}`),
-  getByItemCode: (itemCode: string) => api.get(`/delivery-options/by-item-code/${itemCode}`),
+  getByItemCode: (itemCode: string, projectId?: number) => {
+    const url = projectId 
+      ? `/delivery-options/by-item-code/${itemCode}?project_id=${projectId}`
+      : `/delivery-options/by-item-code/${itemCode}`;
+    return api.get(url);
+  },
 };
 
 // Procurement Plan & Delivery Tracking API
@@ -478,6 +499,78 @@ export const supplierPaymentsAPI = {
   
   // Get payments for a specific decision
   getByDecision: (decisionId: number) => api.get(`/supplier-payments/decisions/${decisionId}/payments`),
+};
+
+// Suppliers API
+export const suppliersAPI = {
+  // List suppliers with filters and pagination
+  list: (params?: {
+    page?: number;
+    size?: number;
+    search?: string;
+    status?: string;
+    compliance_status?: string;
+    risk_level?: string;
+    country?: string;
+  }) => api.get('/suppliers/', { params }),
+  
+  // Get supplier by ID
+  get: (id: number) => api.get(`/suppliers/${id}`),
+  
+  // Create supplier
+  create: (data: any) => api.post('/suppliers/', data),
+  
+  // Update supplier
+  update: (id: number, data: any) => api.put(`/suppliers/${id}`, data),
+  
+  // Delete supplier
+  delete: (id: number) => api.delete(`/suppliers/${id}`),
+  
+  // Supplier contacts
+  listContacts: (supplierId: number, params?: { page?: number; size?: number }) =>
+    api.get(`/suppliers/${supplierId}/contacts`, { params }),
+  
+  // List all contacts with filters and pagination
+  listAllContacts: (params?: {
+    page?: number;
+    size?: number;
+    search?: string;
+    supplier_id?: number;
+  }) => api.get('/suppliers/contacts', { params }),
+  
+  createContact: (supplierId: number, data: any) =>
+    api.post(`/suppliers/${supplierId}/contacts`, data),
+  
+  updateContact: (supplierId: number, contactId: number, data: any) =>
+    api.put(`/suppliers/${supplierId}/contacts/${contactId}`, data),
+  
+  deleteContact: (supplierId: number, contactId: number) =>
+    api.delete(`/suppliers/${supplierId}/contacts/${contactId}`),
+  
+  // Supplier documents
+  listDocuments: (supplierId: number, params?: { page?: number; size?: number }) =>
+    api.get(`/suppliers/${supplierId}/documents`, { params }),
+  
+  uploadDocument: (supplierId: number, formData: FormData) =>
+    api.post(`/suppliers/${supplierId}/documents`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+  
+  downloadDocument: (supplierId: number, documentId: number) =>
+    api.get(`/suppliers/${supplierId}/documents/${documentId}/download`, {
+      responseType: 'blob'
+    }),
+  
+  updateDocument: (supplierId: number, documentId: number, data: any) =>
+    api.put(`/suppliers/${supplierId}/documents/${documentId}`, data),
+  
+  deleteDocument: (supplierId: number, documentId: number) =>
+    api.delete(`/suppliers/${supplierId}/documents/${documentId}`),
+  
+  // Utility endpoints
+  getCategories: () => api.get('/suppliers/categories/list'),
+  getIndustries: () => api.get('/suppliers/industries/list'),
+  getCountries: () => api.get('/suppliers/countries/list'),
 };
 
 export default api;

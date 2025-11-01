@@ -22,11 +22,15 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    # mem_limit: 1g
+    # restart: unless-stopped
     environment:
       - DATABASE_URL=postgresql://postgres:postgres123@postgres:5432/procurement_dss
       - SECRET_KEY=your-secret-key-change-in-production-please-use-strong-key
-      - ENVIRONMENT=development
-      - DEBUG=true
+      # Dynamic values from .env (with safe defaults)
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-true}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,7 +40,7 @@ services:
       - uploads_data:/app/uploads
     networks:
       - procurement_network
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --loop asyncio
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
       interval: 30s
@@ -44,7 +48,10 @@ services:
       retries: 3
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
     ports:
       - "3000:3000"
     environment:

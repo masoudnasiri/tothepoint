@@ -33,6 +33,8 @@ class ItemMaster(Base):
     company = Column(String(100), nullable=False, index=True)  # Manufacturer/Brand
     item_name = Column(String(200), nullable=False)  # Product name
     model = Column(String(100), nullable=True)  # Model number/variant
+    # NEW: Optional part number for the master item
+    part_number = Column(String, nullable=True)
     specifications = Column(JSON, nullable=True)  # Standard specs (length, weight, material, etc.)
     category = Column(String(100), nullable=True, index=True)  # Construction, Electrical, etc.
     unit = Column(String(50), default='piece')  # piece, meter, kg, etc.
@@ -46,6 +48,38 @@ class ItemMaster(Base):
     # Relationships
     created_by = relationship("User", foreign_keys=[created_by_id])
     project_items = relationship("ProjectItem", back_populates="master_item")
+
+
+class ItemSubItem(Base):
+    """Sub-item definition under an items_master entry"""
+    __tablename__ = "item_subitems"
+
+    id = Column(Integer, primary_key=True)
+    item_master_id = Column(Integer, ForeignKey("items_master.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    part_number = Column(String, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    master_item = relationship("ItemMaster", backref="sub_items")
+
+
+class ProjectItemSubItem(Base):
+    """Quantity of a sub-item for a specific project item"""
+    __tablename__ = "project_item_subitems"
+
+    id = Column(Integer, primary_key=True)
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_subitem_id = Column(Integer, ForeignKey("item_subitems.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+
+    # Relationships
+    project_item = relationship("ProjectItem", backref="sub_items_quantities")
+    sub_item = relationship("ItemSubItem")
 
 
 class User(Base):
@@ -209,7 +243,8 @@ class ProcurementOption(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     item_code = Column(String(50), nullable=False, index=True)
-    supplier_name = Column(Text, nullable=False)
+    supplier_name = Column(Text, nullable=False)  # Legacy field - will be deprecated
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)  # New centralized supplier reference
     
     # Updated financial fields with proper currency support
     cost_amount = Column(Numeric(15, 2), nullable=False)  # Cost amount in original currency
@@ -217,12 +252,14 @@ class ProcurementOption(Base):
     shipping_cost = Column(Numeric(15, 2), nullable=True, default=0)  # Shipping cost in same currency as cost_amount
     
     # Legacy field for backward compatibility (will be deprecated)
-    base_cost = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    base_cost = Column(Numeric(15, 2), nullable=True)  # Keep for migration
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=True)  # Keep for migration
     
     lomc_lead_time = Column(Integer, default=0)  # Lead time in days (deprecated - use expected_delivery_date)
+    purchase_date = Column(Date, nullable=True)  # When to place the order (purchase date)
     expected_delivery_date = Column(Date, nullable=True)  # Expected delivery date from supplier
     delivery_option_id = Column(Integer, ForeignKey("delivery_options.id"), nullable=True)  # Link to project item's delivery option
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=True, index=True)  # Link to specific project item
     discount_bundle_threshold = Column(Integer)
     discount_bundle_percent = Column(Numeric(5, 2))
     payment_terms = Column(JSON, nullable=False)  # Structured JSON for payment terms
@@ -233,7 +270,9 @@ class ProcurementOption(Base):
     
     # Relationships
     currency = relationship("Currency")  # Keep for backward compatibility
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])  # Centralized supplier data
     optimization_results = relationship("OptimizationResult", back_populates="procurement_option")
+    project_item = relationship("ProjectItem", foreign_keys=[project_item_id])  # Link to specific project item
     
     # Add check constraints
     __table_args__ = (
@@ -315,7 +354,7 @@ class FinalizedDecision(Base):
     final_cost_currency = Column(String(3), nullable=False, default='IRR')  # Currency of final cost
     
     # Legacy field for backward compatibility (will be deprecated)
-    final_cost = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    final_cost = Column(Numeric(15, 2), nullable=True)  # Keep for migration
     currency_id = Column(Integer, ForeignKey("currencies.id"), nullable=True)  # Keep for migration
     
     # Lifecycle Management
@@ -354,9 +393,9 @@ class FinalizedDecision(Base):
     payment_entered_at = Column(DateTime(timezone=True), nullable=True)
     
     # Legacy fields for backward compatibility (will be deprecated)
-    forecast_invoice_amount = Column(Numeric(12, 2), nullable=True)  # Keep for migration
-    actual_invoice_amount = Column(Numeric(12, 2), nullable=True)  # Keep for migration
-    actual_payment_amount = Column(Numeric(12, 2), nullable=True)  # Keep for migration
+    forecast_invoice_amount = Column(Numeric(15, 2), nullable=True)  # Keep for migration
+    actual_invoice_amount = Column(Numeric(15, 2), nullable=True)  # Keep for migration
+    actual_payment_amount = Column(Numeric(15, 2), nullable=True)  # Keep for migration
     
     # Delivery Tracking (Procurement Plan feature)
     delivery_status = Column(String(50), nullable=False, default='AWAITING_DELIVERY', index=True)
@@ -476,7 +515,7 @@ class OptimizationResult(Base):
     purchase_time = Column(Integer, nullable=False)  # The time slot the purchase decision is made
     delivery_time = Column(Integer, nullable=False)  # The time slot the item is delivered
     quantity = Column(Integer, nullable=False)
-    final_cost = Column(Numeric(12, 2), nullable=False)
+    final_cost = Column(Numeric(15, 2), nullable=False)
     
     # Relationships
     project = relationship("Project", back_populates="optimization_results")
@@ -510,4 +549,207 @@ class SupplierPayment(Base):
     # Relationships
     decision = relationship("FinalizedDecision", back_populates="supplier_payments")
     project = relationship("Project")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+
+# Supplier Management Models
+
+class SupplierStatus(enum.Enum):
+    """Status enum for suppliers"""
+    ACTIVE = "ACTIVE"
+    INACTIVE = "INACTIVE"
+    SUSPENDED = "SUSPENDED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+
+
+class ComplianceStatus(enum.Enum):
+    """Compliance status enum"""
+    APPROVED = "APPROVED"
+    PENDING = "PENDING"
+    REJECTED = "REJECTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+
+
+class RiskLevel(enum.Enum):
+    """Risk level enum"""
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class Supplier(Base):
+    """
+    Supplier master data with comprehensive business information
+    """
+    __tablename__ = "suppliers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    supplier_id = Column(String(50), unique=True, nullable=False, index=True)  # Auto-generated: SUP-XXXXX
+    
+    # General Information
+    company_name = Column(String(200), nullable=False, index=True)
+    legal_entity_type = Column(String(50), nullable=True)  # LLC, Ltd., JV, Corp, Partnership, etc.
+    registration_number = Column(String(100), nullable=True)
+    tax_id = Column(String(100), nullable=True)
+    established_year = Column(Integer, nullable=True)
+    
+    # Location Information
+    country = Column(String(100), nullable=True)
+    city = Column(String(100), nullable=True)
+    address = Column(Text, nullable=True)
+    website = Column(String(200), nullable=True)
+    domain = Column(String(200), nullable=True)
+    
+    # Primary Contact Information
+    primary_email = Column(String(200), nullable=True, index=True)
+    main_phone = Column(String(50), nullable=True)
+    
+    # Social Media Links
+    linkedin_url = Column(String(200), nullable=True)
+    wechat_id = Column(String(100), nullable=True)
+    telegram_id = Column(String(100), nullable=True)
+    other_social_media = Column(JSON, nullable=True)  # Array of other social media links
+    
+    # Business & Classification
+    category = Column(String(100), nullable=True, index=True)  # Telecom, Oil & Gas, IT Equipment, etc.
+    industry = Column(String(100), nullable=True, index=True)
+    product_service_lines = Column(JSON, nullable=True)  # Array of product/service categories
+    main_brands_represented = Column(JSON, nullable=True)  # Array of brands
+    main_markets_regions = Column(JSON, nullable=True)  # Array of markets/regions
+    certifications = Column(JSON, nullable=True)  # Array of certifications (ISO, CE, UL, etc.)
+    ownership_type = Column(String(50), nullable=True)  # Private, State-owned, Distributor, Agent, etc.
+    annual_revenue_range = Column(String(50), nullable=True)  # <1M, 1M-10M, 10M-100M, >100M
+    number_of_employees = Column(String(50), nullable=True)  # <10, 10-50, 50-200, >200
+    
+    # Operational Information
+    warehouse_locations = Column(JSON, nullable=True)  # Array of warehouse/logistics locations
+    key_clients_references = Column(JSON, nullable=True)  # Array of key clients
+    payment_terms = Column(String(100), nullable=True)  # T/T, LC, Net 30, etc.
+    currency_preference = Column(String(10), nullable=True, default='IRR')
+    shipping_methods = Column(JSON, nullable=True)  # Array of shipping methods
+    incoterms = Column(JSON, nullable=True)  # Array of supported incoterms
+    average_lead_time_days = Column(Integer, nullable=True)
+    
+    # Quality and Service Information
+    quality_assurance_process = Column(Text, nullable=True)
+    warranty_policy = Column(Text, nullable=True)
+    after_sales_policy = Column(Text, nullable=True)
+    delivery_accuracy_percent = Column(Numeric(5, 2), nullable=True)
+    response_time_hours = Column(Integer, nullable=True)
+    
+    # Document & Compliance Tracking
+    business_license_path = Column(String(500), nullable=True)
+    tax_certificate_path = Column(String(500), nullable=True)
+    iso_certificates_path = Column(String(500), nullable=True)
+    financial_report_path = Column(String(500), nullable=True)
+    supplier_evaluation_path = Column(String(500), nullable=True)
+    compliance_status = Column(String(20), default=ComplianceStatus.PENDING.value, nullable=False)
+    last_review_date = Column(Date, nullable=True)
+    last_audit_date = Column(Date, nullable=True)
+    
+    # Internal Use & Meta
+    status = Column(String(20), default=SupplierStatus.ACTIVE.value, nullable=False, index=True)
+    risk_level = Column(String(20), default=RiskLevel.MEDIUM.value, nullable=False)
+    internal_rating = Column(Numeric(3, 2), nullable=True)  # 1.00 to 5.00 stars
+    performance_metrics = Column(JSON, nullable=True)  # Delivery accuracy, response time, etc.
+    notes = Column(Text, nullable=True)
+    
+    # Audit fields
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    last_updated_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    last_updated_by = relationship("User", foreign_keys=[last_updated_by_id])
+    contacts = relationship("SupplierContact", back_populates="supplier", cascade="all, delete-orphan")
+    documents = relationship("SupplierDocument", back_populates="supplier", cascade="all, delete-orphan")
+
+
+class SupplierContact(Base):
+    """
+    Contact information for suppliers
+    Multiple contacts per supplier with role designation
+    """
+    __tablename__ = "supplier_contacts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    contact_id = Column(String(50), unique=True, nullable=False, index=True)  # Auto-generated: CONT-XXXXX
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False, index=True)
+    
+    # Contact Information
+    full_name = Column(String(200), nullable=False)
+    job_title = Column(String(100), nullable=True)  # Job Title / Role
+    role = Column(String(100), nullable=True)  # Sales Manager, Technical Support, etc.
+    department = Column(String(100), nullable=True)  # Sales, Technical, Finance, etc.
+    
+    # Communication Details
+    email = Column(String(200), nullable=True, index=True)
+    phone = Column(String(50), nullable=True)
+    whatsapp_id = Column(String(50), nullable=True)
+    telegram_id = Column(String(50), nullable=True)
+    
+    # Preferences
+    language_preference = Column(String(10), nullable=True, default='en')
+    timezone = Column(String(50), nullable=True)
+    working_hours = Column(String(100), nullable=True)  # "9:00-17:00 UTC+3"
+    
+    # Status
+    is_primary_contact = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Additional Information
+    notes = Column(Text, nullable=True)  # Relationship Information (e.g., "Main negotiator for Cisco equipment")
+    
+    # Audit fields
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    supplier = relationship("Supplier", back_populates="contacts")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+
+class SupplierDocument(Base):
+    """
+    Document management for suppliers
+    Compliance documents, certificates, contracts, etc.
+    """
+    __tablename__ = "supplier_documents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(String(50), unique=True, nullable=False, index=True)  # Auto-generated: DOC-XXXXX
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False, index=True)
+    
+    # Document Information
+    document_name = Column(String(200), nullable=False)
+    document_type = Column(String(100), nullable=False)  # Business License, Tax Certificate, ISO Certificate, etc.
+    file_name = Column(String(200), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(Integer, nullable=True)  # Size in bytes
+    mime_type = Column(String(100), nullable=True)
+    
+    # Document Details
+    description = Column(Text, nullable=True)
+    document_number = Column(String(100), nullable=True)
+    issued_by = Column(String(200), nullable=True)
+    issued_date = Column(Date, nullable=True)
+    expiry_date = Column(Date, nullable=True)
+    
+    # Status
+    is_active = Column(Boolean, default=True, nullable=False)
+    is_verified = Column(Boolean, default=False, nullable=False)
+    
+    # Additional Information
+    notes = Column(Text, nullable=True)
+    
+    # Audit fields
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    supplier = relationship("Supplier", back_populates="documents")
     created_by = relationship("User", foreign_keys=[created_by_id])

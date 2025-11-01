@@ -33,9 +33,10 @@ import {
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { deliveryOptionsAPI } from '../services/api.ts';
+import { deliveryOptionsAPI, currencyAPI } from '../services/api.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { CurrencySelector } from './CurrencySelector.tsx';
+import { CurrencyWithRates } from '../types/index.ts';
 
 interface DeliveryOption {
   id?: number;
@@ -70,6 +71,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [selectedOption, setSelectedOption] = useState<DeliveryOption | null>(null);
+  const [currencies, setCurrencies] = useState<CurrencyWithRates[]>([]);
 
   // Form state
   const [deliveryDate, setDeliveryDate] = useState<string>(''); // Changed to string for select
@@ -82,9 +84,43 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
   const [preferenceRank, setPreferenceRank] = useState<number>(1);
   const [notes, setNotes] = useState<string>('');
 
+  // Helper function to add commas while typing (same as procurement page)
+  const addCommasWhileTyping = (value: string): string => {
+    // Remove all non-digit characters except decimal point
+    const cleanValue = value.replace(/[^\d.]/g, '');
+    
+    // Split by decimal point
+    const parts = cleanValue.split('.');
+    const integerPart = parts[0];
+    const decimalPart = parts[1];
+    
+    // Add commas to integer part
+    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    
+    // Combine with decimal part if exists
+    return decimalPart ? `${formattedInteger}.${decimalPart}` : formattedInteger;
+  };
+
+  // Helper function to parse formatted number back to raw value
+  const parseFormattedNumber = (formattedValue: string): string => {
+    return formattedValue.replace(/,/g, '');
+  };
+
   useEffect(() => {
     fetchOptions();
+    fetchCurrencies();
   }, [projectItemId]);
+
+  const fetchCurrencies = async () => {
+    try {
+      const response = await currencyAPI.list();
+      const activeCurrencies = response.data.filter((c: CurrencyWithRates) => c.is_active);
+      setCurrencies(activeCurrencies);
+    } catch (err: any) {
+      // Silently fail - currencies are optional helper text
+      console.warn('Failed to load currencies for helper text:', err);
+    }
+  };
 
   const fetchOptions = async () => {
     try {
@@ -397,12 +433,24 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
 
           <TextField
             fullWidth
-            type="number"
+            type="text"
             label="Invoice Amount per Unit *"
-            value={invoiceAmount}
-            onChange={(e) => setInvoiceAmount(parseFloat(e.target.value) || 0)}
-            helperText="Revenue amount per unit when invoiced"
-            inputProps={{ min: 0, step: 0.01 }}
+            value={invoiceAmount ? addCommasWhileTyping(invoiceAmount.toString()) : ''}
+            onChange={(e) => {
+              const rawValue = parseFormattedNumber(e.target.value);
+              const numericValue = parseFloat(rawValue) || 0;
+              setInvoiceAmount(numericValue);
+            }}
+            helperText={
+              currencies.length > 0
+                ? `Revenue amount per unit when invoiced. Available currencies: ${currencies.map(c => c.code).join(', ')}`
+                : "Revenue amount per unit when invoiced"
+            }
+            inputProps={{ 
+              step: 0.01, 
+              min: 0,
+              placeholder: '0.00'
+            }}
             sx={{ mt: 2, mb: 2 }}
           />
 
@@ -413,6 +461,11 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
             required
             showRate
             fullWidth
+            helperText={
+              currencies.length > 0
+                ? `Select currency for invoice. Available currencies: ${currencies.map(c => c.code).join(', ')}`
+                : "Select currency for invoice"
+            }
           />
 
           {/* Additional Options */}
@@ -454,7 +507,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
               }
             </Typography>
             <Typography variant="body2">
-              • Amount: ${invoiceAmount.toLocaleString()} per unit
+              • Amount: {invoiceAmount ? addCommasWhileTyping(invoiceAmount.toFixed(2)) : '0.00'} per unit
             </Typography>
           </Alert>
         </DialogContent>

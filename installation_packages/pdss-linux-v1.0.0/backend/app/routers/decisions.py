@@ -397,17 +397,29 @@ async def save_proposal_as_decisions(
             # Find or create project item
             item_code = decision_data.get('item_code')
             project_id = decision_data.get('project_id')
+            project_item_id = decision_data.get('project_item_id')  # Prefer project_item_id if provided
             
-            item_result = await db.execute(
-                select(ProjectItem).where(
-                    ProjectItem.item_code == item_code,
-                    ProjectItem.project_id == project_id
+            # FIXED: Use project_item_id directly if provided (prevents wrong item selection when multiple items have same code)
+            if project_item_id:
+                item_result = await db.execute(
+                    select(ProjectItem).where(ProjectItem.id == project_item_id)
                 )
-            )
-            project_item = item_result.scalars().first()
+                project_item = item_result.scalars().first()
+            else:
+                # Fallback: Query by item_code + project_id (legacy behavior)
+                item_result = await db.execute(
+                    select(ProjectItem).where(
+                        ProjectItem.item_code == item_code,
+                        ProjectItem.project_id == project_id
+                    )
+                )
+                project_item = item_result.scalars().first()
             
             if not project_item:
-                logger.warning(f"Project item not found: {item_code} for project {project_id}")
+                if project_item_id:
+                    logger.warning(f"Project item not found: project_item_id={project_item_id}")
+                else:
+                    logger.warning(f"Project item not found: {item_code} for project {project_id}")
                 continue
             
             # Check if decision already exists

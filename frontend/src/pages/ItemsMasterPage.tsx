@@ -58,10 +58,16 @@ export const ItemsMasterPage: React.FC = () => {
     company: '',
     item_name: '',
     model: '',
+    part_number: '',
     category: '',
     unit: 'piece',
     description: '',
   });
+  // Sub-items state
+  const [subItems, setSubItems] = useState<any[]>([]);
+  const [subItemForm, setSubItemForm] = useState<{ name: string; description?: string; part_number?: string }>({ name: '', description: '', part_number: '' });
+  const [subItemsLoading, setSubItemsLoading] = useState(false);
+  const [draftSubItems, setDraftSubItems] = useState<Array<{ name: string; description?: string; part_number?: string }>>([]);
 
   const canEdit = user?.role === 'admin' || user?.role === 'pm' || user?.role === 'pmo' || user?.role === 'finance';
 
@@ -94,6 +100,19 @@ export const ItemsMasterPage: React.FC = () => {
     }
   };
 
+  const fetchSubItems = async (itemId: number) => {
+    setSubItemsLoading(true);
+    try {
+      const res = await itemsMasterAPI.listSubItems(itemId);
+      setSubItems(res.data || []);
+    } catch (e) {
+      // noop
+      setSubItems([]);
+    } finally {
+      setSubItemsLoading(false);
+    }
+  };
+
   const previewItemCode = async () => {
     try {
       const response = await itemsMasterAPI.previewCode(
@@ -117,13 +136,22 @@ export const ItemsMasterPage: React.FC = () => {
 
   const handleCreateItem = async () => {
     try {
-      await itemsMasterAPI.create(formData);
+      const res = await itemsMasterAPI.create(formData);
+      const created = res.data;
+      // If user drafted sub-items during create, persist them now
+      if (created?.id && draftSubItems.length > 0) {
+        try {
+          await Promise.all(draftSubItems.map(d => itemsMasterAPI.createSubItem(created.id, d)));
+        } catch (e) {
+          console.error('Failed creating some sub-items', e);
+        }
+      }
       setCreateDialogOpen(false);
       resetForm();
       fetchItems();
-      setSuccess('Item created successfully');
+      setSuccess(t('itemsMaster.itemCreatedSuccessfully'));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create item');
+      setError(err.response?.data?.detail || t('itemsMaster.failedToCreateItem'));
     }
   };
 
@@ -136,21 +164,21 @@ export const ItemsMasterPage: React.FC = () => {
       setSelectedItem(null);
       resetForm();
       fetchItems();
-      setSuccess('Item updated successfully');
+      setSuccess(t('itemsMaster.itemUpdatedSuccessfully'));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update item');
+      setError(err.response?.data?.detail || t('itemsMaster.failedToUpdateItem'));
     }
   };
 
   const handleDeleteItem = async (itemId: number, itemCode: string) => {
-    if (!window.confirm(`Are you sure you want to delete item ${itemCode}?\n\nNote: You cannot delete items that are used in projects.`)) return;
+    if (!window.confirm(t('itemsMaster.confirmDeleteItem', { itemCode }))) return;
 
     try {
       await itemsMasterAPI.delete(itemId);
       fetchItems();
-      setSuccess('Item deleted successfully');
+      setSuccess(t('itemsMaster.itemDeletedSuccessfully'));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete item. It may be used in projects.');
+      setError(err.response?.data?.detail || t('itemsMaster.failedToDeleteItem'));
     }
   };
 
@@ -165,6 +193,8 @@ export const ItemsMasterPage: React.FC = () => {
     });
     setPreviewedCode('');
     setCodeExists(false);
+    setDraftSubItems([]);
+    setSubItemForm({ name: '', description: '', part_number: '' });
   };
 
   const filteredItems = items.filter(item => {
@@ -196,7 +226,7 @@ export const ItemsMasterPage: React.FC = () => {
         variant="outlined"
         value={formData.company}
         onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-        placeholder="e.g., ACME, TechCo, BuildCorp"
+        placeholder={t('itemsMaster.companyPlaceholder')}
         sx={{ mb: 2 }}
       />
       <TextField
@@ -206,7 +236,7 @@ export const ItemsMasterPage: React.FC = () => {
         variant="outlined"
         value={formData.item_name}
         onChange={(e) => setFormData({ ...formData, item_name: e.target.value })}
-        placeholder="e.g., Steel Beam, Electrical Cable"
+        placeholder={t('itemsMaster.itemNamePlaceholder')}
         sx={{ mb: 2 }}
       />
       <TextField
@@ -216,7 +246,18 @@ export const ItemsMasterPage: React.FC = () => {
         variant="outlined"
         value={formData.model}
         onChange={(e) => setFormData({ ...formData, model: e.target.value })}
-        placeholder="e.g., A36, 10mm², V2"
+        placeholder={t('itemsMaster.modelPlaceholder')}
+        sx={{ mb: 2 }}
+      />
+
+      <TextField
+        margin="dense"
+        label={t('itemsMaster.partNumber') || 'Part Number'}
+        fullWidth
+        variant="outlined"
+        value={formData.part_number || ''}
+        onChange={(e) => setFormData({ ...formData, part_number: e.target.value })}
+        placeholder={t('itemsMaster.partNumberPlaceholder') || 'e.g., PN-ABC-1234'}
         sx={{ mb: 2 }}
       />
 
@@ -236,7 +277,7 @@ export const ItemsMasterPage: React.FC = () => {
             {codeExists ? <CancelIcon color="error" /> : <CheckCircleIcon color="success" />}
             <Box flexGrow={1}>
               <Typography variant="subtitle2" color={codeExists ? 'error.dark' : 'success.dark'}>
-                {codeExists ? '⚠️ Code Already Exists' : '✅ Generated Item Code'}
+                {codeExists ? t('itemsMaster.codeAlreadyExists') : t('itemsMaster.generatedItemCode')}
               </Typography>
               <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
                 {previewedCode}
@@ -245,14 +286,14 @@ export const ItemsMasterPage: React.FC = () => {
           </Box>
           {codeExists && (
             <Typography variant="caption" color="error">
-              This combination already exists. Please use different company, name, or model.
+              {t('itemsMaster.codeAlreadyExists')}
             </Typography>
           )}
         </Paper>
       )}
 
       <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-        <InputLabel>Category</InputLabel>
+        <InputLabel>{t('itemsMaster.category')}</InputLabel>
         <Select
           value={formData.category || ''}
           label={t('itemsMaster.category')}
@@ -287,33 +328,33 @@ export const ItemsMasterPage: React.FC = () => {
         rows={3}
         value={formData.description}
         onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-        placeholder="General description of the item, specifications, or notes..."
+        placeholder={t('itemsMaster.descriptionPlaceholder')}
         sx={{ mb: 2 }}
       />
 
       <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-        <InputLabel>Unit *</InputLabel>
+        <InputLabel>{t('itemsMaster.unitRequired')}</InputLabel>
         <Select
           value={formData.unit}
           label={t('itemsMaster.unit')}
           onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
         >
-          <MenuItem value="piece">Piece</MenuItem>
-          <MenuItem value="set">Set</MenuItem>
-          <MenuItem value="license">License</MenuItem>
-          <MenuItem value="subscription">Subscription</MenuItem>
-          <MenuItem value="meter">Meter</MenuItem>
-          <MenuItem value="kg">Kilogram</MenuItem>
-          <MenuItem value="liter">Liter</MenuItem>
-          <MenuItem value="box">Box</MenuItem>
-          <MenuItem value="ton">Ton</MenuItem>
-          <MenuItem value="sqm">Square Meter</MenuItem>
+          <MenuItem value="piece">{t('itemsMaster.piece')}</MenuItem>
+          <MenuItem value="set">{t('itemsMaster.set')}</MenuItem>
+          <MenuItem value="license">{t('itemsMaster.license')}</MenuItem>
+          <MenuItem value="subscription">{t('itemsMaster.subscription')}</MenuItem>
+          <MenuItem value="meter">{t('itemsMaster.meter')}</MenuItem>
+          <MenuItem value="kg">{t('itemsMaster.kilogram')}</MenuItem>
+          <MenuItem value="liter">{t('itemsMaster.liter')}</MenuItem>
+          <MenuItem value="box">{t('itemsMaster.box')}</MenuItem>
+          <MenuItem value="ton">{t('itemsMaster.ton')}</MenuItem>
+          <MenuItem value="sqm">{t('itemsMaster.squareMeter')}</MenuItem>
         </Select>
       </FormControl>
 
       <Alert severity="info" sx={{ mt: 2 }}>
         <Typography variant="caption">
-          <strong>Item Code:</strong> Will be auto-generated as: COMPANY-NAME-MODEL
+          <strong>{t('itemsMaster.itemCode')}:</strong> {t('itemsMaster.autoGeneratedFormat')}
         </Typography>
       </Alert>
     </>
@@ -334,7 +375,7 @@ export const ItemsMasterPage: React.FC = () => {
               }}
               sx={{ mr: 1 }}
             >
-              Refresh
+              {t('common.refresh')}
             </Button>
             <Button
               variant="contained"
@@ -345,7 +386,7 @@ export const ItemsMasterPage: React.FC = () => {
                 setCreateDialogOpen(true);
               }}
             >
-              Create Item
+              {t('itemsMaster.createItem')}
             </Button>
           </Box>
         )}
@@ -365,8 +406,7 @@ export const ItemsMasterPage: React.FC = () => {
 
       <Alert severity="info" sx={{ mb: 3 }}>
         <Typography variant="body2">
-          📦 <strong>Items Master:</strong> Define items once here with auto-generated unique codes (COMPANY-NAME-MODEL). 
-          These items can then be added to any project.
+          {t('itemsMaster.itemsMasterDescription')}
         </Typography>
       </Alert>
 
@@ -375,7 +415,7 @@ export const ItemsMasterPage: React.FC = () => {
         <TextField
           fullWidth
           label={t('itemsMaster.searchItems')}
-          placeholder="Search by code, company, name, or model..."
+          placeholder={t('itemsMaster.searchPlaceholder')}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           size="small"
@@ -386,14 +426,14 @@ export const ItemsMasterPage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Item Code</TableCell>
-              <TableCell>Company</TableCell>
-              <TableCell>Item Name</TableCell>
-              <TableCell>Model</TableCell>
-              <TableCell>Category</TableCell>
-              <TableCell>Unit</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell>{t('itemsMaster.itemCode')}</TableCell>
+              <TableCell>{t('itemsMaster.company')}</TableCell>
+              <TableCell>{t('itemsMaster.itemName')}</TableCell>
+              <TableCell>{t('itemsMaster.model')}</TableCell>
+              <TableCell>{t('itemsMaster.category')}</TableCell>
+              <TableCell>{t('itemsMaster.unit')}</TableCell>
+              <TableCell>{t('itemsMaster.status')}</TableCell>
+              <TableCell align="center">{t('itemsMaster.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -401,7 +441,7 @@ export const ItemsMasterPage: React.FC = () => {
               <TableRow>
                 <TableCell colSpan={8} align="center">
                   <Typography variant="body2" color="text.secondary" sx={{ py: 3 }}>
-                    {searchTerm ? 'No items found matching your search' : 'No items yet. Click "Create Item" to add your first item.'}
+                    {searchTerm ? t('itemsMaster.noItemsFound') : t('itemsMaster.noItemsYet')}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -448,6 +488,7 @@ export const ItemsMasterPage: React.FC = () => {
                           size="small"
                           onClick={() => {
                             setSelectedItem(item);
+                            fetchSubItems(item.id);
                             setViewDialogOpen(true);
                           }}
                           title="View Item"
@@ -463,11 +504,13 @@ export const ItemsMasterPage: React.FC = () => {
                               company: item.company,
                               item_name: item.item_name,
                               model: item.model || '',
+                              part_number: (item as any).part_number || '',
                               category: item.category || '',
                               unit: item.unit,
                               description: item.description || '',
                             });
                             setEditDialogOpen(true);
+                            fetchSubItems(item.id);
                           }}
                           title="Edit Item"
                         >
@@ -504,22 +547,71 @@ export const ItemsMasterPage: React.FC = () => {
         maxWidth="sm" 
         fullWidth
       >
-        <DialogTitle>Create New Master Item</DialogTitle>
+        <DialogTitle>{t('itemsMaster.createNewMasterItem')}</DialogTitle>
         <DialogContent>
           {renderFormFields()}
+
+        {/* Sub-Items Draft (Create Mode) */}
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            {t('itemsMaster.subItems')}
+          </Typography>
+          {/* Existing drafted sub-items list */}
+          <Box sx={{ display: 'grid', gap: 1, mb: 1 }}>
+            {draftSubItems.length > 0 ? (
+              draftSubItems.map((si, idx) => (
+                <Paper key={`${si.name}-${idx}`} sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box flexGrow={1}>
+                    <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                    {si.description && (
+                      <Typography variant="caption" display="block">{si.description}</Typography>
+                    )}
+                  </Box>
+                  <IconButton size="small" color="error" onClick={() => {
+                    setDraftSubItems(draftSubItems.filter((_, i) => i !== idx));
+                  }}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Paper>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary">{t('itemsMaster.noSubItems')}</Typography>
+            )}
+          </Box>
+
+          {/* Add new draft sub-item */}
+          <Box sx={{ display: 'grid', gap: 1 }}>
+            <Typography variant="subtitle2">{t('itemsMaster.addSubItem')}</Typography>
+            <TextField size="small" label={t('common.name')} value={subItemForm.name} onChange={(e) => setSubItemForm({ ...subItemForm, name: e.target.value })} />
+            <TextField size="small" label={t('itemsMaster.partNumber')} value={subItemForm.part_number || ''} onChange={(e) => setSubItemForm({ ...subItemForm, part_number: e.target.value })} />
+            <TextField size="small" label={t('common.description')} value={subItemForm.description || ''} onChange={(e) => setSubItemForm({ ...subItemForm, description: e.target.value })} />
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!subItemForm.name}
+              onClick={() => {
+                setDraftSubItems([...draftSubItems, { ...subItemForm }]);
+                setSubItemForm({ name: '', description: '', part_number: '' });
+              }}
+            >
+              {t('common.add')}
+            </Button>
+          </Box>
+        </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
             setCreateDialogOpen(false);
             resetForm();
             setSelectedItem(null);
-          }}>Cancel</Button>
+          }}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleCreateItem} 
             variant="contained"
             disabled={!formData.company || !formData.item_name || codeExists}
           >
-            Create Item
+            {t('itemsMaster.createItem')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -535,43 +627,120 @@ export const ItemsMasterPage: React.FC = () => {
         maxWidth="sm" 
         fullWidth
       >
-        <DialogTitle>Edit Master Item</DialogTitle>
+        <DialogTitle>{t('itemsMaster.editMasterItem')}</DialogTitle>
         <DialogContent>
           {selectedItem && (
             <Alert severity="warning" sx={{ mb: 2 }}>
               <Typography variant="caption">
-                <strong>Note:</strong> Changing company, name, or model will regenerate the item code.
-                This will affect all projects using this item.
+                <strong>{t('common.note')}:</strong> {t('itemsMaster.noteCodeRegeneration')}
               </Typography>
             </Alert>
           )}
           {renderFormFields()}
+
+          {/* Sub-Items Management (Edit Only) */}
+          {selectedItem && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                {t('itemsMaster.subItems')}
+              </Typography>
+              <Box sx={{ mb: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => fetchSubItems(selectedItem.id)}
+                  startIcon={<RefreshIcon />}
+                >
+                  {t('common.refresh')}
+                </Button>
+              </Box>
+              <Box sx={{ display: 'grid', gap: 1 }}>
+                {subItemsLoading ? (
+                  <CircularProgress size={20} />
+                ) : (subItems && subItems.length > 0 ? (
+                  subItems.map((si) => (
+                    <Paper key={si.id} sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box flexGrow={1}>
+                        <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                        {si.description && (
+                          <Typography variant="caption" display="block">{si.description}</Typography>
+                        )}
+                      </Box>
+                      {canEdit && (
+                        <>
+                          <IconButton size="small" onClick={async () => {
+                            const name = prompt('Name', si.name) || si.name;
+                            const part = prompt('Part Number', si.part_number || '') || si.part_number || '';
+                            const desc = prompt('Description', si.description || '') || si.description || '';
+                            await itemsMasterAPI.updateSubItem(selectedItem.id, si.id, { name, part_number: part, description: desc });
+                            fetchSubItems(selectedItem.id);
+                          }}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton size="small" color="error" onClick={async () => {
+                            if (!window.confirm('Delete this sub-item?')) return;
+                            await itemsMasterAPI.deleteSubItem(selectedItem.id, si.id);
+                            fetchSubItems(selectedItem.id);
+                          }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </>
+                      )}
+                    </Paper>
+                  ))
+                ) : (
+                  <Typography variant="body2" color="text.secondary">{t('itemsMaster.noSubItems')}</Typography>
+                ))}
+              </Box>
+
+              {canEdit && (
+                <Box sx={{ mt: 2, display: 'grid', gap: 1 }}>
+                  <TextField size="small" label={t('common.name')} value={subItemForm.name} onChange={(e) => setSubItemForm({ ...subItemForm, name: e.target.value })} />
+                  <TextField size="small" label={t('itemsMaster.partNumber')} value={subItemForm.part_number || ''} onChange={(e) => setSubItemForm({ ...subItemForm, part_number: e.target.value })} />
+                  <TextField size="small" label={t('common.description')} value={subItemForm.description || ''} onChange={(e) => setSubItemForm({ ...subItemForm, description: e.target.value })} />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={!subItemForm.name}
+                    onClick={async () => {
+                      await itemsMasterAPI.createSubItem(selectedItem.id, subItemForm);
+                      setSubItemForm({ name: '', description: '', part_number: '' });
+                      fetchSubItems(selectedItem.id);
+                    }}
+                  >
+                    {t('common.add')}
+                  </Button>
+                </Box>
+              )}
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
             setEditDialogOpen(false);
             resetForm();
             setSelectedItem(null);
-          }}>Cancel</Button>
+          }}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleEditItem} 
             variant="contained"
             disabled={!formData.company || !formData.item_name}
           >
-            Update Item
+            {t('itemsMaster.updateItem')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* View Item Dialog */}
       <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>View Master Item</DialogTitle>
+        <DialogTitle>{t('itemsMaster.viewMasterItem')}</DialogTitle>
         <DialogContent>
           {selectedItem && (
             <Box sx={{ pt: 2 }}>
               <Paper elevation={0} sx={{ p: 2, mb: 2, bgcolor: 'primary.lighter', border: '1px solid', borderColor: 'primary.main' }}>
                 <Typography variant="subtitle2" color="primary.dark" gutterBottom>
-                  Item Code
+                  {t('itemsMaster.itemCode')}
                 </Typography>
                 <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
                   {selectedItem.item_code}
@@ -580,7 +749,7 @@ export const ItemsMasterPage: React.FC = () => {
 
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Company / Brand
+                  {t('itemsMaster.companyBrand')}
                 </Typography>
                 <Typography variant="body1" fontWeight="medium">
                   {selectedItem.company}
@@ -589,7 +758,7 @@ export const ItemsMasterPage: React.FC = () => {
 
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Item Name
+                  {t('itemsMaster.itemName')}
                 </Typography>
                 <Typography variant="body1" fontWeight="medium">
                   {selectedItem.item_name}
@@ -599,7 +768,7 @@ export const ItemsMasterPage: React.FC = () => {
               {selectedItem.model && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                    Model / Variant
+                    {t('itemsMaster.modelVariant')}
                   </Typography>
                   <Typography variant="body1">
                     {selectedItem.model}
@@ -607,10 +776,21 @@ export const ItemsMasterPage: React.FC = () => {
                 </Box>
               )}
 
+              {(selectedItem as any).part_number && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                    {t('itemsMaster.partNumber') || 'Part Number'}
+                  </Typography>
+                  <Typography variant="body1">
+                    {(selectedItem as any).part_number}
+                  </Typography>
+                </Box>
+              )}
+
               {selectedItem.category && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                    Category
+                    {t('itemsMaster.category')}
                   </Typography>
                   <Chip label={selectedItem.category} size="small" variant="outlined" />
                 </Box>
@@ -619,7 +799,7 @@ export const ItemsMasterPage: React.FC = () => {
               {selectedItem.description && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                    Description
+                    {t('itemsMaster.description')}
                   </Typography>
                   <Paper elevation={0} sx={{ p: 2, bgcolor: 'grey.50', border: '1px solid', borderColor: 'grey.200' }}>
                     <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
@@ -631,14 +811,14 @@ export const ItemsMasterPage: React.FC = () => {
 
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Unit
+                  {t('itemsMaster.unit')}
                 </Typography>
                 <Chip label={selectedItem.unit} size="small" color="primary" />
               </Box>
 
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                  Status
+                  {t('common.status')}
                 </Typography>
                 <Chip
                   label={selectedItem.is_active ? t('itemsMaster.active') : t('itemsMaster.inactive')}
@@ -649,8 +829,32 @@ export const ItemsMasterPage: React.FC = () => {
 
               <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="caption" color="text.secondary">
-                  Created: {new Date(selectedItem.created_at).toLocaleString()}
+                  {t('itemsMaster.created')}: {new Date(selectedItem.created_at).toLocaleString()}
                 </Typography>
+              </Box>
+
+              {/* Sub-Items (Read-only in View) */}
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  {t('itemsMaster.subItems')}
+                </Typography>
+                <Box sx={{ display: 'grid', gap: 1 }}>
+                  {subItemsLoading ? (
+                    <CircularProgress size={20} />
+                  ) : (subItems && subItems.length > 0 ? (
+                    subItems.map((si) => (
+                      <Paper key={si.id} sx={{ p: 1.5 }}>
+                        <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                        {si.description && (
+                          <Typography variant="caption" display="block">{si.description}</Typography>
+                        )}
+                      </Paper>
+                    ))
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t('itemsMaster.noSubItems')}</Typography>
+                  ))}
+                </Box>
               </Box>
             </Box>
           )}
@@ -676,7 +880,7 @@ export const ItemsMasterPage: React.FC = () => {
               variant="contained"
               startIcon={<EditIcon />}
             >
-              Edit
+              {t('common.edit')}
             </Button>
           )}
         </DialogActions>

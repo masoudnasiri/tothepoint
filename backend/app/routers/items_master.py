@@ -13,8 +13,15 @@ import logging
 
 from app.database import get_db
 from app.auth import get_current_user, require_role
-from app.models import User, ItemMaster
-from app.schemas import ItemMaster as ItemMasterSchema, ItemMasterCreate, ItemMasterUpdate
+from app.models import User, ItemMaster, ItemSubItem
+from app.schemas import (
+    ItemMaster as ItemMasterSchema,
+    ItemMasterCreate,
+    ItemMasterUpdate,
+    ItemSubItem as ItemSubItemSchema,
+    ItemSubItemCreate,
+    ItemSubItemUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +160,7 @@ async def create_item_master(
         company=item_data.company,
         item_name=item_data.item_name,
         model=item_data.model,
+        part_number=item_data.part_number,
         specifications=item_data.specifications,
         category=item_data.category,
         unit=item_data.unit,
@@ -338,4 +346,94 @@ async def get_item_by_code(
         )
     
     return item
+
+
+# ----------------------
+# Sub-Items CRUD (nested)
+# ----------------------
+
+@router.post("/{item_id}/subitems", response_model=ItemSubItemSchema, status_code=status.HTTP_201_CREATED)
+async def create_sub_item(
+    item_id: int,
+    payload: ItemSubItemCreate,
+    current_user: User = Depends(require_role(["admin", "pm", "pmo", "procurement"])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a sub-item under an items_master entry"""
+    # Ensure parent exists
+    result = await db.execute(select(ItemMaster).where(ItemMaster.id == item_id))
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=404, detail="Master item not found")
+
+    sub = ItemSubItem(
+        item_master_id=item_id,
+        name=payload.name,
+        description=payload.description,
+        part_number=payload.part_number,
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
+@router.get("/{item_id}/subitems", response_model=List[ItemSubItemSchema])
+async def list_sub_items(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List sub-items for a master item"""
+    result = await db.execute(
+        select(ItemSubItem).where(ItemSubItem.item_master_id == item_id).order_by(ItemSubItem.id)
+    )
+    return result.scalars().all()
+
+
+@router.put("/{item_id}/subitems/{subitem_id}", response_model=ItemSubItemSchema)
+async def update_sub_item(
+    item_id: int,
+    subitem_id: int,
+    payload: ItemSubItemUpdate,
+    current_user: User = Depends(require_role(["admin", "pm", "pmo", "procurement"])),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(ItemSubItem).where(
+            ItemSubItem.id == subitem_id,
+            ItemSubItem.item_master_id == item_id,
+        )
+    )
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Sub-item not found")
+
+    update_data = payload.dict(exclude_unset=True)
+    for k, v in update_data.items():
+        setattr(sub, k, v)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
+@router.delete("/{item_id}/subitems/{subitem_id}")
+async def delete_sub_item(
+    item_id: int,
+    subitem_id: int,
+    current_user: User = Depends(require_role(["admin"])),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(ItemSubItem).where(
+            ItemSubItem.id == subitem_id,
+            ItemSubItem.item_master_id == item_id,
+        )
+    )
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Sub-item not found")
+    await db.delete(sub)
+    await db.commit()
+    return {"message": "Sub-item deleted"}
 

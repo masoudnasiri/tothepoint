@@ -5,17 +5,19 @@ with role-based access control for Procurement Team and Project Managers.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 from typing import List, Dict, Any, Optional
 from datetime import datetime, date
 import io
+import logging
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from fastapi.responses import StreamingResponse
 
 from app.database import get_db
-from app.models import FinalizedDecision, User, Project, ProjectItem, ProcurementOption, ProjectAssignment, CashflowEvent
+from app.models import FinalizedDecision, User, Project, ProjectItem, ProcurementOption, ProjectAssignment, CashflowEvent, SupplierPayment
+from app.models_invoice_payment import Invoice, Payment, PaymentStatus
 from app.schemas import (
     FinalizedDecision as FinalizedDecisionSchema,
     ProcurementDeliveryConfirmationRequest,
@@ -25,9 +27,175 @@ from app.schemas import (
 from app.auth import get_current_user, require_role
 
 router = APIRouter(prefix="/procurement-plan", tags=["Procurement Plan"])
+logger = logging.getLogger(__name__)
 
 
-def _filter_decision_for_role(decision: FinalizedDecision, user_role: str) -> Dict[str, Any]:
+async def _batch_calculate_payment_statuses(decision_ids: List[int], db: AsyncSession) -> Dict[int, Dict[str, str]]:
+    """
+    Batch calculate Payment In and Payment Out statuses for multiple decisions.
+    Returns: {decision_id: {'payment_in_status': '...', 'payment_out_status': '...'}}
+    """
+    if not decision_ids:
+        return {}
+    
+    # Initialize all statuses to 'not_paid'
+    statuses_map = {did: {'payment_in_status': 'not_paid', 'payment_out_status': 'not_paid'} for did in decision_ids}
+    
+    try:
+        # Batch query all invoices for these decisions
+        invoices_result = await db.execute(
+            select(Invoice).where(Invoice.decision_id.in_(decision_ids))
+        )
+        invoices = invoices_result.scalars().all()
+        
+        # Create invoice_id -> decision_id mapping
+        invoice_to_decision = {inv.id: inv.decision_id for inv in invoices}
+        invoice_ids = [inv.id for inv in invoices]
+        
+        # Batch query all payments for these invoices
+        if invoice_ids:
+            payments_result = await db.execute(
+                select(Payment).where(
+                    Payment.invoice_id.in_(invoice_ids),
+                    Payment.status == PaymentStatus.COMPLETED
+                )
+            )
+            payments = payments_result.scalars().all()
+            
+            # Calculate total payments per invoice
+            payments_by_invoice = {}
+            for payment in payments:
+                if payment.invoice_id not in payments_by_invoice:
+                    payments_by_invoice[payment.invoice_id] = 0
+                payments_by_invoice[payment.invoice_id] += float(payment.payment_amount)
+            
+            # Update Payment In statuses
+            for invoice in invoices:
+                decision_id = invoice.decision_id
+                invoice_amount = float(invoice.invoice_amount)
+                total_paid = payments_by_invoice.get(invoice.id, 0)
+                
+                if total_paid >= invoice_amount:
+                    statuses_map[decision_id]['payment_in_status'] = 'fully_paid'
+                elif total_paid > 0:
+                    statuses_map[decision_id]['payment_in_status'] = 'partially_paid'
+    except Exception as e:
+        # If Invoice/Payment tables don't exist or models aren't accessible, skip Payment In calculation
+        logger.warning(f"Error calculating Payment In statuses: {e}")
+    
+    try:
+        # Batch query all supplier payments for these decisions
+        supplier_payments_result = await db.execute(
+            select(SupplierPayment).where(
+                SupplierPayment.decision_id.in_(decision_ids),
+                SupplierPayment.status == 'completed'
+            )
+        )
+        supplier_payments = supplier_payments_result.scalars().all()
+        
+        # Batch query decisions to get final_cost
+        decisions_result = await db.execute(
+            select(FinalizedDecision).where(FinalizedDecision.id.in_(decision_ids))
+        )
+        decisions = decisions_result.scalars().all()
+        decisions_dict = {d.id: d for d in decisions}
+        
+        # Calculate total supplier payments per decision
+        payments_by_decision = {}
+        for sp in supplier_payments:
+            if sp.decision_id not in payments_by_decision:
+                payments_by_decision[sp.decision_id] = 0
+            payments_by_decision[sp.decision_id] += float(sp.payment_amount)
+        
+        # Update Payment Out statuses
+        for decision_id, decision in decisions_dict.items():
+            total_paid_out = payments_by_decision.get(decision_id, 0)
+            final_cost = float(decision.final_cost_amount) if decision.final_cost_amount else float(decision.final_cost)
+            
+            if total_paid_out >= final_cost:
+                statuses_map[decision_id]['payment_out_status'] = 'fully_paid'
+            elif total_paid_out > 0:
+                statuses_map[decision_id]['payment_out_status'] = 'partially_paid'
+    except Exception as e:
+        # If SupplierPayment table doesn't exist or there's an error, skip Payment Out calculation
+        logger.warning(f"Error calculating Payment Out statuses: {e}")
+    
+    return statuses_map
+
+
+async def _calculate_payment_statuses(decision_id: int, db: AsyncSession) -> Dict[str, str]:
+    """
+    Calculate Payment In and Payment Out statuses for a decision.
+    Returns: {'payment_in_status': '...', 'payment_out_status': '...'}
+    """
+    payment_in_status = "not_paid"
+    payment_out_status = "not_paid"
+    
+    try:
+        # Calculate Payment In (Customer Payments - Revenue)
+        invoice_result = await db.execute(
+            select(Invoice).where(Invoice.decision_id == decision_id)
+        )
+        invoice = invoice_result.scalars().first()
+        
+        if invoice:
+            # Calculate total payments received for this invoice
+            payments_result = await db.execute(
+                select(Payment).where(
+                    Payment.invoice_id == invoice.id,
+                    Payment.status == PaymentStatus.COMPLETED
+                )
+            )
+            payments = payments_result.scalars().all()
+            total_paid_in = sum(float(p.payment_amount) for p in payments)
+            invoice_amount = float(invoice.invoice_amount)
+            
+            if total_paid_in >= invoice_amount:
+                payment_in_status = "fully_paid"
+            elif total_paid_in > 0:
+                payment_in_status = "partially_paid"
+            else:
+                payment_in_status = "not_paid"
+    except Exception as e:
+        logger.warning(f"Error calculating Payment In status for decision {decision_id}: {e}")
+    
+    try:
+        # Calculate Payment Out (Supplier Payments - Costs)
+        supplier_payments_result = await db.execute(
+            select(SupplierPayment).where(
+                SupplierPayment.decision_id == decision_id,
+                SupplierPayment.status == 'completed'
+            )
+        )
+        supplier_payments = supplier_payments_result.scalars().all()
+        
+        if supplier_payments:
+            # Get the decision to compare with final_cost
+            decision_result = await db.execute(
+                select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
+            )
+            decision = decision_result.scalar_one_or_none()
+            
+            if decision:
+                total_paid_out = sum(float(sp.payment_amount) for sp in supplier_payments)
+                final_cost = float(decision.final_cost_amount) if decision.final_cost_amount else float(decision.final_cost)
+                
+                if total_paid_out >= final_cost:
+                    payment_out_status = "fully_paid"
+                elif total_paid_out > 0:
+                    payment_out_status = "partially_paid"
+                else:
+                    payment_out_status = "not_paid"
+    except Exception as e:
+        logger.warning(f"Error calculating Payment Out status for decision {decision_id}: {e}")
+    
+    return {
+        'payment_in_status': payment_in_status,
+        'payment_out_status': payment_out_status
+    }
+
+
+def _filter_decision_for_role(decision: FinalizedDecision, user_role: str, payment_statuses: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """
     Filter decision data based on user role.
     
@@ -71,6 +239,9 @@ def _filter_decision_for_role(decision: FinalizedDecision, user_role: str) -> Di
             "actual_payment_date": decision.actual_payment_date,
             "payment_entered_by_id": decision.payment_entered_by_id,
             "payment_entered_at": decision.payment_entered_at,
+            # Payment In and Payment Out statuses
+            "payment_in_status": payment_statuses.get('payment_in_status', 'not_paid') if payment_statuses else 'not_paid',
+            "payment_out_status": payment_statuses.get('payment_out_status', 'not_paid') if payment_statuses else 'not_paid',
         })
     
     if user_role in ['pm', 'pmo', 'admin']:
@@ -99,14 +270,24 @@ async def list_procurement_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     status_filter: Optional[str] = None,
-    project_id: Optional[int] = None
+    project_id: Optional[int] = None,
+    page: int = 1,
+    limit: int = 25,
+    search: Optional[str] = None,
+    invoice_status: Optional[str] = None,
+    payment_status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
 ):
     """
-    Get procurement plan items based on user role.
+    Get procurement plan items based on user role with pagination and filtering.
     
     - Procurement Team: All finalized items with full details
     - PM: Only items from their assigned projects, limited details
     """
+    from datetime import datetime
+    from sqlalchemy import and_, or_, func
+    
     # Base query for LOCKED decisions only
     stmt = select(FinalizedDecision).where(
         FinalizedDecision.status == 'LOCKED'
@@ -116,9 +297,48 @@ async def list_procurement_plan(
         selectinload(FinalizedDecision.procurement_option)
     )
     
+    # Apply filters
+    filters = []
+    
     # Filter by delivery status if provided
     if status_filter:
-        stmt = stmt.where(FinalizedDecision.delivery_status == status_filter)
+        filters.append(FinalizedDecision.delivery_status == status_filter)
+    
+    # Filter by project if provided
+    if project_id:
+        filters.append(FinalizedDecision.project_id == project_id)
+    
+    # Filter by invoice status
+    if invoice_status == 'invoiced':
+        filters.append(FinalizedDecision.actual_invoice_issue_date.isnot(None))
+    elif invoice_status == 'not_invoiced':
+        filters.append(FinalizedDecision.actual_invoice_issue_date.is_(None))
+    
+    # Filter by payment status
+    if payment_status == 'not_paid':
+        filters.append(FinalizedDecision.actual_payment_date.is_(None))
+    elif payment_status == 'partially_paid':
+        filters.append(and_(
+            FinalizedDecision.actual_payment_date.isnot(None),
+            FinalizedDecision.actual_payment_amount < FinalizedDecision.actual_invoice_amount
+        ))
+    elif payment_status == 'fully_paid':
+        filters.append(and_(
+            FinalizedDecision.actual_payment_date.isnot(None),
+            FinalizedDecision.actual_payment_amount >= FinalizedDecision.actual_invoice_amount
+        ))
+    
+    # Filter by date range
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date)
+        filters.append(FinalizedDecision.delivery_date >= start_dt.date())
+    if end_date:
+        end_dt = datetime.fromisoformat(end_date)
+        filters.append(FinalizedDecision.delivery_date <= end_dt.date())
+    
+    # Apply all filters
+    if filters:
+        stmt = stmt.where(and_(*filters))
     
     # Role-based filtering
     if current_user.role == 'pm':
@@ -130,27 +350,51 @@ async def list_procurement_plan(
         assigned_project_ids = [row[0] for row in assigned_projects_result.fetchall()]
         
         if not assigned_project_ids:
-            return []
+            return {"items": [], "total": 0, "page": page, "limit": limit}
         
         stmt = stmt.where(FinalizedDecision.project_id.in_(assigned_project_ids))
     
-    # Additional project filter
-    if project_id:
-        stmt = stmt.where(FinalizedDecision.project_id == project_id)
+    # Get total count for pagination
+    count_stmt = select(func.count(FinalizedDecision.id)).select_from(stmt.subquery())
+    total_result = await db.execute(count_stmt)
+    total_count = total_result.scalar()
+    
+    # Apply search filter if provided
+    if search:
+        search_filters = [
+            FinalizedDecision.item_code.ilike(f"%{search}%"),
+            FinalizedDecision.project.has(Project.name.ilike(f"%{search}%")),
+            FinalizedDecision.project_item.has(ProjectItem.item_name.ilike(f"%{search}%")),
+            FinalizedDecision.procurement_option.has(ProcurementOption.supplier_name.ilike(f"%{search}%"))
+        ]
+        stmt = stmt.where(or_(*search_filters))
     
     # Order by delivery date
     stmt = stmt.order_by(FinalizedDecision.delivery_date.asc())
     
+    # Apply pagination
+    offset = (page - 1) * limit
+    stmt = stmt.offset(offset).limit(limit)
+    
     result = await db.execute(stmt)
     decisions = result.scalars().all()
     
+    # Batch calculate payment statuses for all decisions
+    decision_ids = [d.id for d in decisions]
+    payment_statuses_map = await _batch_calculate_payment_statuses(decision_ids, db)
+    
     # Filter data based on role
     filtered_data = [
-        _filter_decision_for_role(decision, current_user.role)
+        _filter_decision_for_role(decision, current_user.role, payment_statuses_map.get(decision.id))
         for decision in decisions
     ]
     
-    return filtered_data
+    return {
+        "items": filtered_data,
+        "total": total_count,
+        "page": page,
+        "limit": limit
+    }
 
 
 @router.get("/{decision_id}")
@@ -193,8 +437,11 @@ async def get_procurement_plan_item(
                 detail="You don't have access to this project's items"
             )
     
+    # Calculate payment statuses
+    payment_statuses = await _calculate_payment_statuses(decision_id, db)
+    
     # Return filtered data
-    filtered_data = _filter_decision_for_role(decision, current_user.role)
+    filtered_data = _filter_decision_for_role(decision, current_user.role, payment_statuses)
     
     # Add user names if available
     if decision.procurement_confirmed_by:

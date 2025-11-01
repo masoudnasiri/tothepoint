@@ -11,7 +11,7 @@ from app.crud import (
     create_project_item, get_project_item, get_project_items,
     update_project_item, delete_project_item, finalize_project_item
 )
-from app.models import User, FinalizedDecision
+from app.models import User, FinalizedDecision, ProjectItemSubItem, ItemSubItem
 from app.schemas import ProjectItem, ProjectItemCreate, ProjectItemUpdate, ProjectItemFinalize
 
 router = APIRouter(prefix="/items", tags=["project-items"])
@@ -96,6 +96,21 @@ async def list_project_items(
         )
         has_finalized_decision = (finalized_decision_query.scalar() or 0) > 0
         
+        # Fetch sub-items quantities for this project item
+        sub_rows = await db.execute(
+            select(ProjectItemSubItem, ItemSubItem)
+            .where(ProjectItemSubItem.project_item_id == item.id)
+            .join(ItemSubItem, ItemSubItem.id == ProjectItemSubItem.item_subitem_id)
+        )
+        sub_list = []
+        for rel, sub in sub_rows.fetchall():
+            sub_list.append({
+                "sub_item_id": rel.item_subitem_id,
+                "name": sub.name,
+                "part_number": sub.part_number,
+                "quantity": rel.quantity,
+            })
+
         # Convert to dict and add extra fields
         item_dict = {
             "id": item.id,
@@ -124,6 +139,8 @@ async def list_project_items(
             # Extra fields for UI control
             "procurement_options_count": procurement_options_count,
             "has_finalized_decision": has_finalized_decision,
+            # Sub-items breakdown
+            "sub_items": sub_list,
         }
         enriched_items.append(item_dict)
     
@@ -198,6 +215,21 @@ async def list_finalized_items(
     # Manually serialize to avoid validation issues
     serialized_items = []
     for item in items:
+        # Fetch sub-items quantities
+        sub_rows = await db.execute(
+            select(ProjectItemSubItem, ItemSubItem)
+            .where(ProjectItemSubItem.project_item_id == item.id)
+            .join(ItemSubItem, ItemSubItem.id == ProjectItemSubItem.item_subitem_id)
+        )
+        sub_list = []
+        for rel, sub in sub_rows.fetchall():
+            sub_list.append({
+                "sub_item_id": rel.item_subitem_id,
+                "name": sub.name,
+                "part_number": sub.part_number,
+                "quantity": rel.quantity,
+            })
+
         serialized_items.append({
             "id": item.id,
             "project_id": item.project_id,
@@ -222,18 +254,19 @@ async def list_finalized_items(
             "finalized_at": item.finalized_at.isoformat() if item.finalized_at else None,
             "created_at": item.created_at.isoformat() if item.created_at else None,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "sub_items": sub_list,
         })
     
     return serialized_items
 
 
-@router.get("/{item_id}", response_model=ProjectItem)
+@router.get("/{item_id}")
 async def get_project_item_by_id(
     item_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get project item by ID"""
+    """Get project item by ID with sub-items breakdown included"""
     item = await get_project_item(db, item_id)
     if not item:
         raise HTTPException(
@@ -243,14 +276,58 @@ async def get_project_item_by_id(
     
     user_projects = await get_user_projects(db, current_user)
     
-    # Check if user can access this project
+    # Check access
     if current_user.role == "pm" and item.project_id not in user_projects:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied to this project item"
         )
     
-    return item
+    # Load sub-items quantities
+    from sqlalchemy import select
+    sub_rows = await db.execute(
+        select(ProjectItemSubItem, ItemSubItem)
+        .where(ProjectItemSubItem.project_item_id == item.id)
+        .join(ItemSubItem, ItemSubItem.id == ProjectItemSubItem.item_subitem_id)
+    )
+    sub_list = []
+    for rel, sub in sub_rows.fetchall():
+        sub_list.append({
+            "sub_item_id": rel.item_subitem_id,
+            "name": sub.name,
+            "part_number": sub.part_number,
+            "quantity": rel.quantity,
+        })
+    
+    # Serialize item with sub-items included
+    item_dict = {
+        "id": item.id,
+        "project_id": item.project_id,
+        "master_item_id": item.master_item_id,
+        "item_code": item.item_code,
+        "item_name": item.item_name,
+        "quantity": item.quantity,
+        "delivery_options": item.delivery_options,
+        "status": item.status.value if hasattr(item.status, 'value') else item.status,
+        "external_purchase": item.external_purchase,
+        "description": item.description,
+        "file_path": item.file_path,
+        "file_name": item.file_name,
+        "decision_date": item.decision_date.isoformat() if item.decision_date else None,
+        "procurement_date": item.procurement_date.isoformat() if item.procurement_date else None,
+        "payment_date": item.payment_date.isoformat() if item.payment_date else None,
+        "invoice_submission_date": item.invoice_submission_date.isoformat() if item.invoice_submission_date else None,
+        "expected_cash_in_date": item.expected_cash_in_date.isoformat() if item.expected_cash_in_date else None,
+        "actual_cash_in_date": item.actual_cash_in_date.isoformat() if item.actual_cash_in_date else None,
+        "is_finalized": item.is_finalized,
+        "finalized_by": item.finalized_by,
+        "finalized_at": item.finalized_at.isoformat() if item.finalized_at else None,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        "sub_items": sub_list,
+    }
+    
+    return item_dict
 
 
 @router.put("/{item_id}", response_model=ProjectItem)
@@ -371,7 +448,7 @@ async def unfinalize_project_item_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Unfinalize a project item (PMO or Admin only) - only if no procurement options or decisions exist"""
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, and_
     from app.models import ProjectItem as ProjectItemModel, FinalizedDecision, ProcurementOption
     
     # Get the item
@@ -382,10 +459,15 @@ async def unfinalize_project_item_by_id(
             detail="Project item not found"
         )
     
-    # Check if item has any procurement options
+    # Check if item has any procurement options for THIS specific project item
     procurement_options_query = await db.execute(
         select(func.count(ProcurementOption.id))
-        .where(ProcurementOption.item_code == item.item_code)
+        .where(
+            and_(
+                ProcurementOption.project_item_id == item_id,
+                ProcurementOption.is_active == True
+            )
+        )
     )
     has_procurement_options = (procurement_options_query.scalar() or 0) > 0
     

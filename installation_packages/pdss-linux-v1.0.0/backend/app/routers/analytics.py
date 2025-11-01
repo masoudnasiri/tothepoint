@@ -6,6 +6,7 @@ Provides Earned Value Management (EVM), Cash Flow Forecasting, and Risk Analytic
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
+from sqlalchemy.orm import selectinload
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 from decimal import Decimal
@@ -77,27 +78,46 @@ async def get_earned_value_analytics(
     
     # Calculate Planned Value (PV) - budgeted cost of work scheduled to be complete by now
     # PV = Sum of planned costs for work that SHOULD be done by today (based on delivery dates)
+    # FALLBACK: If all delivery dates are in future, use finalized_at dates instead
     today = date.today()
     
     PV = 0
     items_should_be_done = 0
+    
+    # Check if all delivery dates are in the future (data quality issue)
+    all_delivery_dates_future = all(
+        d.delivery_date and d.delivery_date > today 
+        for d in decisions if d.delivery_date
+    )
+    
     for d in decisions:
-        # Work is "scheduled" if delivery date has passed
-        if d.delivery_date and d.delivery_date <= today:
+        # Use finalized_at date as fallback if delivery dates are unrealistic
+        if all_delivery_dates_future and d.finalized_at:
+            # Work is "scheduled" if finalized more than 30 days ago
+            if d.finalized_at.date() <= today - timedelta(days=30):
+                items_should_be_done += 1
+                PV += float(d.final_cost)
+        elif d.delivery_date and d.delivery_date <= today:
+            # Normal case: use delivery date
             items_should_be_done += 1
-            # Add the PLANNED COST (not invoice amount) to PV
             PV += float(d.final_cost)
     
     # Calculate Earned Value (EV) - budgeted cost of work actually completed
-    # EV = Sum of planned costs for work that HAS BEEN ACCEPTED by PM
-    # This is more accurate than just LOCKED status
+    # Items are considered completed ONLY when PM accepts delivery
+    # Priority: Actual Payment > PM Acceptance (required for completion)
     EV = 0
     items_actually_done = 0
+    
     for d in decisions:
-        if d.status == 'LOCKED' and d.pm_accepted_at:
+        # Priority 1: Actual payment indicates truly completed work (payment made after PM acceptance)
+        if d.status == 'LOCKED' and d.actual_payment_amount and d.actual_payment_amount > 0:
             items_actually_done += 1
-            # Add the PLANNED COST (not actual cost or invoice) to EV
             EV += float(d.final_cost)
+        # Priority 2: PM acceptance - required indicator that delivery was accepted
+        elif d.status == 'LOCKED' and d.pm_accepted_at:
+            items_actually_done += 1
+            EV += float(d.final_cost)
+        # Note: LOCKED status alone is NOT sufficient - PM must accept delivery first
     
     # Calculate performance indices
     CPI = EV / AC if AC > 0 else 1.0
@@ -147,17 +167,26 @@ async def get_earned_value_analytics(
         # PV at this date - budgeted cost of work scheduled by target_date
         pv_at_date = 0
         for d in decisions:
-            # Work is "scheduled" if delivery date <= target_date
-            if d.delivery_date and d.delivery_date <= target_date:
+            # Use finalized_at date as fallback if delivery dates are unrealistic
+            if all_delivery_dates_future and d.finalized_at:
+                # Work is "scheduled" if finalized by target_date
+                if d.finalized_at.date() <= target_date:
+                    pv_at_date += float(d.final_cost)
+            elif d.delivery_date and d.delivery_date <= target_date:
+                # Normal case: use delivery date
                 pv_at_date += float(d.final_cost)
         
         # EV at this date - budgeted cost of work actually completed by target_date
+        # Items are considered completed ONLY when PM accepts delivery
         ev_at_date = 0
         for d in decisions:
-            if d.status == 'LOCKED' and d.pm_accepted_at and d.pm_accepted_at.date() <= target_date:
-                # Add PLANNED COST (not actual or invoice)
-                # Work is "earned" when PM accepts it
+            # Priority 1: Actual payment indicates truly completed work
+            if d.status == 'LOCKED' and d.actual_payment_amount and d.actual_payment_amount > 0 and d.actual_payment_date and d.actual_payment_date <= target_date:
                 ev_at_date += float(d.final_cost)
+            # Priority 2: PM acceptance - required indicator that delivery was accepted
+            elif d.status == 'LOCKED' and d.pm_accepted_at and d.pm_accepted_at.date() <= target_date:
+                ev_at_date += float(d.final_cost)
+            # Note: LOCKED status alone is NOT sufficient - PM must accept delivery first
         
         # AC at this date - sum of actual costs for payments made by this date
         ac_at_date = sum(
@@ -448,14 +477,21 @@ async def get_portfolio_eva(
             PV += float(d.final_cost)
     
     # EV - budgeted cost of work actually completed across all projects
-    # Work is "earned" when PM accepts it
+    # Items are considered completed ONLY when PM accepts delivery
+    # Priority: Actual Payment > PM Acceptance (required for completion)
     EV = 0
     items_actually_done = 0
+    
     for d in all_decisions:
-        if d.status == 'LOCKED' and d.pm_accepted_at:
+        # Priority 1: Actual payment indicates truly completed work (payment made after PM acceptance)
+        if d.status == 'LOCKED' and d.actual_payment_amount and d.actual_payment_amount > 0:
             items_actually_done += 1
-            # Add PLANNED COST (not actual or invoice)
             EV += float(d.final_cost)
+        # Priority 2: PM acceptance - required indicator that delivery was accepted
+        elif d.status == 'LOCKED' and d.pm_accepted_at:
+            items_actually_done += 1
+            EV += float(d.final_cost)
+        # Note: LOCKED status alone is NOT sufficient - PM must accept delivery first
     
     # AC - actual cost across all projects
     # Only count decisions where payment has actually been made
@@ -829,4 +865,294 @@ async def get_all_projects_analytics_summary(
         'total_projects': len(projects),
         'projects': summaries,
     }
+
+
+@router.get("/item-follow-up/{project_id}")
+async def get_item_follow_up(
+    project_id: int,
+    current_user: User = Depends(require_analytics_access),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get item follow-up status for a project
+    Shows the status of each item in the platform process
+    """
+    
+    # Get project
+    project_result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = project_result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Get all project items with their status
+    items_result = await db.execute(
+        select(ProjectItem)
+        .options(selectinload(ProjectItem.delivery_options_rel))
+        .where(ProjectItem.project_id == project_id)
+        .order_by(ProjectItem.id)
+    )
+    project_items = items_result.scalars().all()
+    
+    follow_up_data = []
+    
+    for item in project_items:
+        # Determine item status based on platform process
+        status = "CREATED"
+        notes = ""
+        
+        # Check if item has delivery options
+        has_delivery_options = item.delivery_options_rel and len(item.delivery_options_rel) > 0
+        
+        if has_delivery_options:
+            status = "DELIVERY_ADDED"
+        
+        # Check finalized decisions FIRST (highest priority)
+        decision_result = await db.execute(
+            select(FinalizedDecision)
+            .where(FinalizedDecision.project_item_id == item.id)
+            .order_by(FinalizedDecision.created_at.desc())
+        )
+        decision = decision_result.scalars().first()  # Get the most recent decision
+        
+        if decision:
+            if decision.status == "PROPOSED":
+                status = "PROPOSED"
+            elif decision.status == "LOCKED":
+                # Check delivery_status for procurement and project delivery tracking
+                if decision.delivery_status == "DELIVERY_COMPLETE":
+                    status = "DELIVERY_COMPLETE"
+                elif decision.delivery_status == "CONFIRMED_BY_PROCUREMENT":
+                    status = "CONFIRMED_BY_PROCUREMENT"
+                else:
+                    status = "LOCKED"
+            elif decision.status == "PROCUREMENT_PLAN":
+                # Check delivery_status for procurement and project delivery tracking
+                if decision.delivery_status == "DELIVERY_COMPLETE":
+                    status = "DELIVERY_COMPLETE"
+                elif decision.delivery_status == "CONFIRMED_BY_PROCUREMENT":
+                    status = "CONFIRMED_BY_PROCUREMENT"
+                else:
+                    status = "PROCUREMENT_PLAN"
+            elif decision.status == "ORDERED":
+                status = "ORDERED"
+            elif decision.status == "DELIVERED":
+                status = "DELIVERED"
+        
+        # Check procurement options - get full objects to extract dates and counts
+        procurement_options_result = await db.execute(
+            select(ProcurementOption)
+            .where(
+                and_(
+                    ProcurementOption.project_item_id == item.id,
+                    ProcurementOption.is_active == True
+                )
+            )
+        )
+        procurement_options_list = procurement_options_result.scalars().all()
+        procurement_options_count = len(procurement_options_list)
+        finalized_options_count = sum(1 for opt in procurement_options_list if opt.is_finalized)
+        
+        # Only set PROCUREMENT_OPTIONS status if there's no finalized decision
+        if procurement_options_count > 0 and not decision:
+            if item.is_finalized:
+                # Item is finalized and has options but no decision - ready for optimization
+                status = "READY_FOR_OPTIMIZATION"
+            else:
+                status = "PROCUREMENT_OPTIONS"
+            notes = f"{procurement_options_count} options ({finalized_options_count} finalized)"
+        elif procurement_options_count > 0:
+            # Has procurement options and decision - update notes only
+            notes = f"{procurement_options_count} options ({finalized_options_count} finalized)"
+        
+        # Check if item is finalized (only if no decision and no procurement options status set)
+        if not decision and procurement_options_count == 0 and item.is_finalized:
+            status = "FINALIZED"
+        
+        # Get delivery dates from delivery options and procurement options
+        lead_time_date = None  # Delivery date to project (from procurement option - when supplier delivers)
+        delivery_time_date = None  # Delivery date to customer (from delivery option - when we deliver)
+        
+        # Get earliest expected delivery date from procurement options (when supplier delivers to us)
+        if procurement_options_list:
+            procurement_dates = [
+                opt.expected_delivery_date for opt in procurement_options_list
+                if opt.expected_delivery_date
+            ]
+            if procurement_dates:
+                lead_time_date = min(procurement_dates)  # Earliest delivery from supplier
+        
+        # Get delivery date from delivery options (when we deliver to customer)
+        if item.delivery_options_rel:
+            delivery_dates = [
+                do.delivery_date for do in item.delivery_options_rel 
+                if do.delivery_date
+            ]
+            if delivery_dates:
+                delivery_time_date = min(delivery_dates)  # Earliest delivery to customer
+        
+        follow_up_data.append({
+            'project_item_id': item.id,
+            'item_code': item.item_code,
+            'item_name': item.item_name or item.item_code,
+            'quantity': item.quantity,
+            'status': status,
+            'lead_time_date': lead_time_date.isoformat() if lead_time_date else None,  # Delivery date to project
+            'delivery_time_date': delivery_time_date.isoformat() if delivery_time_date else None,  # Delivery date to customer
+            'procurement_options_count': procurement_options_count,
+            'procurement_options_finalized': finalized_options_count == procurement_options_count and procurement_options_count > 0,
+            'notes': notes,
+            'is_finalized': item.is_finalized,
+            'created_at': item.created_at,
+        })
+    
+    return follow_up_data
+
+
+@router.get("/portfolio/item-follow-up")
+async def get_portfolio_item_follow_up(
+    current_user: User = Depends(require_analytics_access),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get item follow-up status for all projects (portfolio view)
+    """
+    
+    # Get all projects
+    projects_result = await db.execute(
+        select(Project).where(Project.is_active == True)
+    )
+    projects = projects_result.scalars().all()
+    
+    portfolio_data = []
+    
+    for project in projects:
+        # Get project items
+        items_result = await db.execute(
+            select(ProjectItem)
+            .options(selectinload(ProjectItem.delivery_options_rel))
+            .where(ProjectItem.project_id == project.id)
+            .order_by(ProjectItem.id)
+        )
+        project_items = items_result.scalars().all()
+        
+        for item in project_items:
+            # Same logic as single project endpoint
+            status = "CREATED"
+            notes = ""
+            
+            # Check delivery options
+            has_delivery_options = item.delivery_options_rel and len(item.delivery_options_rel) > 0
+            
+            if has_delivery_options:
+                status = "DELIVERY_ADDED"
+            
+            # Check finalized decisions FIRST (highest priority)
+            decision_result = await db.execute(
+                select(FinalizedDecision)
+                .where(FinalizedDecision.project_item_id == item.id)
+                .order_by(FinalizedDecision.created_at.desc())
+            )
+            decision = decision_result.scalars().first()  # Get the most recent decision
+            
+            if decision:
+                if decision.status == "PROPOSED":
+                    status = "PROPOSED"
+                elif decision.status == "LOCKED":
+                    # Check delivery_status for procurement and project delivery tracking
+                    if decision.delivery_status == "DELIVERY_COMPLETE":
+                        status = "DELIVERY_COMPLETE"
+                    elif decision.delivery_status == "CONFIRMED_BY_PROCUREMENT":
+                        status = "CONFIRMED_BY_PROCUREMENT"
+                    else:
+                        status = "LOCKED"
+                elif decision.status == "PROCUREMENT_PLAN":
+                    # Check delivery_status for procurement and project delivery tracking
+                    if decision.delivery_status == "DELIVERY_COMPLETE":
+                        status = "DELIVERY_COMPLETE"
+                    elif decision.delivery_status == "CONFIRMED_BY_PROCUREMENT":
+                        status = "CONFIRMED_BY_PROCUREMENT"
+                    else:
+                        status = "PROCUREMENT_PLAN"
+                elif decision.status == "ORDERED":
+                    status = "ORDERED"
+                elif decision.status == "DELIVERED":
+                    status = "DELIVERED"
+            
+            # Check procurement options - get full objects to extract dates and counts
+            procurement_options_result = await db.execute(
+                select(ProcurementOption)
+                .where(
+                    and_(
+                        ProcurementOption.project_item_id == item.id,
+                        ProcurementOption.is_active == True
+                    )
+                )
+            )
+            procurement_options_list = procurement_options_result.scalars().all()
+            procurement_options_count = len(procurement_options_list)
+            finalized_options_count = sum(1 for opt in procurement_options_list if opt.is_finalized)
+            
+            # Only set PROCUREMENT_OPTIONS status if there's no finalized decision
+            if procurement_options_count > 0 and not decision:
+                if item.is_finalized:
+                    # Item is finalized and has options but no decision - ready for optimization
+                    status = "READY_FOR_OPTIMIZATION"
+                else:
+                    status = "PROCUREMENT_OPTIONS"
+                notes = f"{procurement_options_count} options ({finalized_options_count} finalized)"
+            elif procurement_options_count > 0:
+                # Has procurement options and decision - update notes only
+                notes = f"{procurement_options_count} options ({finalized_options_count} finalized)"
+            
+            # Check if item is finalized (only if no decision and no procurement options status set)
+            if not decision and procurement_options_count == 0 and item.is_finalized:
+                status = "FINALIZED"
+            
+            # Get delivery dates from delivery options and procurement options
+            lead_time_date = None  # Delivery date to project (from procurement option - when supplier delivers)
+            delivery_time_date = None  # Delivery date to customer (from delivery option - when we deliver)
+            
+            # Get earliest expected delivery date from procurement options (when supplier delivers to us)
+            if procurement_options_list:
+                procurement_dates = [
+                    opt.expected_delivery_date for opt in procurement_options_list
+                    if opt.expected_delivery_date
+                ]
+                if procurement_dates:
+                    lead_time_date = min(procurement_dates)  # Earliest delivery from supplier
+            
+            # Get delivery date from delivery options (when we deliver to customer)
+            if item.delivery_options_rel:
+                delivery_dates = [
+                    do.delivery_date for do in item.delivery_options_rel 
+                    if do.delivery_date
+                ]
+                if delivery_dates:
+                    delivery_time_date = min(delivery_dates)  # Earliest delivery to customer
+            
+            portfolio_data.append({
+                'project_id': project.id,
+                'project_code': project.project_code,
+                'project_name': project.name,
+                'project_item_id': item.id,
+                'item_code': item.item_code,
+                'item_name': item.item_name or item.item_code,
+                'quantity': item.quantity,
+                'status': status,
+                'lead_time_date': lead_time_date.isoformat() if lead_time_date else None,  # Delivery date to project
+                'delivery_time_date': delivery_time_date.isoformat() if delivery_time_date else None,  # Delivery date to customer
+                'procurement_options_count': procurement_options_count,
+                'procurement_options_finalized': finalized_options_count == procurement_options_count and procurement_options_count > 0,
+                'notes': notes,
+                'is_finalized': item.is_finalized,
+                'created_at': item.created_at,
+            })
+    
+    return portfolio_data
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models import (
     User, Project, ProjectAssignment, ProjectPhase, ProjectItem, 
     ProcurementOption, BudgetData, OptimizationResult, DecisionFactorWeight,
-    DeliveryOption
+    DeliveryOption, FinalizedDecision, ItemSubItem, ProjectItemSubItem
 )
 from app.schemas import (
     UserCreate, UserUpdate, ProjectCreate, ProjectUpdate,
@@ -200,11 +200,34 @@ async def create_project_item(db: AsyncSession, item: ProjectItemCreate) -> Proj
         item_dict['item_code'] = master_item.item_code
         item_dict['item_name'] = master_item.item_name
     
+    # Extract sub-items quantities if present
+    sub_items_payload = item_dict.pop('sub_items', None)
+
     # Create project item
     db_item = ProjectItem(**item_dict)
     db.add(db_item)
     await db.commit()
     await db.refresh(db_item)
+
+    # Create project sub-item rows
+    if sub_items_payload:
+        for entry in sub_items_payload:
+            sub_id = entry.get('sub_item_id')
+            qty = entry.get('quantity', 0)
+            if sub_id is None:
+                continue
+            # Ensure sub-item exists
+            exists_result = await db.execute(select(ItemSubItem).where(ItemSubItem.id == sub_id))
+            if exists_result.scalar_one_or_none() is None:
+                continue
+            db_rel = ProjectItemSubItem(
+                project_item_id=db_item.id,
+                item_subitem_id=sub_id,
+                quantity=qty or 0,
+            )
+            db.add(db_rel)
+        await db.commit()
+
     return db_item
 
 
@@ -236,10 +259,33 @@ async def update_project_item(db: AsyncSession, item_id: int, item_update: Proje
     if not update_data:
         return await get_project_item(db, item_id)
     
+    # Pull out sub-items payload if provided
+    sub_items_payload = update_data.pop('sub_items', None)
+
     await db.execute(
         update(ProjectItem).where(ProjectItem.id == item_id).values(**update_data)
     )
     await db.commit()
+
+    if sub_items_payload is not None:
+        # Replace strategy: delete and reinsert
+        await db.execute(delete(ProjectItemSubItem).where(ProjectItemSubItem.project_item_id == item_id))
+        for entry in sub_items_payload:
+            sub_id = entry.get('sub_item_id')
+            qty = entry.get('quantity', 0)
+            if sub_id is None:
+                continue
+            exists_result = await db.execute(select(ItemSubItem).where(ItemSubItem.id == sub_id))
+            if exists_result.scalar_one_or_none() is None:
+                continue
+            db_rel = ProjectItemSubItem(
+                project_item_id=item_id,
+                item_subitem_id=sub_id,
+                quantity=qty or 0,
+            )
+            db.add(db_rel)
+        await db.commit()
+
     return await get_project_item(db, item_id)
 
 
@@ -295,14 +341,22 @@ async def create_procurement_option(db: AsyncSession, option: ProcurementOptionC
 
 async def get_procurement_option(db: AsyncSession, option_id: int) -> Optional[ProcurementOption]:
     """Get procurement option by ID"""
-    result = await db.execute(select(ProcurementOption).where(ProcurementOption.id == option_id))
+    from sqlalchemy.orm import joinedload
+    
+    result = await db.execute(
+        select(ProcurementOption)
+        .options(joinedload(ProcurementOption.supplier))
+        .where(ProcurementOption.id == option_id)
+    )
     return result.scalar_one_or_none()
 
 
 async def get_procurement_options(db: AsyncSession, skip: int = 0, limit: int = 100, 
                                  item_code: Optional[str] = None) -> List[ProcurementOption]:
     """Get procurement options with optional filtering by item_code"""
-    query = select(ProcurementOption).where(ProcurementOption.is_active == True)
+    from sqlalchemy.orm import joinedload
+    
+    query = select(ProcurementOption).options(joinedload(ProcurementOption.supplier)).where(ProcurementOption.is_active == True)
     
     if item_code:
         query = query.where(ProcurementOption.item_code == item_code)
@@ -347,7 +401,14 @@ async def update_procurement_option(db: AsyncSession, option_id: int,
 
 
 async def delete_procurement_option(db: AsyncSession, option_id: int) -> bool:
-    """Delete procurement option"""
+    """Delete procurement option and related optimization results and finalized decisions"""
+    # First delete all optimization results that reference this procurement option
+    await db.execute(delete(OptimizationResult).where(OptimizationResult.procurement_option_id == option_id))
+    
+    # Delete finalized decisions that reference this procurement option
+    await db.execute(delete(FinalizedDecision).where(FinalizedDecision.procurement_option_id == option_id))
+    
+    # Then delete the procurement option
     result = await db.execute(delete(ProcurementOption).where(ProcurementOption.id == option_id))
     await db.commit()
     return result.rowcount > 0
