@@ -117,12 +117,12 @@ export const LoginPage: React.FC = () => {
             </Button>
           </Box>
 
-          <Box sx={{ mt: 3, p: 2, bgcolor: 'warning.light', borderRadius: 1, width: '100%' }}>
-            <Typography variant="body2" color="error" gutterBottom>
-              <strong>⚠️ SECURITY NOTICE:</strong>
+          <Box sx={{ mt: 3, p: 2, bgcolor: 'primary.lighter', borderRadius: 1, width: '100%', border: '1px solid', borderColor: 'primary.main' }}>
+            <Typography variant="body2" color="primary.dark" gutterBottom>
+              <strong>Welcome to InoTech Procurement DSS (SupplyWise)</strong>
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Change default passwords immediately after first login for security.
+              Please sign in to continue.
             </Typography>
           </Box>
         </Paper>
