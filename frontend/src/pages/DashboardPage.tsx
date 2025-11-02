@@ -410,12 +410,12 @@ export const DashboardPage: React.FC = () => {
           )}
           {viewMode === 'actual' && (
             <Alert severity="success" icon={<ActualIcon />}>
-              Showing <strong>actual</strong> cash flow based on real invoice data entered by the finance team.
+              {t('dashboard.showingActualCashFlow')}
             </Alert>
           )}
           {viewMode === 'comparison' && (
             <Alert severity="warning" icon={<CompareIcon />}>
-              Comparing <strong>forecasted vs actual</strong> cash flow to analyze variances.
+              {t('dashboard.comparingForecastVsActual')}
             </Alert>
           )}
           {currencyDisplayMode === 'unified' && (
@@ -425,7 +425,7 @@ export const DashboardPage: React.FC = () => {
           )}
           {currencyDisplayMode === 'original' && (
             <Alert severity="info" icon={<CompareIcon />} sx={{ mt: 1 }}>
-              Displaying amounts in <strong>original currencies</strong> (USD, EUR, IRR, etc.)
+              {t('dashboard.displayingOriginalCurrencies')}
             </Alert>
           )}
         </Box>
@@ -995,12 +995,15 @@ export const DashboardPage: React.FC = () => {
       ) : (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h6" color="text.secondary">
-            No {viewMode === 'forecast' ? 'forecasted' : viewMode === 'actual' ? 'actual' : ''} cash flow data available
+            {t('dashboard.noCashFlowDataAvailable', { 
+              type: viewMode === 'forecast' ? t('dashboard.forecast') : 
+                    viewMode === 'actual' ? t('dashboard.actual') : '' 
+            })}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {viewMode === 'forecast' && 'Save finalized decisions to generate forecast cash flow projections'}
-            {viewMode === 'actual' && 'Finance team needs to enter actual invoice data to see actual cash flow'}
-            {viewMode === 'comparison' && 'Both forecast and actual data are needed for comparison'}
+            {viewMode === 'forecast' && t('dashboard.saveFinalizedDecisions')}
+            {viewMode === 'actual' && t('dashboard.financeTeamEnterData')}
+            {viewMode === 'comparison' && t('dashboard.bothDataNeeded')}
           </Typography>
         </Paper>
       )}
@@ -1009,14 +1012,14 @@ export const DashboardPage: React.FC = () => {
       {viewMode === 'comparison' && forecastData && actualData && (
         <Paper sx={{ p: 3, mt: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Variance Analysis
+            {t('dashboard.varianceAnalysis')}
           </Typography>
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
               <Card sx={{ bgcolor: '#e3f2fd' }}>
                 <CardContent>
                   <Typography variant="subtitle2" color="text.secondary">
-                    Inflow Variance
+                    {t('dashboard.inflowVariance')}
                   </Typography>
                   <Typography variant="h5" sx={{ 
                     color: (actualSummary.total_inflow - summary.total_inflow) >= 0 ? '#4caf50' : '#f44336',
@@ -1025,7 +1028,7 @@ export const DashboardPage: React.FC = () => {
                     {formatCurrency(actualSummary.total_inflow - summary.total_inflow)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Actual vs Forecast
+                    {t('dashboard.actualVsForecast')}
                   </Typography>
                 </CardContent>
               </Card>
@@ -1034,7 +1037,7 @@ export const DashboardPage: React.FC = () => {
               <Card sx={{ bgcolor: '#fce4ec' }}>
                 <CardContent>
                   <Typography variant="subtitle2" color="text.secondary">
-                    Outflow Variance
+                    {t('dashboard.outflowVariance')}
                   </Typography>
                   <Typography variant="h5" sx={{ 
                     color: (actualSummary.total_outflow - summary.total_outflow) <= 0 ? '#4caf50' : '#f44336',
@@ -1043,7 +1046,7 @@ export const DashboardPage: React.FC = () => {
                     {formatCurrency(actualSummary.total_outflow - summary.total_outflow)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Actual vs Forecast
+                    {t('dashboard.actualVsForecast')}
                 </Typography>
             </CardContent>
           </Card>
@@ -1052,7 +1055,7 @@ export const DashboardPage: React.FC = () => {
               <Card sx={{ bgcolor: '#f3e5f5' }}>
             <CardContent>
                   <Typography variant="subtitle2" color="text.secondary">
-                    Net Position Variance
+                    {t('dashboard.netPositionVariance')}
                   </Typography>
                   <Typography variant="h5" sx={{ 
                     color: (actualSummary.net_position - summary.net_position) >= 0 ? '#4caf50' : '#f44336',
@@ -1061,7 +1064,7 @@ export const DashboardPage: React.FC = () => {
                     {formatCurrency(actualSummary.net_position - summary.net_position)}
               </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Actual vs Forecast
+                    {t('dashboard.actualVsForecast')}
               </Typography>
             </CardContent>
           </Card>

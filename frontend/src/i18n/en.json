@@ -137,7 +137,17 @@
     "totalOutflow": "Total Outflow",
     "netPosition": "Net Position",
     "finalBalance": "Final Balance",
-    "peakValue": "Peak"
+    "peakValue": "Peak",
+    "noCashFlowDataAvailable": "No {{type}} cash flow data available",
+    "saveFinalizedDecisions": "Save finalized decisions to generate forecast cash flow projections",
+    "financeTeamEnterData": "Finance team needs to enter actual invoice data to see actual cash flow",
+    "bothDataNeeded": "Both forecast and actual data are needed for comparison",
+    "comparingForecastVsActual": "Comparing forecasted vs actual cash flow to analyze variances.",
+    "varianceAnalysis": "Variance Analysis",
+    "inflowVariance": "Inflow Variance",
+    "outflowVariance": "Outflow Variance",
+    "netPositionVariance": "Net Position Variance",
+    "actualVsForecast": "Actual vs Forecast"
   },
   "roles": {
     "admin": "Administrator",

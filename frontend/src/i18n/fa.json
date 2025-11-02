@@ -137,7 +137,17 @@
     "totalOutflow": "کل خروجی",
     "netPosition": "موقعیت خالص",
     "finalBalance": "موجودی نهایی",
-    "peakValue": "اوج"
+    "peakValue": "اوج",
+    "noCashFlowDataAvailable": "هیچ داده جریان نقدینگی {{type}} در دسترس نیست",
+    "saveFinalizedDecisions": "تصمیمات نهایی شده را ذخیره کنید تا پیش‌بینی‌های جریان نقدینگی ایجاد شود",
+    "financeTeamEnterData": "تیم مالی باید داده‌های فاکتور واقعی را وارد کند تا جریان نقدینگی واقعی نمایش داده شود",
+    "bothDataNeeded": "برای مقایسه، هر دو داده پیش‌بینی شده و واقعی نیاز است",
+    "comparingForecastVsActual": "مقایسه جریان نقدینگی پیش‌بینی شده در مقابل واقعی برای تحلیل واریانس‌ها",
+    "varianceAnalysis": "تحلیل واریانس",
+    "inflowVariance": "واریانس ورودی",
+    "outflowVariance": "واریانس خروجی",
+    "netPositionVariance": "واریانس موقعیت خالص",
+    "actualVsForecast": "واقعی در مقابل پیش‌بینی"
   },
   "roles": {
     "admin": "مدیر سیستم",
