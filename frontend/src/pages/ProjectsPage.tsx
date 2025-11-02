@@ -95,13 +95,31 @@ export const ProjectsPage: React.FC = () => {
 
   const fetchPMUsers = async () => {
     try {
+      // If user is PM, add themselves to the list
+      if (user?.role === 'pm' && user) {
+        setPmUsers([{
+          id: user.id,
+          username: user.username,
+          role: user.role,
+        } as User]);
+        return;
+      }
+      
       // Use dedicated endpoint that PMO can access
       const response = await usersAPI.listPMs();
       setPmUsers(response.data);
     } catch (err: any) {
       console.error(t('projects.failedToLoadPMUsers'), err);
-      // Fallback: Try to get current user's info at least
-      setPmUsers([]);
+      // Fallback: If PM user, add themselves
+      if (user?.role === 'pm' && user) {
+        setPmUsers([{
+          id: user.id,
+          username: user.username,
+          role: user.role,
+        } as User]);
+      } else {
+        setPmUsers([]);
+      }
     }
   };
 
@@ -109,7 +127,19 @@ export const ProjectsPage: React.FC = () => {
     try {
       const assignmentsMap: Record<number, number[]> = {};
       
-      // Fetch assignments for all projects in parallel
+      // If user is PM, they can only see projects they're assigned to
+      // So we can directly show the current user as the PM for those projects
+      if (user?.role === 'pm' && user?.id) {
+        // PM users can only see projects they're assigned to
+        // So for each visible project, the PM user themselves is assigned
+        projects.forEach((project) => {
+          assignmentsMap[project.id] = [user.id];
+        });
+        setProjectAssignments(assignmentsMap);
+        return;
+      }
+      
+      // For admin/PMO users, fetch assignments for all projects in parallel
       const assignmentPromises = projects.map(async (project) => 
         projectsAPI.getAssignments(project.id)
           .then(response => {
