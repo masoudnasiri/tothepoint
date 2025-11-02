@@ -19,6 +19,8 @@ import { WeightsPage } from './pages/WeightsPage.tsx';
 import SuppliersPage from './pages/SuppliersPage.tsx';
 import { AnalyticsDashboardPage } from './pages/AnalyticsDashboardPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
+import AuditLogsPage from './pages/AuditLogsPage.tsx';
+import LocalizedDateProvider from './components/LocalizedDateProvider.tsx';
 
 function App() {
   return (
@@ -29,8 +31,9 @@ function App() {
           path="/*"
           element={
             <ProtectedRoute>
-              <Layout>
-                <Routes>
+              <LocalizedDateProvider>
+                <Layout>
+                  <Routes>
                   <Route path="/" element={<Navigate to="/dashboard" replace />} />
                   <Route path="/dashboard" element={<DashboardPage />} />
                   <Route path="/decisions" element={<FinalizedDecisionsPage />} />
@@ -47,8 +50,10 @@ function App() {
                   <Route path="/users" element={<UsersPage />} />
                   <Route path="/weights" element={<WeightsPage />} />
                   <Route path="/suppliers" element={<SuppliersPage />} />
+                  <Route path="/audit-logs" element={<AuditLogsPage />} />
                 </Routes>
               </Layout>
+              </LocalizedDateProvider>
             </ProtectedRoute>
           }
         />

@@ -172,8 +172,7 @@ import {
   LocalOffer as LocalOfferIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 import { useTranslation } from 'react-i18next';
 import { suppliersAPI } from '../services/api.ts';
 
@@ -1237,24 +1236,24 @@ const SuppliersPage: React.FC = () => {
                 </FormControl>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <LocalizedDateProvider>
                   <DatePicker
                     label={t('suppliers.lastReviewDate')}
                     value={supplierForm.last_review_date ? new Date(supplierForm.last_review_date) : null}
                     onChange={(date) => setSupplierForm({ ...supplierForm, last_review_date: date?.toISOString().split('T')[0] })}
-                    textField={(params) => <TextField {...params} fullWidth />}
+                    slotProps={{ textField: { fullWidth: true } }}
                   />
-                </LocalizationProvider>
+                </LocalizedDateProvider>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <LocalizedDateProvider>
                   <DatePicker
                     label={t('suppliers.lastAuditDate')}
                     value={supplierForm.last_audit_date ? new Date(supplierForm.last_audit_date) : null}
                     onChange={(date) => setSupplierForm({ ...supplierForm, last_audit_date: date?.toISOString().split('T')[0] })}
-                    textField={(params) => <TextField {...params} fullWidth />}
+                    slotProps={{ textField: { fullWidth: true } }}
                   />
-                </LocalizationProvider>
+                </LocalizedDateProvider>
               </Grid>
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom>
@@ -1778,24 +1777,24 @@ const SuppliersPage: React.FC = () => {
               />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <LocalizedDateProvider>
                 <DatePicker
                   label={t('suppliers.issuedDate')}
                   value={documentForm.issued_date ? new Date(documentForm.issued_date) : null}
                   onChange={(date) => setDocumentForm({ ...documentForm, issued_date: date?.toISOString().split('T')[0] })}
-                  renderInput={(params) => <TextField {...params} fullWidth />}
+                  slotProps={{ textField: { fullWidth: true } }}
                 />
-              </LocalizationProvider>
+              </LocalizedDateProvider>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <LocalizationProvider dateAdapter={AdapterDateFns}>
+              <LocalizedDateProvider>
                 <DatePicker
                   label={t('suppliers.expiryDate')}
                   value={documentForm.expiry_date ? new Date(documentForm.expiry_date) : null}
                   onChange={(date) => setDocumentForm({ ...documentForm, expiry_date: date?.toISOString().split('T')[0] })}
-                  renderInput={(params) => <TextField {...params} fullWidth />}
+                  slotProps={{ textField: { fullWidth: true } }}
                 />
-              </LocalizationProvider>
+              </LocalizedDateProvider>
             </Grid>
             <Grid item xs={12}>
               <TextField
@@ -2270,7 +2269,7 @@ const SuppliersPage: React.FC = () => {
   }
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
+    <LocalizedDateProvider>
       <Box sx={{ p: 3 }}>
         {/* Header */}
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -2738,7 +2737,7 @@ const SuppliersPage: React.FC = () => {
         {renderViewDialog()}
         {renderDeleteDialog()}
       </Box>
-    </LocalizationProvider>
+    </LocalizedDateProvider>
   );
 };
 

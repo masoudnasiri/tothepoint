@@ -30,13 +30,16 @@ import {
   Delete as DeleteIcon,
   Receipt as ReceiptIcon,
 } from '@mui/icons-material';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizedDateProvider } from './LocalizedDateProvider.tsx';
 import { deliveryOptionsAPI, currencyAPI } from '../services/api.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { CurrencySelector } from './CurrencySelector.tsx';
 import { CurrencyWithRates } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface DeliveryOption {
   id?: number;
@@ -64,6 +67,11 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
   itemCode,
   availableDeliveryDates,
 }) => {
+  const { i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  
   const [options, setOptions] = useState<DeliveryOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -219,14 +227,23 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
     }
   };
 
-  const formatDate = (dateString: string | null) => {
+  const formatDate = useMemo(() => (dateString: string | null) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      if (isFa) {
+        return jalaliFormat(d, 'yyyy/MM/dd');
+      } else {
+        return gregorianFormat(d, 'MMM dd, yyyy');
+      }
+    } catch {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+  }, [isFa]);
 
   const getInvoiceTimingDisplay = (option: DeliveryOption) => {
     if (option.invoice_timing_type === 'ABSOLUTE') {
@@ -406,7 +423,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
           </FormControl>
 
           {invoiceTimingType === 'ABSOLUTE' ? (
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <LocalizedDateProvider>
               <DatePicker
                 label="Invoice Issue Date *"
                 value={invoiceIssueDate}
@@ -418,7 +435,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
                   } 
                 }}
               />
-            </LocalizationProvider>
+            </LocalizedDateProvider>
           ) : (
             <TextField
               fullWidth

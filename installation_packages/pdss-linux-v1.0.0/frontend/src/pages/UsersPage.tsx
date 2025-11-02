@@ -36,10 +36,25 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { usersAPI } from '../services/api.ts';
 import { User } from '../types/index.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 export const UsersPage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString();
+    }
+  }, [isFa]);
+  
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -169,7 +184,7 @@ export const UsersPage: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   if (loading) {

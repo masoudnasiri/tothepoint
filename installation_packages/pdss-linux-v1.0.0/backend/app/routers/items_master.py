@@ -4,7 +4,7 @@ Centralized catalog of all items used across projects
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from sqlalchemy.exc import IntegrityError
@@ -12,9 +12,17 @@ import re
 import logging
 
 from app.database import get_db
+from app.crud import log_audit
 from app.auth import get_current_user, require_role
-from app.models import User, ItemMaster
-from app.schemas import ItemMaster as ItemMasterSchema, ItemMasterCreate, ItemMasterUpdate
+from app.models import User, ItemMaster, ItemSubItem
+from app.schemas import (
+    ItemMaster as ItemMasterSchema,
+    ItemMasterCreate,
+    ItemMasterUpdate,
+    ItemSubItem as ItemSubItemSchema,
+    ItemSubItemCreate,
+    ItemSubItemUpdate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +129,7 @@ async def get_item_master(
 @router.post("/", response_model=ItemMasterSchema, status_code=status.HTTP_201_CREATED)
 async def create_item_master(
     item_data: ItemMasterCreate,
+    request: Request,
     current_user: User = Depends(require_role(["admin", "pm", "pmo", "finance"])),
     db: AsyncSession = Depends(get_db)
 ):
@@ -153,6 +162,7 @@ async def create_item_master(
         company=item_data.company,
         item_name=item_data.item_name,
         model=item_data.model,
+        part_number=item_data.part_number,
         specifications=item_data.specifications,
         category=item_data.category,
         unit=item_data.unit,
@@ -165,6 +175,22 @@ async def create_item_master(
         await db.commit()
         await db.refresh(master_item)
         logger.info(f"Created master item: {item_code} by user {current_user.username}")
+        # Audit
+        try:
+            client_host = request.client.host if request and request.client else None
+            ua = request.headers.get("user-agent") if request else None
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="ITEM_MASTER_CREATE",
+                entity_type="item_master",
+                entity_id=master_item.id,
+                details={"item_code": master_item.item_code, "company": master_item.company, "item_name": master_item.item_name},
+                ip_address=client_host,
+                user_agent=ua,
+            )
+        except Exception:
+            pass
         return master_item
     except IntegrityError as e:
         await db.rollback()
@@ -179,6 +205,7 @@ async def create_item_master(
 async def update_item_master(
     item_id: int,
     item_update: ItemMasterUpdate,
+    request: Request,
     current_user: User = Depends(require_role(["admin", "pm", "pmo", "finance"])),
     db: AsyncSession = Depends(get_db)
 ):
@@ -234,6 +261,22 @@ async def update_item_master(
         await db.commit()
         await db.refresh(item)
         logger.info(f"Updated master item #{item_id}: {item.item_code}")
+        # Audit
+        try:
+            client_host = request.client.host if request and request.client else None
+            ua = request.headers.get("user-agent") if request else None
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="ITEM_MASTER_UPDATE",
+                entity_type="item_master",
+                entity_id=item.id,
+                details=item_update.dict(exclude_unset=True),
+                ip_address=client_host,
+                user_agent=ua,
+            )
+        except Exception:
+            pass
         return item
     except IntegrityError as e:
         await db.rollback()
@@ -247,6 +290,7 @@ async def update_item_master(
 @router.delete("/{item_id}")
 async def delete_item_master(
     item_id: int,
+    request: Request,
     current_user: User = Depends(require_role(["admin"])),
     db: AsyncSession = Depends(get_db)
 ):
@@ -287,6 +331,22 @@ async def delete_item_master(
     await db.commit()
     
     logger.info(f"Deleted master item #{item_id}: {item.item_code}")
+    # Audit
+    try:
+        client_host = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="ITEM_MASTER_DELETE",
+            entity_type="item_master",
+            entity_id=item_id,
+            details={"item_code": item.item_code},
+            ip_address=client_host,
+            user_agent=ua,
+        )
+    except Exception:
+        pass
     
     return {"message": "Master item deleted successfully", "item_id": item_id}
 
@@ -338,4 +398,94 @@ async def get_item_by_code(
         )
     
     return item
+
+
+# ----------------------
+# Sub-Items CRUD (nested)
+# ----------------------
+
+@router.post("/{item_id}/subitems", response_model=ItemSubItemSchema, status_code=status.HTTP_201_CREATED)
+async def create_sub_item(
+    item_id: int,
+    payload: ItemSubItemCreate,
+    current_user: User = Depends(require_role(["admin", "pm", "pmo", "procurement"])),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a sub-item under an items_master entry"""
+    # Ensure parent exists
+    result = await db.execute(select(ItemMaster).where(ItemMaster.id == item_id))
+    master = result.scalar_one_or_none()
+    if not master:
+        raise HTTPException(status_code=404, detail="Master item not found")
+
+    sub = ItemSubItem(
+        item_master_id=item_id,
+        name=payload.name,
+        description=payload.description,
+        part_number=payload.part_number,
+    )
+    db.add(sub)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
+@router.get("/{item_id}/subitems", response_model=List[ItemSubItemSchema])
+async def list_sub_items(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List sub-items for a master item"""
+    result = await db.execute(
+        select(ItemSubItem).where(ItemSubItem.item_master_id == item_id).order_by(ItemSubItem.id)
+    )
+    return result.scalars().all()
+
+
+@router.put("/{item_id}/subitems/{subitem_id}", response_model=ItemSubItemSchema)
+async def update_sub_item(
+    item_id: int,
+    subitem_id: int,
+    payload: ItemSubItemUpdate,
+    current_user: User = Depends(require_role(["admin", "pm", "pmo", "procurement"])),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(ItemSubItem).where(
+            ItemSubItem.id == subitem_id,
+            ItemSubItem.item_master_id == item_id,
+        )
+    )
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Sub-item not found")
+
+    update_data = payload.dict(exclude_unset=True)
+    for k, v in update_data.items():
+        setattr(sub, k, v)
+    await db.commit()
+    await db.refresh(sub)
+    return sub
+
+
+@router.delete("/{item_id}/subitems/{subitem_id}")
+async def delete_sub_item(
+    item_id: int,
+    subitem_id: int,
+    current_user: User = Depends(require_role(["admin"])),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(ItemSubItem).where(
+            ItemSubItem.id == subitem_id,
+            ItemSubItem.item_master_id == item_id,
+        )
+    )
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Sub-item not found")
+    await db.delete(sub)
+    await db.commit()
+    return {"message": "Sub-item deleted"}
 

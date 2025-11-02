@@ -5,6 +5,7 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "edit": "Edit",
+    "name": "Name",
     "add": "Add",
     "create": "Create",
     "update": "Update",
@@ -26,7 +27,8 @@
     "previous": "Previous",
     "all": "All",
     "none": "None",
-    "note": "Note"
+    "note": "Note",
+    "description": "Description"
   },
   "navigation": {
     "dashboard": "Dashboard",
@@ -162,6 +164,8 @@
     "unit": "Unit",
     "description": "Description",
     "deliveryDateOptions": "Delivery Date Options (at least 1 required)",
+    "subItemsBreakdown": "Sub-Items Breakdown",
+    "partNumber": "Part Number",
     "primaryOption": "Primary option",
     "option": "Option",
     "cannotRemoveLastDate": "Cannot remove last date",
@@ -297,7 +301,9 @@
     "addRemoveProjectManagers": "Add or remove Project Managers. Changes are applied when you click \"Update & Save Assignments\".",
     "failedToLoadProjects": "Failed to load projects",
     "failedToLoadPMUsers": "Failed to load PM users",
-    "failedToLoadAssignments": "Failed to load assignments"
+    "failedToLoadAssignments": "Failed to load assignments",
+    "projectManager": "Project Manager",
+    "noProjectManager": "No PM assigned"
   },
   "items": {
     "title": "Project Items",
@@ -317,6 +323,7 @@
   },
   "procurement": {
     "title": "Procurement Options",
+    "subItems": "Sub-Items",
     "summary": "Procurement Summary",
     "totalItems": "Total Items",
     "finalizedOptions": "Finalized Options",
@@ -1321,6 +1328,11 @@
     "ton": "Ton",
     "squareMeter": "Square Meter",
     "itemsMasterDescription": "📦 Items Master: Define items once here with auto-generated unique codes (COMPANY-NAME-MODEL). These items can then be added to any project.",
+    "partNumber": "Part Number",
+    "partNumberPlaceholder": "e.g., PN-ABC-1234",
+    "subItems": "Sub-Items",
+    "noSubItems": "No sub-items yet.",
+    "addSubItem": "Add Sub-Item",
     "searchPlaceholder": "Search by code, company, name, or model...",
     "itemCode": "Item Code",
     "company": "Company",

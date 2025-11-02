@@ -38,10 +38,25 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { itemsMasterAPI } from '../services/api.ts';
 import { ItemMaster, ItemMasterCreate } from '../types/index.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 export const ItemsMasterPage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDateTime = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd HH:mm') : gregorianFormat(d, 'yyyy-MM-dd HH:mm');
+    } catch {
+      return new Date(dateString).toLocaleString();
+    }
+  }, [isFa]);
+  
   const [items, setItems] = useState<ItemMaster[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -58,10 +73,16 @@ export const ItemsMasterPage: React.FC = () => {
     company: '',
     item_name: '',
     model: '',
+    part_number: '',
     category: '',
     unit: 'piece',
     description: '',
   });
+  // Sub-items state
+  const [subItems, setSubItems] = useState<any[]>([]);
+  const [subItemForm, setSubItemForm] = useState<{ name: string; description?: string; part_number?: string }>({ name: '', description: '', part_number: '' });
+  const [subItemsLoading, setSubItemsLoading] = useState(false);
+  const [draftSubItems, setDraftSubItems] = useState<Array<{ name: string; description?: string; part_number?: string }>>([]);
 
   const canEdit = user?.role === 'admin' || user?.role === 'pm' || user?.role === 'pmo' || user?.role === 'finance';
 
@@ -94,6 +115,19 @@ export const ItemsMasterPage: React.FC = () => {
     }
   };
 
+  const fetchSubItems = async (itemId: number) => {
+    setSubItemsLoading(true);
+    try {
+      const res = await itemsMasterAPI.listSubItems(itemId);
+      setSubItems(res.data || []);
+    } catch (e) {
+      // noop
+      setSubItems([]);
+    } finally {
+      setSubItemsLoading(false);
+    }
+  };
+
   const previewItemCode = async () => {
     try {
       const response = await itemsMasterAPI.previewCode(
@@ -117,7 +151,16 @@ export const ItemsMasterPage: React.FC = () => {
 
   const handleCreateItem = async () => {
     try {
-      await itemsMasterAPI.create(formData);
+      const res = await itemsMasterAPI.create(formData);
+      const created = res.data;
+      // If user drafted sub-items during create, persist them now
+      if (created?.id && draftSubItems.length > 0) {
+        try {
+          await Promise.all(draftSubItems.map(d => itemsMasterAPI.createSubItem(created.id, d)));
+        } catch (e) {
+          console.error('Failed creating some sub-items', e);
+        }
+      }
       setCreateDialogOpen(false);
       resetForm();
       fetchItems();
@@ -165,6 +208,8 @@ export const ItemsMasterPage: React.FC = () => {
     });
     setPreviewedCode('');
     setCodeExists(false);
+    setDraftSubItems([]);
+    setSubItemForm({ name: '', description: '', part_number: '' });
   };
 
   const filteredItems = items.filter(item => {
@@ -217,6 +262,17 @@ export const ItemsMasterPage: React.FC = () => {
         value={formData.model}
         onChange={(e) => setFormData({ ...formData, model: e.target.value })}
         placeholder={t('itemsMaster.modelPlaceholder')}
+        sx={{ mb: 2 }}
+      />
+
+      <TextField
+        margin="dense"
+        label={t('itemsMaster.partNumber') || 'Part Number'}
+        fullWidth
+        variant="outlined"
+        value={formData.part_number || ''}
+        onChange={(e) => setFormData({ ...formData, part_number: e.target.value })}
+        placeholder={t('itemsMaster.partNumberPlaceholder') || 'e.g., PN-ABC-1234'}
         sx={{ mb: 2 }}
       />
 
@@ -447,6 +503,7 @@ export const ItemsMasterPage: React.FC = () => {
                           size="small"
                           onClick={() => {
                             setSelectedItem(item);
+                            fetchSubItems(item.id);
                             setViewDialogOpen(true);
                           }}
                           title="View Item"
@@ -462,11 +519,13 @@ export const ItemsMasterPage: React.FC = () => {
                               company: item.company,
                               item_name: item.item_name,
                               model: item.model || '',
+                              part_number: (item as any).part_number || '',
                               category: item.category || '',
                               unit: item.unit,
                               description: item.description || '',
                             });
                             setEditDialogOpen(true);
+                            fetchSubItems(item.id);
                           }}
                           title="Edit Item"
                         >
@@ -506,6 +565,55 @@ export const ItemsMasterPage: React.FC = () => {
         <DialogTitle>{t('itemsMaster.createNewMasterItem')}</DialogTitle>
         <DialogContent>
           {renderFormFields()}
+
+        {/* Sub-Items Draft (Create Mode) */}
+        <Box sx={{ mt: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            {t('itemsMaster.subItems')}
+          </Typography>
+          {/* Existing drafted sub-items list */}
+          <Box sx={{ display: 'grid', gap: 1, mb: 1 }}>
+            {draftSubItems.length > 0 ? (
+              draftSubItems.map((si, idx) => (
+                <Paper key={`${si.name}-${idx}`} sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box flexGrow={1}>
+                    <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                    <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                    {si.description && (
+                      <Typography variant="caption" display="block">{si.description}</Typography>
+                    )}
+                  </Box>
+                  <IconButton size="small" color="error" onClick={() => {
+                    setDraftSubItems(draftSubItems.filter((_, i) => i !== idx));
+                  }}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Paper>
+              ))
+            ) : (
+              <Typography variant="body2" color="text.secondary">{t('itemsMaster.noSubItems')}</Typography>
+            )}
+          </Box>
+
+          {/* Add new draft sub-item */}
+          <Box sx={{ display: 'grid', gap: 1 }}>
+            <Typography variant="subtitle2">{t('itemsMaster.addSubItem')}</Typography>
+            <TextField size="small" label={t('common.name')} value={subItemForm.name} onChange={(e) => setSubItemForm({ ...subItemForm, name: e.target.value })} />
+            <TextField size="small" label={t('itemsMaster.partNumber')} value={subItemForm.part_number || ''} onChange={(e) => setSubItemForm({ ...subItemForm, part_number: e.target.value })} />
+            <TextField size="small" label={t('common.description')} value={subItemForm.description || ''} onChange={(e) => setSubItemForm({ ...subItemForm, description: e.target.value })} />
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!subItemForm.name}
+              onClick={() => {
+                setDraftSubItems([...draftSubItems, { ...subItemForm }]);
+                setSubItemForm({ name: '', description: '', part_number: '' });
+              }}
+            >
+              {t('common.add')}
+            </Button>
+          </Box>
+        </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
@@ -544,6 +652,84 @@ export const ItemsMasterPage: React.FC = () => {
             </Alert>
           )}
           {renderFormFields()}
+
+          {/* Sub-Items Management (Edit Only) */}
+          {selectedItem && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                {t('itemsMaster.subItems')}
+              </Typography>
+              <Box sx={{ mb: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => fetchSubItems(selectedItem.id)}
+                  startIcon={<RefreshIcon />}
+                >
+                  {t('common.refresh')}
+                </Button>
+              </Box>
+              <Box sx={{ display: 'grid', gap: 1 }}>
+                {subItemsLoading ? (
+                  <CircularProgress size={20} />
+                ) : (subItems && subItems.length > 0 ? (
+                  subItems.map((si) => (
+                    <Paper key={si.id} sx={{ p: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Box flexGrow={1}>
+                        <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                        {si.description && (
+                          <Typography variant="caption" display="block">{si.description}</Typography>
+                        )}
+                      </Box>
+                      {canEdit && (
+                        <>
+                          <IconButton size="small" onClick={async () => {
+                            const name = prompt('Name', si.name) || si.name;
+                            const part = prompt('Part Number', si.part_number || '') || si.part_number || '';
+                            const desc = prompt('Description', si.description || '') || si.description || '';
+                            await itemsMasterAPI.updateSubItem(selectedItem.id, si.id, { name, part_number: part, description: desc });
+                            fetchSubItems(selectedItem.id);
+                          }}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton size="small" color="error" onClick={async () => {
+                            if (!window.confirm('Delete this sub-item?')) return;
+                            await itemsMasterAPI.deleteSubItem(selectedItem.id, si.id);
+                            fetchSubItems(selectedItem.id);
+                          }}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </>
+                      )}
+                    </Paper>
+                  ))
+                ) : (
+                  <Typography variant="body2" color="text.secondary">{t('itemsMaster.noSubItems')}</Typography>
+                ))}
+              </Box>
+
+              {canEdit && (
+                <Box sx={{ mt: 2, display: 'grid', gap: 1 }}>
+                  <TextField size="small" label={t('common.name')} value={subItemForm.name} onChange={(e) => setSubItemForm({ ...subItemForm, name: e.target.value })} />
+                  <TextField size="small" label={t('itemsMaster.partNumber')} value={subItemForm.part_number || ''} onChange={(e) => setSubItemForm({ ...subItemForm, part_number: e.target.value })} />
+                  <TextField size="small" label={t('common.description')} value={subItemForm.description || ''} onChange={(e) => setSubItemForm({ ...subItemForm, description: e.target.value })} />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={!subItemForm.name}
+                    onClick={async () => {
+                      await itemsMasterAPI.createSubItem(selectedItem.id, subItemForm);
+                      setSubItemForm({ name: '', description: '', part_number: '' });
+                      fetchSubItems(selectedItem.id);
+                    }}
+                  >
+                    {t('common.add')}
+                  </Button>
+                </Box>
+              )}
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
@@ -605,6 +791,17 @@ export const ItemsMasterPage: React.FC = () => {
                 </Box>
               )}
 
+              {(selectedItem as any).part_number && (
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                    {t('itemsMaster.partNumber') || 'Part Number'}
+                  </Typography>
+                  <Typography variant="body1">
+                    {(selectedItem as any).part_number}
+                  </Typography>
+                </Box>
+              )}
+
               {selectedItem.category && (
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -647,8 +844,32 @@ export const ItemsMasterPage: React.FC = () => {
 
               <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid', borderColor: 'divider' }}>
                 <Typography variant="caption" color="text.secondary">
-                  {t('itemsMaster.created')}: {new Date(selectedItem.created_at).toLocaleString()}
+                  {t('itemsMaster.created')}: {formatDisplayDateTime(selectedItem.created_at)}
                 </Typography>
+              </Box>
+
+              {/* Sub-Items (Read-only in View) */}
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  {t('itemsMaster.subItems')}
+                </Typography>
+                <Box sx={{ display: 'grid', gap: 1 }}>
+                  {subItemsLoading ? (
+                    <CircularProgress size={20} />
+                  ) : (subItems && subItems.length > 0 ? (
+                    subItems.map((si) => (
+                      <Paper key={si.id} sx={{ p: 1.5 }}>
+                        <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                        {si.description && (
+                          <Typography variant="caption" display="block">{si.description}</Typography>
+                        )}
+                      </Paper>
+                    ))
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t('itemsMaster.noSubItems')}</Typography>
+                  ))}
+                </Box>
               </Box>
             </Box>
           )}

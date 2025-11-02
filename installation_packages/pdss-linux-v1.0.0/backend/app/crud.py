@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models import (
     User, Project, ProjectAssignment, ProjectPhase, ProjectItem, 
     ProcurementOption, BudgetData, OptimizationResult, DecisionFactorWeight,
-    DeliveryOption, FinalizedDecision
+    DeliveryOption, FinalizedDecision, ItemSubItem, ProjectItemSubItem, AuditLog
 )
 from app.schemas import (
     UserCreate, UserUpdate, ProjectCreate, ProjectUpdate,
@@ -24,6 +24,34 @@ from app.auth import get_password_hash
 import logging
 
 logger = logging.getLogger(__name__)
+async def log_audit(
+    db: AsyncSession,
+    *,
+    user_id: Optional[int],
+    action: str,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[int] = None,
+    details: Optional[Dict[str, Any]] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+) -> None:
+    """Write an audit log row. Non-blocking best-effort (errors ignored)."""
+    try:
+        log_row = AuditLog(
+            user_id=user_id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details=details,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.add(log_row)
+        await db.commit()
+    except Exception as e:
+        # Don't break main flow due to audit failures
+        logger.warning(f"Audit log write failed: {e}")
+
 
 
 # User CRUD operations
@@ -200,11 +228,34 @@ async def create_project_item(db: AsyncSession, item: ProjectItemCreate) -> Proj
         item_dict['item_code'] = master_item.item_code
         item_dict['item_name'] = master_item.item_name
     
+    # Extract sub-items quantities if present
+    sub_items_payload = item_dict.pop('sub_items', None)
+
     # Create project item
     db_item = ProjectItem(**item_dict)
     db.add(db_item)
     await db.commit()
     await db.refresh(db_item)
+
+    # Create project sub-item rows
+    if sub_items_payload:
+        for entry in sub_items_payload:
+            sub_id = entry.get('sub_item_id')
+            qty = entry.get('quantity', 0)
+            if sub_id is None:
+                continue
+            # Ensure sub-item exists
+            exists_result = await db.execute(select(ItemSubItem).where(ItemSubItem.id == sub_id))
+            if exists_result.scalar_one_or_none() is None:
+                continue
+            db_rel = ProjectItemSubItem(
+                project_item_id=db_item.id,
+                item_subitem_id=sub_id,
+                quantity=qty or 0,
+            )
+            db.add(db_rel)
+        await db.commit()
+
     return db_item
 
 
@@ -236,10 +287,33 @@ async def update_project_item(db: AsyncSession, item_id: int, item_update: Proje
     if not update_data:
         return await get_project_item(db, item_id)
     
+    # Pull out sub-items payload if provided
+    sub_items_payload = update_data.pop('sub_items', None)
+
     await db.execute(
         update(ProjectItem).where(ProjectItem.id == item_id).values(**update_data)
     )
     await db.commit()
+
+    if sub_items_payload is not None:
+        # Replace strategy: delete and reinsert
+        await db.execute(delete(ProjectItemSubItem).where(ProjectItemSubItem.project_item_id == item_id))
+        for entry in sub_items_payload:
+            sub_id = entry.get('sub_item_id')
+            qty = entry.get('quantity', 0)
+            if sub_id is None:
+                continue
+            exists_result = await db.execute(select(ItemSubItem).where(ItemSubItem.id == sub_id))
+            if exists_result.scalar_one_or_none() is None:
+                continue
+            db_rel = ProjectItemSubItem(
+                project_item_id=item_id,
+                item_subitem_id=sub_id,
+                quantity=qty or 0,
+            )
+            db.add(db_rel)
+        await db.commit()
+
     return await get_project_item(db, item_id)
 
 

@@ -75,6 +75,7 @@ const navigationItems: NavigationItem[] = [
   { textKey: 'navigation.optimization', icon: <Psychology />, path: '/optimization-enhanced', roles: ['admin', 'finance'] },
   { textKey: 'navigation.decisions', icon: <CheckCircle />, path: '/decisions', roles: ['admin', 'finance'] },
   { textKey: 'navigation.users', icon: <People />, path: '/users', roles: ['admin'] },
+  { textKey: 'navigation.auditLogs', icon: <Info />, path: '/audit-logs', roles: ['admin'] },
   { 
     textKey: 'navigation.baseInformation', 
     icon: <Info />, 

@@ -42,9 +42,26 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { financeAPI, decisionsAPI, procurementAPI } from '../services/api.ts';
 import { OptimizationResult, OptimizationRunResponse, ProcurementOption } from '../types/index.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
+import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 export const OptimizationPage: React.FC = () => {
   const { user } = useAuth();
+  const { i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDateTime = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd HH:mm') : gregorianFormat(d, 'yyyy-MM-dd HH:mm');
+    } catch {
+      return new Date(dateString).toLocaleString();
+    }
+  }, [isFa]);
+  
   const [results, setResults] = useState<OptimizationResult[]>([]);
   const [editedResults, setEditedResults] = useState<Record<number, OptimizationResult>>({});
   const [removedResultIds, setRemovedResultIds] = useState<Set<number>>(new Set());
@@ -262,7 +279,7 @@ export const OptimizationPage: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+    return formatDisplayDateTime(dateString);
   };
 
   const getStatusColor = (status: string) => {

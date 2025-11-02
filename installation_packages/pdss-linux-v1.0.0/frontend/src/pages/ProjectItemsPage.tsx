@@ -46,23 +46,55 @@ import {
   Lock as LockedIcon,
 } from '@mui/icons-material';
 import { DeliveryOptionsManager } from '../components/DeliveryOptionsManager.tsx';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import LocalizedDateProvider from '../components/LocalizedDateProvider.tsx';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { useParams, useNavigate } from 'react-router-dom';
 import { itemsAPI, itemsMasterAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
-import { ProjectItem, ProjectItemCreate, ItemMaster } from '../types/index.ts';
+import { ProjectItem, ProjectItemCreate, ItemMaster, ItemSubItem } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 
 export const ProjectItemsPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      if (isFa) {
+        return jalaliFormat(d, 'yyyy/MM/dd');
+      } else {
+        return gregorianFormat(d, 'MMM dd, yyyy');
+      }
+    } catch {
+      return new Date(dateString).toLocaleDateString('en-US', {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    }
+  }, [isFa]);
+  
+  const formatDisplayDateTime = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd HH:mm') : gregorianFormat(d, 'yyyy-MM-dd HH:mm');
+    } catch {
+      return new Date(dateString).toLocaleString();
+    }
+  }, [isFa]);
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [masterItems, setMasterItems] = useState<ItemMaster[]>([]);
   const [selectedMasterItem, setSelectedMasterItem] = useState<ItemMaster | null>(null);
+  const [masterSubItems, setMasterSubItems] = useState<ItemSubItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -163,7 +195,11 @@ export const ProjectItemsPage: React.FC = () => {
 
   const handleCreateItem = async () => {
     try {
-      await itemsAPI.create(formData);
+      // Ensure we send all sub-items (default 0 if not edited)
+      const subItemsMap = new Map((formData.sub_items || []).map(s => [s.sub_item_id, s.quantity]));
+      const completeSubItems = masterSubItems.map(si => ({ sub_item_id: si.id, quantity: subItemsMap.get(si.id) ?? 0 }));
+      const payload = { ...formData, sub_items: completeSubItems } as any;
+      await itemsAPI.create(payload);
       setCreateDialogOpen(false);
       resetForm();
       fetchItems();
@@ -176,7 +212,10 @@ export const ProjectItemsPage: React.FC = () => {
     if (!selectedItem) return;
     
     try {
-      await itemsAPI.update(selectedItem.id, formData);
+      const subItemsMap = new Map((formData.sub_items || []).map(s => [s.sub_item_id, s.quantity]));
+      const completeSubItems = masterSubItems.map(si => ({ sub_item_id: si.id, quantity: subItemsMap.get(si.id) ?? 0 }));
+      const payload = { ...formData, sub_items: completeSubItems } as any;
+      await itemsAPI.update(selectedItem.id, payload);
       setEditDialogOpen(false);
       setSelectedItem(null);
       resetForm();
@@ -242,11 +281,15 @@ export const ProjectItemsPage: React.FC = () => {
     const masterItem = masterItems.find(m => m.id === masterItemId);
     if (masterItem) {
       setSelectedMasterItem(masterItem);
+      // Load sub-items for this master item
+      itemsMasterAPI.listSubItems(masterItem.id).then(res => setMasterSubItems(res.data || [])).catch(() => setMasterSubItems([]));
       setFormData({
         ...formData,
         master_item_id: masterItem.id,
         item_code: masterItem.item_code,
         item_name: masterItem.item_name,
+        // Initialize sub_items quantities to zero for all available sub-items
+        sub_items: [],
       });
     }
   };
@@ -402,6 +445,11 @@ export const ProjectItemsPage: React.FC = () => {
           <Typography variant="body2">
             <strong>{t('projectItems.unit')}:</strong> {selectedMasterItem.unit}
           </Typography>
+          {(selectedMasterItem as any).part_number && (
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              <strong>{t('projectItems.partNumber') || 'Part Number'}:</strong> {(selectedMasterItem as any).part_number}
+            </Typography>
+          )}
         </Paper>
       )}
 
@@ -415,6 +463,45 @@ export const ProjectItemsPage: React.FC = () => {
         onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
         sx={{ mb: 2 }}
       />
+
+      {/* Sub-Items Quantities (if any) */}
+      {selectedMasterItem && masterSubItems.length > 0 && (
+        <Box sx={{ mb: 2, p: 2, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            {t('projectItems.subItemsBreakdown') || 'Sub-Items Breakdown'}
+          </Typography>
+          {masterSubItems.map((si) => {
+            const existing = (formData.sub_items || []).find(s => s.sub_item_id === si.id);
+            const qty = existing ? existing.quantity : 0;
+            return (
+              <Box key={si.id} sx={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 1, alignItems: 'center', mb: 1 }}>
+                <Box>
+                  <Typography variant="body2" fontWeight="medium">{si.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                </Box>
+                <TextField
+                  size="small"
+                  type="number"
+                  label={t('projectItems.quantity')}
+                  value={qty}
+                  onChange={(e) => {
+                    const newQty = Math.max(0, parseInt(e.target.value || '0'));
+                    const list = [...(formData.sub_items || [])];
+                    const idx = list.findIndex(x => x.sub_item_id === si.id);
+                    if (idx >= 0) {
+                      list[idx] = { sub_item_id: si.id, quantity: newQty };
+                    } else {
+                      list.push({ sub_item_id: si.id, quantity: newQty });
+                    }
+                    setFormData({ ...formData, sub_items: list });
+                  }}
+                  inputProps={{ min: 0 }}
+                />
+              </Box>
+            );
+          })}
+        </Box>
+      )}
       
       {/* Delivery Options Manager */}
       <Box sx={{ mb: 2, p: 2, border: '1px solid #ddd', borderRadius: 1 }}>
@@ -427,12 +514,7 @@ export const ProjectItemsPage: React.FC = () => {
           {formData.delivery_options.map((dateStr, index) => (
             <ListItem key={index} sx={{ bgcolor: 'background.paper', mb: 0.5, borderRadius: 1 }}>
               <ListItemText
-                primary={new Date(dateStr).toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                })}
+                primary={formatDisplayDate(dateStr)}
                 secondary={index === 0 ? t('projectItems.primaryOption') : `${t('projectItems.option')} ${index + 1}`}
               />
               <ListItemSecondaryAction>
@@ -452,7 +534,7 @@ export const ProjectItemsPage: React.FC = () => {
 
         {/* Add new delivery date */}
         <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <DatePicker
               label={t('projectItems.addDeliveryDate')}
               value={newDeliveryDate}
@@ -464,7 +546,7 @@ export const ProjectItemsPage: React.FC = () => {
                 }
               }}
             />
-          </LocalizationProvider>
+          </LocalizedDateProvider>
           <Button
             variant="outlined"
             onClick={addDeliveryDate}
@@ -686,7 +768,7 @@ export const ProjectItemsPage: React.FC = () => {
                     {item.delivery_options && item.delivery_options.length > 0 ? (
                       <>
                         <Typography variant="body2">
-                          {new Date(item.delivery_options[0]).toLocaleDateString()}
+                          {formatDisplayDate(item.delivery_options[0])}
                         </Typography>
                         {item.delivery_options.length > 1 && (
                           <Chip
@@ -769,13 +851,22 @@ export const ProjectItemsPage: React.FC = () => {
                         delivery_options: item.delivery_options || [],
                         external_purchase: item.external_purchase,
                         description: item.description || '',
+                        // Prefill existing sub-item quantities if present
+                        sub_items: ((item as any).sub_items || []).map((si: any) => ({
+                          sub_item_id: si.sub_item_id,
+                          quantity: si.quantity ?? 0,
+                        })),
                       });
                       
                       // Load the master item for display
                       if ((item as any).master_item_id) {
-                        itemsMasterAPI.get((item as any).master_item_id).then(response => {
+                        const mid = (item as any).master_item_id as number;
+                        itemsMasterAPI.get(mid).then(response => {
                           setSelectedMasterItem(response.data);
                         }).catch(err => console.error('Failed to load master item'));
+                        // Also load the sub-items for this master to render the breakdown
+                        itemsMasterAPI.listSubItems(mid).then(res => setMasterSubItems(res.data || []))
+                          .catch(() => setMasterSubItems([]));
                       }
                       
                       setEditDialogOpen(true);
@@ -1003,6 +1094,32 @@ export const ProjectItemsPage: React.FC = () => {
                   <Typography variant="h6">{selectedItem.quantity}</Typography>
                 </Paper>
 
+                {/* Sub-Items Breakdown (read-only) */}
+                <Paper elevation={1} sx={{ p: 2 }}>
+                  <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                    {t('projectItems.subItemsBreakdown')}
+                  </Typography>
+                  {(selectedItem as any).sub_items && (selectedItem as any).sub_items.length > 0 ? (
+                    <Box sx={{ display: 'grid', gap: 1, mt: 1 }}>
+                      {(selectedItem as any).sub_items.map((si: any) => (
+                        <Paper key={si.sub_item_id} elevation={0} sx={{ p: 1.5, bgcolor: 'grey.50', border: '1px solid', borderColor: 'grey.200' }}>
+                          <Typography variant="body2" fontWeight="medium">{si.name || '-'}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {t('projectItems.partNumber')}: {si.part_number || '-'}
+                          </Typography>
+                          <Typography variant="body2" sx={{ mt: 0.5 }}>
+                            {t('projectItems.quantity')}: {si.quantity ?? 0}
+                          </Typography>
+                        </Paper>
+                      ))}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                      {t('itemsMaster.noSubItems')}
+                    </Typography>
+                  )}
+                </Paper>
+
                 {selectedItem.description && (
                   <Paper elevation={1} sx={{ p: 2 }}>
                     <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -1079,13 +1196,13 @@ export const ProjectItemsPage: React.FC = () => {
 
                 <Paper elevation={1} sx={{ p: 2, bgcolor: 'grey.50' }}>
                   <Typography variant="caption" color="textSecondary">
-                    {t('projectItems.created')}: {new Date(selectedItem.created_at).toLocaleString()}
+                    {t('projectItems.created')}: {formatDisplayDateTime(selectedItem.created_at)}
                   </Typography>
                   {selectedItem.updated_at && (
                     <>
                       <br />
                       <Typography variant="caption" color="textSecondary">
-                        {t('projectItems.updated')}: {new Date(selectedItem.updated_at).toLocaleString()}
+                        {t('projectItems.updated')}: {formatDisplayDateTime(selectedItem.updated_at)}
                       </Typography>
                     </>
                   )}

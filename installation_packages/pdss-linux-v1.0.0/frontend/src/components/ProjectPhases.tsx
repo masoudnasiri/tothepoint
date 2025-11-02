@@ -20,17 +20,35 @@ import {
   CircularProgress,
 } from '@mui/material';
 import { Edit, Delete, Add } from '@mui/icons-material';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizedDateProvider } from './LocalizedDateProvider.tsx';
 import { phasesAPI } from '../services/api.ts';
 import { ProjectPhase } from '../types/index.ts';
+import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface ProjectPhasesProps {
   projectId: number;
 }
 
 export const ProjectPhases: React.FC<ProjectPhasesProps> = ({ projectId }) => {
+  const { i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (date: Date | string) => {
+    try {
+      const d = typeof date === 'string' 
+        ? (isFa ? jalaliParseISO(date) : gregorianParseISO(date))
+        : date;
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return typeof date === 'string' ? date : date.toLocaleDateString();
+    }
+  }, [isFa]);
+  
   const [phases, setPhases] = useState<ProjectPhase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -185,10 +203,10 @@ export const ProjectPhases: React.FC<ProjectPhasesProps> = ({ projectId }) => {
                       </Typography>
                     </TableCell>
                     <TableCell align="center">
-                      {startDate.toLocaleDateString()}
+                      {formatDisplayDate(startDate)}
                     </TableCell>
                     <TableCell align="center">
-                      {endDate.toLocaleDateString()}
+                      {formatDisplayDate(endDate)}
                     </TableCell>
                     <TableCell align="center">
                       <Typography variant="body2" color="text.secondary">
@@ -233,7 +251,7 @@ export const ProjectPhases: React.FC<ProjectPhasesProps> = ({ projectId }) => {
             placeholder="e.g., Q1-2025 Planning"
             required
           />
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <Box sx={{ mt: 2 }}>
               <DatePicker
                 label="Start Date"
@@ -263,7 +281,7 @@ export const ProjectPhases: React.FC<ProjectPhasesProps> = ({ projectId }) => {
                 }}
               />
             </Box>
-          </LocalizationProvider>
+          </LocalizedDateProvider>
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>Cancel</Button>

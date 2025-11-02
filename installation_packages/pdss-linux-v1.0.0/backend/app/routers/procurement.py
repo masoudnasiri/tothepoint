@@ -3,13 +3,13 @@ Procurement options management endpoints
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, require_procurement
 from app.crud import (
     create_procurement_option, get_procurement_option, get_procurement_options,
-    update_procurement_option, delete_procurement_option, get_unique_item_codes
+    update_procurement_option, delete_procurement_option, get_unique_item_codes, log_audit
 )
 from app.models import User
 from app.schemas import ProcurementOption, ProcurementOptionCreate, ProcurementOptionUpdate, ProcurementOptionWithSupplier, SupplierSummary
@@ -171,7 +171,8 @@ async def list_procurement_options_by_item_code(
 async def create_new_procurement_option(
     option: ProcurementOptionCreate,
     current_user: User = Depends(require_procurement()),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    request: Request = None
 ):
     """Create a new procurement option (procurement specialist only)"""
     import logging
@@ -183,6 +184,22 @@ async def create_new_procurement_option(
         logger.info(f"🔍 DEBUG: Current user: {current_user.username} (role: {current_user.role})")
         
         result = await create_procurement_option(db, option)
+        # Audit
+        try:
+            client_host = request.client.host if request and request.client else None
+            ua = request.headers.get("user-agent") if request else None
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="PROCUREMENT_OPTION_CREATE",
+                entity_type="procurement_option",
+                entity_id=result.id,
+                details={"item_code": result.item_code, "supplier_name": result.supplier_name},
+                ip_address=client_host,
+                user_agent=ua,
+            )
+        except Exception:
+            pass
         logger.info(f"🔍 DEBUG: Successfully created procurement option with ID: {result.id}")
         return result
         
@@ -289,6 +306,17 @@ async def update_procurement_option_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement option not found"
         )
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROCUREMENT_OPTION_UPDATE",
+            entity_type="procurement_option",
+            entity_id=option_id,
+            details=option_update.dict(exclude_unset=True),
+        )
+    except Exception:
+        pass
     return option
 
 
@@ -305,4 +333,14 @@ async def delete_procurement_option_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement option not found"
         )
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROCUREMENT_OPTION_DELETE",
+            entity_type="procurement_option",
+            entity_id=option_id,
+        )
+    except Exception:
+        pass
     return {"message": "Procurement option deleted successfully"}

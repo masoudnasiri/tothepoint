@@ -1,4 +1,7 @@
 import axios from 'axios';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Minimal shim to satisfy type checking in environments without @types/node
+declare const process: any;
 
 // Configure axios
 // Note: In development, the proxy in package.json handles routing to the backend
@@ -90,6 +93,14 @@ export const itemsMasterAPI = {
     return api.get('/items-master/preview/code', { params });
   },
   getByCode: (itemCode: string) => api.get(`/items-master/search/by-code/${itemCode}`),
+  // Sub-items nested under items master
+  listSubItems: (itemId: number) => api.get(`/items-master/${itemId}/subitems`),
+  createSubItem: (itemId: number, data: { name: string; description?: string; part_number?: string }) =>
+    api.post(`/items-master/${itemId}/subitems`, data),
+  updateSubItem: (itemId: number, subItemId: number, data: { name?: string; description?: string; part_number?: string }) =>
+    api.put(`/items-master/${itemId}/subitems/${subItemId}`, data),
+  deleteSubItem: (itemId: number, subItemId: number) =>
+    api.delete(`/items-master/${itemId}/subitems/${subItemId}`),
 };
 
 // Project Items API
@@ -560,6 +571,17 @@ export const suppliersAPI = {
   getCategories: () => api.get('/suppliers/categories/list'),
   getIndustries: () => api.get('/suppliers/industries/list'),
   getCountries: () => api.get('/suppliers/countries/list'),
+};
+
+export const auditLogsAPI = {
+  list: (params: {
+    page?: number;
+    size?: number;
+    user_id?: number;
+    action?: string;
+    entity_type?: string;
+    entity_id?: number;
+  } = {}) => axios.get('/audit-logs/', { params }),
 };
 
 export default api;

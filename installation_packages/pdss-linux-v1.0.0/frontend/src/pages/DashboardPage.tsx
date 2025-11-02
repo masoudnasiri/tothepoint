@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Grid,
   Card,
@@ -49,6 +49,8 @@ import { useAuth } from '../contexts/AuthContext.tsx';
 import { dashboardAPI } from '../services/api.ts';
 import { ProjectFilter } from '../components/ProjectFilter.tsx';
 import { useTranslation } from 'react-i18next';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat } from 'date-fns';
 
 interface CashflowDataPoint {
   month: string;
@@ -109,7 +111,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, subtitle, icon, color
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [forecastData, setForecastData] = useState<CashflowResponse | null>(null);
   const [actualData, setActualData] = useState<CashflowResponse | null>(null);
   const [allData, setAllData] = useState<CashflowResponse | null>(null);
@@ -123,6 +125,32 @@ export const DashboardPage: React.FC = () => {
   const [viewMode, setViewMode] = useState<'forecast' | 'actual' | 'comparison'>('forecast');
   const [currencyDisplayMode, setCurrencyDisplayMode] = useState<'original' | 'unified'>('unified');
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
+
+  // Locale-aware month formatter (must be before any early return)
+  const isFa = i18n.language?.startsWith('fa');
+  const formatMonthLabel = useMemo(() => (value: string) => {
+    if (!isFa) return value;
+    try {
+      const iso = value.length === 7 ? `${value}-01` : value;
+      const d = jalaliParseISO(iso);
+      return jalaliFormat(d, 'yyyy-MM');
+    } catch {
+      return value;
+    }
+  }, [isFa]);
+
+  // Locale-aware date formatter for display dates
+  const formatDisplayDate = useMemo(() => (dateString: string | Date) => {
+    try {
+      const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+      if (isFa) {
+        return jalaliFormat(date, 'yyyy/MM/dd');
+      }
+      return gregorianFormat(date, 'yyyy-MM-dd');
+    } catch {
+      return typeof dateString === 'string' ? dateString : dateString.toISOString().split('T')[0];
+    }
+  }, [isFa]);
 
   useEffect(() => {
     const fetchCashflowData = async () => {
@@ -248,7 +276,8 @@ export const DashboardPage: React.FC = () => {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `cashflow_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const exportDate = formatDisplayDate(new Date());
+      link.download = `cashflow_export_${exportDate}.xlsx`;
       link.click();
       window.URL.revokeObjectURL(url);
     } catch (err) {
@@ -629,6 +658,7 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
+                  tickFormatter={formatMonthLabel}
                   label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
@@ -638,7 +668,7 @@ export const DashboardPage: React.FC = () => {
                 />
                 <Tooltip
                   formatter={(value: any, name: string) => [`${currencyCode} ${value.toLocaleString()}`, name]}
-                  labelFormatter={(label) => `${t('dashboard.month')}: ${label}`}
+                  labelFormatter={(label) => `${t('dashboard.month')}: ${formatMonthLabel(label as string)}`}
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
                 />
                 <Legend />
@@ -694,6 +724,7 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
+                  tickFormatter={formatMonthLabel}
                   label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
@@ -703,6 +734,7 @@ export const DashboardPage: React.FC = () => {
                 />
                 <Tooltip
                   formatter={(value: any) => formatCurrency(value)}
+                  labelFormatter={(label) => `${t('dashboard.month')}: ${formatMonthLabel(label as string)}`}
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
                 />
                 <Legend />
@@ -770,6 +802,7 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
+                  tickFormatter={formatMonthLabel}
                   label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
@@ -779,6 +812,7 @@ export const DashboardPage: React.FC = () => {
                 />
                 <Tooltip
                   formatter={(value: any) => formatCurrency(value)}
+                  labelFormatter={(label) => `${t('dashboard.month')}: ${formatMonthLabel(label as string)}`}
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
                 />
                 <Legend />
@@ -808,6 +842,7 @@ export const DashboardPage: React.FC = () => {
                 <XAxis
                   dataKey="month"
                   tick={{ fontSize: 12 }}
+                  tickFormatter={formatMonthLabel}
                   label={{ value: t('dashboard.month'), position: 'insideBottom', offset: -5 }}
                 />
                 <YAxis
@@ -817,6 +852,7 @@ export const DashboardPage: React.FC = () => {
                 />
                 <Tooltip
                   formatter={(value: any) => formatCurrency(value)}
+                  labelFormatter={(label) => `${t('dashboard.month')}: ${formatMonthLabel(label as string)}`}
                   contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)' }}
                 />
                 <Legend />
@@ -900,7 +936,7 @@ export const DashboardPage: React.FC = () => {
                     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                     .map((row, index) => (
                       <TableRow key={index} hover>
-                        <TableCell>{row.month}</TableCell>
+                        <TableCell>{formatMonthLabel(row.month)}</TableCell>
                         {!isRestricted && (
                           <TableCell align="right" sx={{ color: '#9c27b0' }}>
                             {formatCurrency(row.budget)}

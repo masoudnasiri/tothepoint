@@ -51,6 +51,11 @@ import api, { procurementAPI, excelAPI, deliveryOptionsAPI, itemsAPI, suppliersA
 import { ProcurementOption, ProcurementOptionCreate } from '../types/index.ts';
 import { CurrencySelector } from '../components/CurrencySelector.tsx';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 
 interface DeliveryOption {
   id: number;
@@ -91,7 +96,21 @@ interface Supplier {
 
 export const ProcurementPage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string | null) => {
+    if (!dateString) return '-';
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString();
+    }
+  }, [isFa]);
+  
+  const [projectsMap, setProjectsMap] = useState<Record<number, string>>({});
   const [itemCodes, setItemCodes] = useState<string[]>([]);
   const [itemsWithDetails, setItemsWithDetails] = useState<ItemWithDetails[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -102,6 +121,7 @@ export const ProcurementPage: React.FC = () => {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [viewItemDialogOpen, setViewItemDialogOpen] = useState(false);
+  const [itemSubItems, setItemSubItems] = useState<Array<{ sub_item_id: number; name?: string; part_number?: string; quantity: number }>>([]);
   const [selectedOption, setSelectedOption] = useState<ProcurementOption | null>(null);
   const [projectInfo, setProjectInfo] = useState<any>(null);
   const [itemDeliveryOptions, setItemDeliveryOptions] = useState<DeliveryOption[]>([]);
@@ -127,6 +147,19 @@ export const ProcurementPage: React.FC = () => {
     is_finalized: false,
   });
   const [bulkUpdating, setBulkUpdating] = useState<string | null>(null);
+  // Load all active projects to map id -> name for headers
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await projectsAPI.list();
+        const map: Record<number, string> = {};
+        (res.data || []).forEach((p: any) => { map[p.id] = p.name || p.project_code; });
+        setProjectsMap(map);
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
   const [loadedItemOptions, setLoadedItemOptions] = useState<Record<string, ProcurementOption[]>>({});
   const [loadingItemOptions, setLoadingItemOptions] = useState<Record<string, boolean>>({});
 
@@ -1069,6 +1102,7 @@ export const ProcurementPage: React.FC = () => {
                   {itemDetails && (itemDetails.item_name || itemDetails.description) && (
                     <Typography variant="caption" color="text.secondary">
                       {itemDetails.item_name}
+                      {projectsMap[itemDetails.project_id] && ` — ${projectsMap[itemDetails.project_id]}`}
                       {itemDetails.item_name && itemDetails.description && ' - '}
                       {itemDetails.description && itemDetails.description.substring(0, 80)}
                       {itemDetails.description && itemDetails.description.length > 80 && '...'}
@@ -1097,6 +1131,15 @@ export const ProcurementPage: React.FC = () => {
                       } catch (err) {
                         console.error('Failed to fetch delivery options:', err);
                         setItemDeliveryOptions([]);
+                      }
+
+                      // Fetch sub-items breakdown for this project item
+                      try {
+                        const itemResponse = await itemsAPI.get(itemDetails.project_item_id);
+                        setItemSubItems(itemResponse.data?.sub_items || []);
+                      } catch (err) {
+                        console.error('Failed to fetch sub-items:', err);
+                        setItemSubItems([]);
                       }
                       
                       setViewItemDialogOpen(true);
@@ -1153,7 +1196,7 @@ export const ProcurementPage: React.FC = () => {
                         <TableCell align="center">
                           {option.purchase_date ? (
                             <Chip 
-                              label={new Date(option.purchase_date).toLocaleDateString()} 
+                              label={formatDisplayDate(option.purchase_date)} 
                               size="small" 
                               color="secondary"
                             />
@@ -1164,7 +1207,7 @@ export const ProcurementPage: React.FC = () => {
                         <TableCell align="center">
                           {option.expected_delivery_date ? (
                             <Chip 
-                              label={new Date(option.expected_delivery_date).toLocaleDateString()} 
+                              label={formatDisplayDate(option.expected_delivery_date)} 
                               size="small" 
                               color="primary"
                             />
@@ -1301,6 +1344,13 @@ export const ProcurementPage: React.FC = () => {
                       is_finalized: false,
                     });
                     setSelectedItemDetails(itemDetails || null);
+                    if (itemDetails?.project_item_id) {
+                      itemsAPI.get(itemDetails.project_item_id).then(res => {
+                        setItemSubItems(res.data?.sub_items || []);
+                      }).catch(() => setItemSubItems([]));
+                    } else {
+                      setItemSubItems([]);
+                    }
                     // Pass project_item_id to get project-item-specific delivery options
                     if (itemDetails) {
                       fetchDeliveryOptions(itemDetails.project_item_id);
@@ -1476,7 +1526,7 @@ export const ProcurementPage: React.FC = () => {
               ) : (
                 availableDeliveryOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id}>
-                    {option.delivery_date} - Slot {option.delivery_slot}
+                    {formatDisplayDate(option.delivery_date)} - Slot {option.delivery_slot}
                   </MenuItem>
                 ))
               )}
@@ -1489,33 +1539,33 @@ export const ProcurementPage: React.FC = () => {
           </FormControl>
 
           {/* Purchase Date */}
-          <TextField
-            margin="dense"
-            label={t('procurement.purchaseDate')}
-            type="date"
-            fullWidth
-            variant="outlined"
-            value={formData.purchase_date}
-            onChange={(e) => setFormData({ 
-              ...formData, 
-              purchase_date: e.target.value 
-            })}
-            helperText={t('procurement.purchaseDateHelper')}
-            sx={{ mb: 2 }}
-          />
+          <LocalizedDateProvider>
+            <DatePicker
+              label={t('procurement.purchaseDate')}
+              value={formData.purchase_date ? new Date(formData.purchase_date) : null}
+              onChange={(newValue) => {
+                if (newValue) {
+                  setFormData({ 
+                    ...formData, 
+                    purchase_date: newValue.toISOString().split('T')[0] 
+                  });
+                } else {
+                  setFormData({ ...formData, purchase_date: '' });
+                }
+              }}
+              slotProps={{ textField: { fullWidth: true, margin: 'dense', helperText: t('procurement.purchaseDateHelper'), sx: { mb: 2 } } }}
+            />
+          </LocalizedDateProvider>
 
           {/* Expected Delivery Date (auto-filled) */}
-          <TextField
-            margin="dense"
-            label={t('procurement.expectedDeliveryDate')}
-            type="date"
-            fullWidth
-            variant="outlined"
-            value={formData.expected_delivery_date}
-            disabled
-            helperText="Auto-filled from selected delivery option"
-            sx={{ mb: 2 }}
-          />
+          <LocalizedDateProvider>
+            <DatePicker
+              label={t('procurement.expectedDeliveryDate')}
+              value={formData.expected_delivery_date ? new Date(formData.expected_delivery_date) : null}
+              disabled
+              slotProps={{ textField: { fullWidth: true, margin: 'dense', helperText: 'Auto-filled from selected delivery option', sx: { mb: 2 } } }}
+            />
+          </LocalizedDateProvider>
           <TextField
             margin="dense"
             label={t('procurement.bundleDiscountThreshold')}
@@ -1856,7 +1906,7 @@ export const ProcurementPage: React.FC = () => {
               ) : (
                 availableDeliveryOptions.map((option) => (
                   <MenuItem key={option.id} value={option.id}>
-                    {option.delivery_date} - Slot {option.delivery_slot}
+                    {formatDisplayDate(option.delivery_date)} - Slot {option.delivery_slot}
                   </MenuItem>
                 ))
               )}
@@ -1869,33 +1919,33 @@ export const ProcurementPage: React.FC = () => {
           </FormControl>
 
           {/* Purchase Date */}
-          <TextField
-            margin="dense"
-            label={t('procurement.purchaseDate')}
-            type="date"
-            fullWidth
-            variant="outlined"
-            value={formData.purchase_date}
-            onChange={(e) => setFormData({ 
-              ...formData, 
-              purchase_date: e.target.value 
-            })}
-            helperText={t('procurement.purchaseDateHelper')}
-            sx={{ mb: 2 }}
-          />
+          <LocalizedDateProvider>
+            <DatePicker
+              label={t('procurement.purchaseDate')}
+              value={formData.purchase_date ? new Date(formData.purchase_date) : null}
+              onChange={(newValue) => {
+                if (newValue) {
+                  setFormData({ 
+                    ...formData, 
+                    purchase_date: newValue.toISOString().split('T')[0] 
+                  });
+                } else {
+                  setFormData({ ...formData, purchase_date: '' });
+                }
+              }}
+              slotProps={{ textField: { fullWidth: true, margin: 'dense', helperText: t('procurement.purchaseDateHelper'), sx: { mb: 2 } } }}
+            />
+          </LocalizedDateProvider>
 
           {/* Expected Delivery Date (auto-filled) */}
-          <TextField
-            margin="dense"
-            label={t('procurement.expectedDeliveryDate')}
-            type="date"
-            fullWidth
-            variant="outlined"
-            value={formData.expected_delivery_date}
-            disabled
-            helperText="Auto-filled from selected delivery option"
-            sx={{ mb: 2 }}
-          />
+          <LocalizedDateProvider>
+            <DatePicker
+              label={t('procurement.expectedDeliveryDate')}
+              value={formData.expected_delivery_date ? new Date(formData.expected_delivery_date) : null}
+              disabled
+              slotProps={{ textField: { fullWidth: true, margin: 'dense', helperText: 'Auto-filled from selected delivery option', sx: { mb: 2 } } }}
+            />
+          </LocalizedDateProvider>
           <TextField
             margin="dense"
             label={t('procurement.bundleDiscountThreshold')}
@@ -2149,6 +2199,22 @@ export const ProcurementPage: React.FC = () => {
                 )}
               </Box>
 
+              {/* Sub-Items Breakdown */}
+              {itemSubItems && itemSubItems.length > 0 && (
+                <Box sx={{ mt: 2, mb: 3 }}>
+                  <Typography variant="h5" sx={{ mb: 1, fontWeight: 600, color: '#333' }}>
+                    {t('procurement.subItems') || 'Sub-Items'}
+                  </Typography>
+                  {itemSubItems.map(si => (
+                    <Paper key={si.sub_item_id} sx={{ p: 1.5, mb: 1 }}>
+                      <Typography variant="body2" fontWeight="medium">{si.name || '-'}</Typography>
+                      <Typography variant="caption" color="text.secondary">{si.part_number || '-'}</Typography>
+                      <Typography variant="body2">{t('procurement.quantity')}: {si.quantity}</Typography>
+                    </Paper>
+                  ))}
+                </Box>
+              )}
+
               {/* Delivery & Invoice Options Section */}
               <Box>
                 <Typography variant="h4" sx={{ mb: 2, fontWeight: 600, color: '#333' }}>
@@ -2169,7 +2235,7 @@ export const ProcurementPage: React.FC = () => {
                               {t('procurement.deliveryDate')}:
                             </Typography>
                             <Typography variant="body1" sx={{ fontWeight: 500, color: '#333' }}>
-                              {option.delivery_date ? new Date(option.delivery_date).toLocaleDateString() : t('procurement.notSpecified')}
+                              {option.delivery_date ? formatDisplayDate(option.delivery_date) : t('procurement.notSpecified')}
                             </Typography>
                           </Box>
                         </Grid>

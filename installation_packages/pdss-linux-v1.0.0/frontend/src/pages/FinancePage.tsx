@@ -40,14 +40,16 @@ import {
   AttachMoney as AttachMoneyIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { financeAPI, excelAPI, currencyAPI } from '../services/api.ts';
 import { BudgetData, BudgetDataCreate, Currency } from '../types/index.ts';
 import { CurrencyManagementPage } from './CurrencyManagementPage.tsx';
 import InvoicePaymentManagement from '../components/InvoicePaymentManagement.tsx';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -72,7 +74,19 @@ function TabPanel(props: TabPanelProps) {
 
 export const FinancePage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString();
+    }
+  }, [isFa]);
+  
   const [tabValue, setTabValue] = useState(0);
   const [budgetData, setBudgetData] = useState<BudgetData[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
@@ -404,7 +418,7 @@ export const FinancePage: React.FC = () => {
               <TableRow key={budget.budget_date}>
                 <TableCell>
                   <Typography variant="body2" fontWeight="medium">
-                    {new Date(budget.budget_date).toLocaleDateString()}
+                    {formatDisplayDate(budget.budget_date)}
                   </Typography>
                 </TableCell>
                 <TableCell align="right">
@@ -433,7 +447,7 @@ export const FinancePage: React.FC = () => {
                 </TableCell>
                 <TableCell align="center">
                   <Typography variant="body2" color="text.secondary">
-                    {new Date(budget.created_at).toLocaleDateString()}
+                    {formatDisplayDate(budget.created_at)}
                   </Typography>
                 </TableCell>
                 <TableCell align="center">
@@ -475,7 +489,7 @@ export const FinancePage: React.FC = () => {
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{t('finance.addNewBudgetEntry')}</DialogTitle>
         <DialogContent>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <DatePicker
               label={t('finance.budgetDate')}
               value={new Date(formData.budget_date)}
@@ -486,7 +500,7 @@ export const FinancePage: React.FC = () => {
               }}
               slotProps={{ textField: { fullWidth: true, margin: 'dense', sx: { mb: 2, mt: 1 } } }}
             />
-          </LocalizationProvider>
+          </LocalizedDateProvider>
           
           <TextField
             margin="dense"
@@ -573,7 +587,7 @@ export const FinancePage: React.FC = () => {
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{t('finance.editBudgetEntry')}</DialogTitle>
         <DialogContent>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <DatePicker
               label={t('finance.budgetDate')}
               value={new Date(formData.budget_date)}
@@ -585,7 +599,7 @@ export const FinancePage: React.FC = () => {
               disabled
               slotProps={{ textField: { fullWidth: true, margin: 'dense', sx: { mb: 2, mt: 1 } } }}
             />
-          </LocalizationProvider>
+          </LocalizedDateProvider>
           
           <TextField
             margin="dense"

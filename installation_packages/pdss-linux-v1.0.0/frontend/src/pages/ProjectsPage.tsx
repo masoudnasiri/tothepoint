@@ -63,6 +63,7 @@ export const ProjectsPage: React.FC = () => {
   const [pmUsers, setPmUsers] = useState<User[]>([]);
   const [selectedPMs, setSelectedPMs] = useState<number[]>([]);
   const [currentAssignments, setCurrentAssignments] = useState<number[]>([]);
+  const [projectAssignments, setProjectAssignments] = useState<Record<number, number[]>>({});
   const [formData, setFormData] = useState({
     project_code: '',
     name: '',
@@ -73,6 +74,13 @@ export const ProjectsPage: React.FC = () => {
     fetchProjects();
     fetchPMUsers();
   }, []);
+
+  useEffect(() => {
+    // Fetch assignments for all projects after projects are loaded
+    if (projects.length > 0) {
+      fetchAllProjectAssignments();
+    }
+  }, [projects]);
 
   const fetchProjects = async () => {
     try {
@@ -94,6 +102,30 @@ export const ProjectsPage: React.FC = () => {
       console.error(t('projects.failedToLoadPMUsers'), err);
       // Fallback: Try to get current user's info at least
       setPmUsers([]);
+    }
+  };
+
+  const fetchAllProjectAssignments = async () => {
+    try {
+      const assignmentsMap: Record<number, number[]> = {};
+      
+      // Fetch assignments for all projects in parallel
+      const assignmentPromises = projects.map(async (project) => 
+        projectsAPI.getAssignments(project.id)
+          .then(response => {
+            const assignedUserIds = response.data.map((a: any) => a.user_id);
+            assignmentsMap[project.id] = assignedUserIds;
+          })
+          .catch(() => {
+            // If fetch fails, set empty array
+            assignmentsMap[project.id] = [];
+          })
+      );
+      
+      await Promise.all(assignmentPromises);
+      setProjectAssignments(assignmentsMap);
+    } catch (err) {
+      console.error('Failed to fetch project assignments:', err);
     }
   };
 
@@ -119,7 +151,9 @@ export const ProjectsPage: React.FC = () => {
       setCreateDialogOpen(false);
       setFormData({ project_code: '', name: '', priority_weight: 5 });
       setSelectedPMs([]);
-      fetchProjects();
+      await fetchProjects();
+      // Refresh assignments after project creation
+      await fetchAllProjectAssignments();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create project');
     }
@@ -180,7 +214,9 @@ export const ProjectsPage: React.FC = () => {
       setFormData({ project_code: '', name: '', priority_weight: 5 });
       setSelectedPMs([]);
       setCurrentAssignments([]);
-      fetchProjects();
+      await fetchProjects();
+      // Refresh assignments after project update
+      await fetchAllProjectAssignments();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to update project');
     }
@@ -395,6 +431,7 @@ export const ProjectsPage: React.FC = () => {
             <TableRow>
               <TableCell>{t('projects.projectCode')}</TableCell>
               <TableCell>{t('projects.projectName')}</TableCell>
+              <TableCell align="left">{t('projects.projectManager')}</TableCell>
               <TableCell align="right">{t('projects.items')}</TableCell>
               <TableCell align="right">{t('projects.totalQuantity')}</TableCell>
               <TableCell align="right">{t('projects.totalInvoiceValue')}</TableCell>
@@ -413,6 +450,28 @@ export const ProjectsPage: React.FC = () => {
                   </Typography>
                 </TableCell>
                 <TableCell>{project.name}</TableCell>
+                <TableCell align="left">
+                  {projectAssignments[project.id] && projectAssignments[project.id].length > 0 ? (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'flex-start' }}>
+                      {projectAssignments[project.id].map((pmId) => {
+                        const pm = pmUsers.find(u => u.id === pmId);
+                        return pm ? (
+                          <Chip 
+                            key={pmId} 
+                            label={pm.username} 
+                            size="small" 
+                            color="primary"
+                            variant="outlined"
+                          />
+                        ) : null;
+                      })}
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      {t('projects.noProjectManager')}
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell align="right">
                   <Chip label={project.item_count} size="small" />
                 </TableCell>

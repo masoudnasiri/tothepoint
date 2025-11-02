@@ -3,14 +3,14 @@ Project management endpoints
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, require_admin, require_pmo, get_user_projects
 from app.crud import (
     create_project, get_projects, get_project, update_project, delete_project,
     assign_user_to_project, remove_user_from_project, get_user_project_assignments,
-    get_project_summaries
+    get_project_summaries, log_audit
 )
 from app.models import User
 from app.schemas import (
@@ -40,11 +40,29 @@ async def list_projects(
 @router.post("/", response_model=Project)
 async def create_new_project(
     project: ProjectCreate,
+    request: Request,
     current_user: User = Depends(require_pmo()),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new project (PMO or admin only)"""
-    return await create_project(db, project)
+    created = await create_project(db, project)
+    # Audit
+    try:
+        client_host = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROJECT_CREATE",
+            entity_type="project",
+            entity_id=created.id,
+            details={"project_code": created.project_code, "name": created.name},
+            ip_address=client_host,
+            user_agent=ua,
+        )
+    except Exception:
+        pass
+    return created
 
 
 @router.get("/{project_id}", response_model=Project)
@@ -86,6 +104,17 @@ async def update_project_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
         )
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROJECT_UPDATE",
+            entity_type="project",
+            entity_id=project_id,
+            details=project_update.dict(exclude_unset=True),
+        )
+    except Exception:
+        pass
     return project
 
 
@@ -102,6 +131,16 @@ async def delete_project_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found"
         )
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROJECT_DELETE",
+            entity_type="project",
+            entity_id=project_id,
+        )
+    except Exception:
+        pass
     return {"message": "Project deleted successfully"}
 
 

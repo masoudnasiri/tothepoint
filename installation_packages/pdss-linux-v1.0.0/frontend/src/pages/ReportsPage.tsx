@@ -58,6 +58,9 @@ import {
   SupplierScorecard,
 } from '../types/index.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -81,7 +84,31 @@ function TabPanel(props: TabPanelProps) {
 }
 
 export const ReportsPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter for charts
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDateLabel = useMemo(() => (value: string) => {
+    if (!value) return value;
+    try {
+      // Try parsing as ISO date
+      const d = isFa ? jalaliParseISO(value) : gregorianParseISO(value);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      // If parsing fails, try as month string (YYYY-MM)
+      if (value.length === 7 && value.match(/^\d{4}-\d{2}$/)) {
+        try {
+          const iso = `${value}-01`;
+          const d = isFa ? jalaliParseISO(iso) : gregorianParseISO(iso);
+          return isFa ? jalaliFormat(d, 'yyyy/MM') : value;
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }
+  }, [isFa]);
+  
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -581,9 +608,9 @@ export const ReportsPage: React.FC = () => {
                     }))}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
+                    <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                     <YAxis />
-                    <Tooltip formatter={(value: any) => formatCurrency(value)} />
+                    <Tooltip formatter={(value: any) => formatCurrency(value)} labelFormatter={formatDateLabel} />
                     <Legend />
                     <Bar dataKey="inflow" fill="#4caf50" name={t('reports.cashInflow')} />
                     <Bar dataKey="outflow" fill="#f44336" name={t('reports.cashOutflow')} />
@@ -670,9 +697,9 @@ export const ReportsPage: React.FC = () => {
                     }))}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
+                    <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                     <YAxis />
-                    <Tooltip formatter={(value: any) => formatCurrency(value)} />
+                    <Tooltip formatter={(value: any) => formatCurrency(value)} labelFormatter={formatDateLabel} />
                     <Legend />
                     <Line
                       type="monotone"
@@ -713,9 +740,9 @@ export const ReportsPage: React.FC = () => {
                     }))}
                   >
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
+                    <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                     <YAxis domain={[0, 2]} />
-                    <Tooltip formatter={(value: any) => formatNumber(value, 3)} />
+                    <Tooltip formatter={(value: any) => formatNumber(value, 3)} labelFormatter={formatDateLabel} />
                     <Legend />
                     <ReferenceLine y={1.0} stroke="#666" strokeDasharray="3 3" label={t('reports.target10')} />
                     <Line

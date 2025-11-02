@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete as sql_delete
 from app.database import get_db
+from app.crud import log_audit
 from app.auth import get_current_user
 from app.models import User, DeliveryOption, ProjectItem
 from app.schemas import (
@@ -137,6 +138,17 @@ async def create_delivery_option(
     await db.refresh(new_option)
     
     logger.info(f"Created delivery option for item {option_data.project_item_id}, slot {calculated_slot}")
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="DELIVERY_OPTION_CREATE",
+            entity_type="delivery_option",
+            entity_id=new_option.id,
+            details=option_dict,
+        )
+    except Exception:
+        pass
     
     return new_option
 
@@ -171,6 +183,17 @@ async def update_delivery_option(
             .values(**update_data)
         )
         await db.commit()
+        try:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="DELIVERY_OPTION_UPDATE",
+                entity_type="delivery_option",
+                entity_id=option_id,
+                details=update_data,
+            )
+        except Exception:
+            pass
     
     # Fetch and return updated option
     result = await db.execute(
@@ -197,5 +220,15 @@ async def delete_delivery_option(
         )
     
     await db.commit()
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="DELIVERY_OPTION_DELETE",
+            entity_type="delivery_option",
+            entity_id=option_id,
+        )
+    except Exception:
+        pass
     
     return {"message": "Delivery option deleted successfully"}

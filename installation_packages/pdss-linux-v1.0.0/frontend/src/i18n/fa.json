@@ -5,6 +5,7 @@
     "cancel": "انصراف",
     "delete": "حذف",
     "edit": "ویرایش",
+    "name": "نام",
     "add": "افزودن",
     "create": "ایجاد",
     "update": "به‌روزرسانی",
@@ -26,7 +27,8 @@
     "previous": "قبلی",
     "all": "همه",
     "none": "هیچکدام",
-    "note": "توجه"
+    "note": "توجه",
+    "description": "توضیحات"
   },
   "navigation": {
     "dashboard": "داشبورد",
@@ -162,6 +164,8 @@
     "unit": "واحد",
     "description": "توضیحات",
     "deliveryDateOptions": "گزینه‌های تاریخ تحویل (حداقل 1 مورد الزامی است)",
+    "subItemsBreakdown": "جزییات زیر‌آیتم‌ها",
+    "partNumber": "شماره قطعه",
     "primaryOption": "گزینه اصلی",
     "option": "گزینه",
     "cannotRemoveLastDate": "نمی‌توان آخرین تاریخ را حذف کرد",
@@ -315,7 +319,9 @@
     "addRemoveProjectManagers": "افزودن یا حذف مدیران پروژه. تغییرات هنگام کلیک روی \"به‌روزرسانی و ذخیره تخصیص‌ها\" اعمال می‌شود.",
     "failedToLoadProjects": "خطا در بارگذاری پروژه‌ها",
     "failedToLoadPMUsers": "خطا در بارگذاری کاربران مدیر پروژه",
-    "failedToLoadAssignments": "خطا در بارگذاری تخصیص‌ها"
+    "failedToLoadAssignments": "خطا در بارگذاری تخصیص‌ها",
+    "projectManager": "مدیر پروژه",
+    "noProjectManager": "هیچ مدیر پروژه‌ای تخصیص داده نشده"
   },
   "items": {
     "title": "اقلام پروژه",
@@ -1067,6 +1073,11 @@
     "ton": "تن",
     "squareMeter": "متر مربع",
     "itemsMasterDescription": "📦 مدیریت آیتم‌ها: آیتم‌ها را یکبار اینجا با کدهای منحصر به فرد خودکار تولید شده تعریف کنید (شرکت-نام-مدل). سپس این آیتم‌ها را می‌توانید به هر پروژه اضافه کنید.",
+    "partNumber": "شماره قطعه",
+    "partNumberPlaceholder": "مثال: PN-ABC-1234",
+    "subItems": "زیر‌آیتم‌ها",
+    "noSubItems": "هنوز زیر‌آیتمی وجود ندارد.",
+    "addSubItem": "افزودن زیر‌آیتم",
     "searchPlaceholder": "جستجو بر اساس کد، شرکت، نام یا مدل...",
     "itemCode": "کد آیتم",
     "company": "شرکت",

@@ -49,12 +49,14 @@ import {
   Error as ErrorIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { LocalizedDateProvider } from './LocalizedDateProvider.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { invoicePaymentAPI, InvoiceCreate, PaymentCreate } from '../services/invoicePaymentAPI.ts';
 import { decisionsAPI } from '../services/api.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface InvoiceData {
   id: number;
@@ -115,7 +117,19 @@ function TabPanel(props: TabPanelProps) {
 
 export const InvoicePaymentManagement: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString();
+    }
+  }, [isFa]);
+  
   const [tabValue, setTabValue] = useState(0);
   const [invoices, setInvoices] = useState<InvoiceData[]>([]);
   const [payments, setPayments] = useState<PaymentData[]>([]);
@@ -561,8 +575,8 @@ export const InvoicePaymentManagement: React.FC = () => {
                       <TableCell align="right">
                         {formatCurrency(invoice.invoice_amount, invoice.currency)}
                       </TableCell>
-                      <TableCell>{new Date(invoice.invoice_date).toLocaleDateString()}</TableCell>
-                      <TableCell>{new Date(invoice.due_date).toLocaleDateString()}</TableCell>
+                      <TableCell>{formatDisplayDate(invoice.invoice_date)}</TableCell>
+                      <TableCell>{formatDisplayDate(invoice.due_date)}</TableCell>
                       <TableCell>
                         <Chip
                           icon={getStatusIcon(invoice.status)}
@@ -669,7 +683,7 @@ export const InvoicePaymentManagement: React.FC = () => {
                       <TableCell align="right">
                         {formatCurrency(payment.payment_amount, payment.currency)}
                       </TableCell>
-                      <TableCell>{new Date(payment.payment_date).toLocaleDateString()}</TableCell>
+                      <TableCell>{formatDisplayDate(payment.payment_date)}</TableCell>
                       <TableCell>{t(`finance.${payment.payment_method}`)}</TableCell>
                       <TableCell>
                         <Chip
@@ -712,7 +726,7 @@ export const InvoicePaymentManagement: React.FC = () => {
       }} maxWidth="md" fullWidth>
         <DialogTitle>{t('finance.createInvoice')}</DialogTitle>
         <DialogContent>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth required>
@@ -886,7 +900,7 @@ export const InvoicePaymentManagement: React.FC = () => {
                 />
               </Grid>
             </Grid>
-          </LocalizationProvider>
+          </LocalizedDateProvider>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {
@@ -903,7 +917,7 @@ export const InvoicePaymentManagement: React.FC = () => {
       <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{t('finance.createPayment')}</DialogTitle>
         <DialogContent>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
@@ -989,7 +1003,7 @@ export const InvoicePaymentManagement: React.FC = () => {
                 />
               </Grid>
             </Grid>
-          </LocalizationProvider>
+          </LocalizedDateProvider>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPaymentDialogOpen(false)}>{t('finance.cancel')}</Button>
@@ -1031,13 +1045,13 @@ export const InvoicePaymentManagement: React.FC = () => {
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="textSecondary">{t('finance.invoiceDate')}</Typography>
                   <Typography variant="body1" gutterBottom>
-                    {new Date(selectedInvoice.invoice_date).toLocaleDateString()}
+                    {formatDisplayDate(selectedInvoice.invoice_date)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="textSecondary">{t('finance.dueDate')}</Typography>
                   <Typography variant="body1" gutterBottom>
-                    {new Date(selectedInvoice.due_date).toLocaleDateString()}
+                    {formatDisplayDate(selectedInvoice.due_date)}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>

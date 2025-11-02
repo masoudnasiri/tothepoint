@@ -38,10 +38,12 @@ import {
   Lock as LockIcon,
   Search as SearchIcon,
 } from '@mui/icons-material';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { decisionsAPI } from '../services/api.ts';
 import { useNavigate } from 'react-router-dom';
 import { ProjectFilter } from '../components/ProjectFilter.tsx';
@@ -69,8 +71,20 @@ interface FinalizedDecision {
 
 export const FinalizedDecisionsPage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string | null) => {
+    if (!dateString) return '-';
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString();
+    }
+  }, [isFa]);
   const [decisions, setDecisions] = useState<FinalizedDecision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -300,8 +314,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
   };
 
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): "success" | "warning" | "error" | "default" => {
@@ -662,7 +675,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
           </FormControl>
           
           {invoiceTimingType === 'ABSOLUTE' ? (
-            <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <LocalizedDateProvider>
               <DatePicker
                 label={t('decisions.invoiceIssueDate')}
                 value={invoiceDate}
@@ -674,7 +687,7 @@ export const FinalizedDecisionsPage: React.FC = () => {
                   } 
                 }}
               />
-            </LocalizationProvider>
+            </LocalizedDateProvider>
           ) : (
             <TextField
               fullWidth

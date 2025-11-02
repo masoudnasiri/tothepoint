@@ -49,8 +49,7 @@ import {
   Error as ErrorIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { LocalizedDateProvider } from './LocalizedDateProvider.tsx';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { invoicePaymentAPI, InvoiceCreate, PaymentCreate } from '../services/invoicePaymentAPI.ts';
 import { decisionsAPI } from '../services/api.ts';
@@ -497,7 +496,7 @@ const InvoicePaymentManagement: React.FC = () => {
       <Dialog open={invoiceDialogOpen} onClose={() => setInvoiceDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{t('finance.createInvoice')}</DialogTitle>
         <DialogContent>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizedDateProvider>
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth required>
@@ -644,7 +643,7 @@ const InvoicePaymentManagement: React.FC = () => {
                 />
               </Grid>
             </Grid>
-          </LocalizationProvider>
+          </LocalizedDateProvider>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => {

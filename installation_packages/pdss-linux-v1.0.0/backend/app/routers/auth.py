@@ -3,10 +3,11 @@ Authentication endpoints
 """
 
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from app.crud import log_audit
 from app.auth import authenticate_user, create_access_token, get_current_user
 from app.crud import create_user
 from app.schemas import UserCreate, UserLogin, Token, User
@@ -32,7 +33,7 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-async def login(user_credentials: UserLogin, db: AsyncSession = Depends(get_db)):
+async def login(user_credentials: UserLogin, request: Request, db: AsyncSession = Depends(get_db)):
     """Login and get access token"""
     user = await authenticate_user(db, user_credentials.username, user_credentials.password)
     if not user:
@@ -47,6 +48,23 @@ async def login(user_credentials: UserLogin, db: AsyncSession = Depends(get_db))
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     
+    # Audit: LOGIN
+    try:
+        client_host = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        await log_audit(
+            db,
+            user_id=user.id,
+            action="LOGIN",
+            entity_type="user",
+            entity_id=user.id,
+            details={"username": user.username},
+            ip_address=client_host,
+            user_agent=ua,
+        )
+    except Exception:
+        pass
+
     return {"access_token": access_token, "token_type": "bearer"}
 
 

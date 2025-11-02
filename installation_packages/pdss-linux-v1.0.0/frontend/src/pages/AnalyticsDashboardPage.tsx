@@ -49,6 +49,9 @@ import {
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { analyticsAPI, projectsAPI } from '../services/api.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import {
   Table,
   TableBody,
@@ -81,6 +84,18 @@ interface ItemFollowUpTabProps {
 
 const ItemFollowUpTab: React.FC<ItemFollowUpTabProps> = ({ data, loading, selectedProjectId }) => {
   const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter for this component
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = React.useMemo(() => (dateString: string | null) => {
+    if (!dateString) return '-';
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString(i18n.language === 'fa' ? 'fa-IR' : 'en-US');
+    }
+  }, [isFa, i18n.language]);
 
   console.log('DEBUG: ItemFollowUpTab received data:', data);
   console.log('DEBUG: ItemFollowUpTab loading:', loading);
@@ -147,16 +162,10 @@ const ItemFollowUpTab: React.FC<ItemFollowUpTabProps> = ({ data, loading, select
                 <TableCell>{item.item_name}</TableCell>
                 <TableCell>{item.quantity}</TableCell>
                 <TableCell>
-                  {item.lead_time_date 
-                    ? new Date(item.lead_time_date).toLocaleDateString(i18n.language === 'fa' ? 'fa-IR' : 'en-US')
-                    : '-'
-                  }
+                  {formatDisplayDate(item.lead_time_date)}
                 </TableCell>
                 <TableCell>
-                  {item.delivery_time_date 
-                    ? new Date(item.delivery_time_date).toLocaleDateString(i18n.language === 'fa' ? 'fa-IR' : 'en-US')
-                    : '-'
-                  }
+                  {formatDisplayDate(item.delivery_time_date)}
                 </TableCell>
                 <TableCell>{getStatusChip(item.status)}</TableCell>
                 <TableCell>
@@ -184,6 +193,28 @@ export const AnalyticsDashboardPage: React.FC = () => {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
   
+  // Locale-aware date formatter for charts
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDateLabel = useMemo(() => (value: string) => {
+    if (!value) return value;
+    try {
+      // Try parsing as ISO date
+      const d = isFa ? jalaliParseISO(value) : gregorianParseISO(value);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      // If parsing fails, try as month string (YYYY-MM)
+      if (value.length === 7 && value.match(/^\d{4}-\d{2}$/)) {
+        try {
+          const iso = `${value}-01`;
+          const d = isFa ? jalaliParseISO(iso) : gregorianParseISO(iso);
+          return isFa ? jalaliFormat(d, 'yyyy/MM') : value;
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }
+  }, [isFa]);
   
   const [tabValue, setTabValue] = useState(0);
   const [projects, setProjects] = useState<any[]>([]);
@@ -713,9 +744,9 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <ResponsiveContainer width="100%" height={400}>
                       <LineChart data={evaData.time_series}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
+                        <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                         <YAxis />
-                        <Tooltip formatter={(value: any) => formatCurrency(value)} />
+                        <Tooltip formatter={(value: any) => formatCurrency(value)} labelFormatter={formatDateLabel} />
                         <Legend />
                         <Line type="monotone" dataKey="pv" stroke="#2196f3" name={t('analytics.plannedValue')} strokeWidth={2} />
                         <Line type="monotone" dataKey="ev" stroke="#4caf50" name={t('analytics.earnedValue')} strokeWidth={2} />
@@ -734,9 +765,9 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <ResponsiveContainer width="100%" height={300}>
                       <LineChart data={evaData.time_series}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
+                        <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                         <YAxis domain={[0.5, 1.5]} />
-                        <Tooltip formatter={(value: any) => value.toFixed(3)} />
+                        <Tooltip formatter={(value: any) => value.toFixed(3)} labelFormatter={formatDateLabel} />
                         <Legend />
                         <Line type="monotone" dataKey="cpi" stroke="#ff9800" name={t('analytics.costPerformance')} strokeWidth={2} />
                         <Line type="monotone" dataKey="spi" stroke="#9c27b0" name={t('analytics.schedulePerformance')} strokeWidth={2} />
@@ -848,9 +879,9 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <ResponsiveContainer width="100%" height={400}>
                       <ComposedChart data={cashflowData.forecast_data}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
+                        <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                         <YAxis />
-                        <Tooltip formatter={(value: any) => formatCurrency(value)} />
+                        <Tooltip formatter={(value: any) => formatCurrency(value)} labelFormatter={formatDateLabel} />
                         <Legend />
                         <Bar dataKey="inflow_forecast" fill="#4caf50" name={t('analytics.inflowForecast')} />
                         <Bar dataKey="outflow_forecast" fill="#f44336" name={t('analytics.outflowForecast')} />
@@ -870,9 +901,9 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     <ResponsiveContainer width="100%" height={300}>
                       <AreaChart data={cashflowData.forecast_data}>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
+                        <XAxis dataKey="date" tickFormatter={formatDateLabel} />
                         <YAxis />
-                        <Tooltip formatter={(value: any) => formatCurrency(value)} />
+                        <Tooltip formatter={(value: any) => formatCurrency(value)} labelFormatter={formatDateLabel} />
                         <Legend />
                         <Area 
                           type="monotone" 

@@ -49,6 +49,11 @@ import {
   PMDeliveryAcceptance,
 } from '../types/index.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 
 const formatCurrencyWithCode = (amount: number | undefined, currency: string | undefined): string => {
   if (amount === undefined || amount === null) return 'N/A';
@@ -69,7 +74,19 @@ const formatCurrencyWithCode = (amount: number | undefined, currency: string | u
 
 export const ProcurementPlanPage: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string | null | undefined) => {
+    if (!dateString) return '-';
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return dateString;
+    }
+  }, [isFa]);
   const [items, setItems] = useState<ProcurementPlanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -503,25 +520,37 @@ export const ProcurementPlanPage: React.FC = () => {
           
           {/* Date Range */}
           <Grid item xs={12} md={3}>
-            <TextField
-              fullWidth
-              label={t('procurementPlan.deliveryDateFrom')}
-              type="date"
-              value={dateRangeFilter.startDate}
-              onChange={(e) => setDateRangeFilter({ ...dateRangeFilter, startDate: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-            />
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('procurementPlan.deliveryDateFrom')}
+                value={dateRangeFilter.startDate ? new Date(dateRangeFilter.startDate) : null}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setDateRangeFilter({ ...dateRangeFilter, startDate: newValue.toISOString().split('T')[0] });
+                  } else {
+                    setDateRangeFilter({ ...dateRangeFilter, startDate: '' });
+                  }
+                }}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </LocalizedDateProvider>
           </Grid>
           
           <Grid item xs={12} md={3}>
-            <TextField
-              fullWidth
-              label={t('procurementPlan.deliveryDateTo')}
-              type="date"
-              value={dateRangeFilter.endDate}
-              onChange={(e) => setDateRangeFilter({ ...dateRangeFilter, endDate: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-            />
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('procurementPlan.deliveryDateTo')}
+                value={dateRangeFilter.endDate ? new Date(dateRangeFilter.endDate) : null}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setDateRangeFilter({ ...dateRangeFilter, endDate: newValue.toISOString().split('T')[0] });
+                  } else {
+                    setDateRangeFilter({ ...dateRangeFilter, endDate: '' });
+                  }
+                }}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </LocalizedDateProvider>
           </Grid>
         </Grid>
       </Paper>
@@ -608,9 +637,9 @@ export const ProcurementPlanPage: React.FC = () => {
                       {formatCurrencyWithCode(item.final_cost, item.final_cost_currency)}
                     </TableCell>
                   )}
-                  <TableCell>{item.purchase_date || '-'}</TableCell>
-                  <TableCell>{item.delivery_date}</TableCell>
-                  <TableCell>{item.actual_delivery_date || '-'}</TableCell>
+                  <TableCell>{formatDisplayDate(item.purchase_date)}</TableCell>
+                  <TableCell>{formatDisplayDate(item.delivery_date)}</TableCell>
+                  <TableCell>{formatDisplayDate(item.actual_delivery_date)}</TableCell>
                   <TableCell>
                     <Chip
                       label={getStatusLabel(item.delivery_status)}
@@ -770,18 +799,18 @@ export const ProcurementPlanPage: React.FC = () => {
                     </Grid>
                     <Grid item xs={12} md={6}>
                       <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.purchaseDate')}</Typography>
-                      <Typography variant="body1" gutterBottom>{selectedItem.purchase_date || t('procurementPlan.nA')}</Typography>
+                      <Typography variant="body1" gutterBottom>{formatDisplayDate(selectedItem.purchase_date)}</Typography>
                     </Grid>
                   </>
                 )}
                 
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.plannedDelivery')}</Typography>
-                  <Typography variant="body1" gutterBottom>{selectedItem.delivery_date}</Typography>
+                  <Typography variant="body1" gutterBottom>{formatDisplayDate(selectedItem.delivery_date)}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.actualDelivery')}</Typography>
-                  <Typography variant="body1" gutterBottom>{selectedItem.actual_delivery_date || t('procurementPlan.notYetDelivered')}</Typography>
+                  <Typography variant="body1" gutterBottom>{selectedItem.actual_delivery_date ? formatDisplayDate(selectedItem.actual_delivery_date) : t('procurementPlan.notYetDelivered')}</Typography>
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.deliveryStatus')}</Typography>
@@ -822,7 +851,7 @@ export const ProcurementPlanPage: React.FC = () => {
                 {selectedItem.actual_invoice_issue_date && (
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.invoiceDate')}</Typography>
-                    <Typography variant="body1" gutterBottom>{selectedItem.actual_invoice_issue_date}</Typography>
+                    <Typography variant="body1" gutterBottom>{formatDisplayDate(selectedItem.actual_invoice_issue_date)}</Typography>
                   </Grid>
                 )}
                 
@@ -838,7 +867,7 @@ export const ProcurementPlanPage: React.FC = () => {
                 {selectedItem.actual_payment_date && (
                   <Grid item xs={12} md={6}>
                     <Typography variant="subtitle2" color="textSecondary">{t('procurementPlan.paymentDate')}</Typography>
-                    <Typography variant="body1" gutterBottom>{selectedItem.actual_payment_date}</Typography>
+                    <Typography variant="body1" gutterBottom>{formatDisplayDate(selectedItem.actual_payment_date)}</Typography>
                   </Grid>
                 )}
                 
@@ -887,15 +916,20 @@ export const ProcurementPlanPage: React.FC = () => {
         <DialogTitle>{t('procurementPlan.confirmSupplierDelivery')}</DialogTitle>
         <DialogContent>
           <Box sx={{ pt: 2 }}>
-            <TextField
-              fullWidth
-              label={t('procurementPlan.actualDeliveryDate')}
-              type="date"
-              value={confirmData.actual_delivery_date}
-              onChange={(e) => setConfirmData({ ...confirmData, actual_delivery_date: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-            />
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('procurementPlan.actualDeliveryDate')}
+                value={confirmData.actual_delivery_date ? new Date(confirmData.actual_delivery_date) : null}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setConfirmData({ ...confirmData, actual_delivery_date: newValue.toISOString().split('T')[0] });
+                  } else {
+                    setConfirmData({ ...confirmData, actual_delivery_date: '' });
+                  }
+                }}
+                slotProps={{ textField: { fullWidth: true, sx: { mb: 2 } } }}
+              />
+            </LocalizedDateProvider>
             <FormControlLabel
               control={
                 <Checkbox
@@ -950,16 +984,20 @@ export const ProcurementPlanPage: React.FC = () => {
               }
               label={t('procurementPlan.acceptItemForProject')}
             />
-            <TextField
-              fullWidth
-              label={t('procurementPlan.customerDeliveryDate')}
-              type="date"
-              value={acceptData.customer_delivery_date}
-              onChange={(e) => setAcceptData({ ...acceptData, customer_delivery_date: e.target.value })}
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2, mt: 2 }}
-              helperText="When the item was (or will be) delivered to the end customer"
-            />
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('procurementPlan.customerDeliveryDate')}
+                value={acceptData.customer_delivery_date ? new Date(acceptData.customer_delivery_date) : null}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setAcceptData({ ...acceptData, customer_delivery_date: newValue.toISOString().split('T')[0] });
+                  } else {
+                    setAcceptData({ ...acceptData, customer_delivery_date: '' });
+                  }
+                }}
+                slotProps={{ textField: { fullWidth: true, helperText: 'When the item was (or will be) delivered to the end customer', sx: { mb: 2, mt: 2 } } }}
+              />
+            </LocalizedDateProvider>
             <TextField
               fullWidth
               label="Acceptance Notes (Optional)"

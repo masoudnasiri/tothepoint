@@ -58,6 +58,9 @@ import { financeAPI, decisionsAPI, procurementAPI } from '../services/api.ts';
 import { BudgetAnalysis } from '../components/BudgetAnalysis.tsx';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface SolverInfo {
   type: string;
@@ -116,7 +119,37 @@ interface OptimizationResponse {
 
 export const OptimizationPageEnhanced: React.FC = () => {
   const { user } = useAuth();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string | Date) => {
+    if (!dateString || dateString === 'Invalid Date' || dateString === 'null' || dateString === 'undefined') {
+      return 'Not Set';
+    }
+    try {
+      const dateStr = typeof dateString === 'string' ? dateString : dateString.toISOString();
+      const d = isFa ? jalaliParseISO(dateStr) : gregorianParseISO(dateStr);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+      if (isNaN(date.getTime())) {
+        return 'Invalid Date';
+      }
+      return date.toLocaleDateString();
+    }
+  }, [isFa]);
+  
+  const formatDisplayDateTime = useMemo(() => (dateString: string) => {
+    if (!dateString) return '-';
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd HH:mm') : gregorianFormat(d, 'yyyy-MM-dd HH:mm');
+    } catch {
+      return new Date(dateString).toLocaleString();
+    }
+  }, [isFa]);
+  
   const [solverInfo, setSolverInfo] = useState<{ available_solvers: SolverInfo[], available_strategies: StrategyInfo[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [mainTabValue, setMainTabValue] = useState(0); // 0 = Optimization, 1 = Budget Analysis
@@ -532,14 +565,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    if (!dateString || dateString === 'Invalid Date' || dateString === 'null' || dateString === 'undefined') {
-      return 'Not Set';
-    }
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) {
-      return 'Invalid Date';
-    }
-    return date.toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string) => {
@@ -1446,7 +1472,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     <TableRow key={run.run_id} hover>
                       <TableCell>
                         <Typography variant="body2">
-                          {new Date(run.run_timestamp).toLocaleString()}
+                          {formatDisplayDateTime(run.run_timestamp)}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           ID: {run.run_id.slice(0, 8)}...

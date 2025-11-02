@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, select, update
@@ -11,6 +11,7 @@ import shutil
 import mimetypes
 
 from app.database import get_db
+from app.crud import log_audit
 from app.auth import get_current_user
 from app.models import User, Supplier, SupplierContact, SupplierDocument, SupplierStatus, ComplianceStatus, RiskLevel
 from app.schemas import (
@@ -243,7 +244,8 @@ async def get_supplier(
 async def create_supplier(
     supplier_data: SupplierCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """Create new supplier"""
     # Generate supplier ID if not provided
@@ -266,6 +268,23 @@ async def create_supplier(
     await db.commit()
     await db.refresh(supplier)
     
+    # Audit
+    try:
+        client_host = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        await log_audit(
+            db,
+            user_id=current_user.id if current_user else None,
+            action="SUPPLIER_CREATE",
+            entity_type="supplier",
+            entity_id=supplier.id,
+            details={"company_name": supplier.company_name, "supplier_id": supplier.supplier_id},
+            ip_address=client_host,
+            user_agent=ua,
+        )
+    except Exception:
+        pass
+    
     return supplier
 
 
@@ -274,7 +293,8 @@ async def update_supplier(
     supplier_id: int,
     supplier_data: SupplierUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """Update supplier"""
     result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
@@ -290,6 +310,23 @@ async def update_supplier(
     await db.commit()
     await db.refresh(supplier)
     
+    # Audit
+    try:
+        client_host = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        await log_audit(
+            db,
+            user_id=current_user.id if current_user else None,
+            action="SUPPLIER_UPDATE",
+            entity_type="supplier",
+            entity_id=supplier.id,
+            details=supplier_data.dict(exclude_unset=True),
+            ip_address=client_host,
+            user_agent=ua,
+        )
+    except Exception:
+        pass
+    
     return supplier
 
 
@@ -297,7 +334,8 @@ async def update_supplier(
 async def delete_supplier(
     supplier_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """Delete supplier"""
     result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
@@ -305,6 +343,23 @@ async def delete_supplier(
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
+    # Guard: prevent deletion if supplier is used in any procurement options
+    # ProcurementOption currently references supplier by name
+    from sqlalchemy import select, func
+    from app.models import ProcurementOption as ProcurementOptionModel
+
+    po_count_result = await db.execute(
+        select(func.count(ProcurementOptionModel.id)).where(
+            ProcurementOptionModel.is_active == True,
+            ProcurementOptionModel.supplier_name == supplier.company_name
+        )
+    )
+    if (po_count_result.scalar() or 0) > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete supplier: it is linked to existing procurement options. Set status to INACTIVE instead."
+        )
+
     # Delete associated files
     for document in supplier.documents:
         file_path = os.path.join(UPLOAD_DIR, document.file_name)
@@ -313,6 +368,23 @@ async def delete_supplier(
     
     await db.delete(supplier)
     await db.commit()
+    
+    # Audit
+    try:
+        client_host = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        await log_audit(
+            db,
+            user_id=current_user.id if current_user else None,
+            action="SUPPLIER_DELETE",
+            entity_type="supplier",
+            entity_id=supplier_id,
+            details={"company_name": supplier.company_name, "supplier_id": supplier.supplier_id},
+            ip_address=client_host,
+            user_agent=ua,
+        )
+    except Exception:
+        pass
     
     return {"message": "Supplier deleted successfully"}
 

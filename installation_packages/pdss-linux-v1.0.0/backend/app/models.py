@@ -33,6 +33,8 @@ class ItemMaster(Base):
     company = Column(String(100), nullable=False, index=True)  # Manufacturer/Brand
     item_name = Column(String(200), nullable=False)  # Product name
     model = Column(String(100), nullable=True)  # Model number/variant
+    # NEW: Optional part number for the master item
+    part_number = Column(String, nullable=True)
     specifications = Column(JSON, nullable=True)  # Standard specs (length, weight, material, etc.)
     category = Column(String(100), nullable=True, index=True)  # Construction, Electrical, etc.
     unit = Column(String(50), default='piece')  # piece, meter, kg, etc.
@@ -46,6 +48,38 @@ class ItemMaster(Base):
     # Relationships
     created_by = relationship("User", foreign_keys=[created_by_id])
     project_items = relationship("ProjectItem", back_populates="master_item")
+
+
+class ItemSubItem(Base):
+    """Sub-item definition under an items_master entry"""
+    __tablename__ = "item_subitems"
+
+    id = Column(Integer, primary_key=True)
+    item_master_id = Column(Integer, ForeignKey("items_master.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    part_number = Column(String, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    master_item = relationship("ItemMaster", backref="sub_items")
+
+
+class ProjectItemSubItem(Base):
+    """Quantity of a sub-item for a specific project item"""
+    __tablename__ = "project_item_subitems"
+
+    id = Column(Integer, primary_key=True)
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_subitem_id = Column(Integer, ForeignKey("item_subitems.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantity = Column(Integer, nullable=False, default=0)
+
+    # Relationships
+    project_item = relationship("ProjectItem", backref="sub_items_quantities")
+    sub_item = relationship("ItemSubItem")
 
 
 class User(Base):
@@ -719,3 +753,21 @@ class SupplierDocument(Base):
     # Relationships
     supplier = relationship("Supplier", back_populates="documents")
     created_by = relationship("User", foreign_keys=[created_by_id])
+
+
+class AuditLog(Base):
+    """Central audit log for user actions across the platform"""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    action = Column(String(100), nullable=False, index=True)  # e.g., LOGIN, PROJECT_CREATE, ITEM_MASTER_CREATE
+    entity_type = Column(String(100), nullable=True, index=True)  # e.g., project, project_item, procurement_option, item_master, supplier
+    entity_id = Column(Integer, nullable=True, index=True)
+    details = Column(JSON, nullable=True)  # arbitrary structured payload snapshot
+    ip_address = Column(String(100), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    user = relationship("User")

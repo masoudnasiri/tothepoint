@@ -44,6 +44,9 @@ import { currencyAPI } from '../services/api.ts';
 import { CurrencyWithRates, CurrencyCreate, ExchangeRateCreate, CurrencyConversion } from '../types/index.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { useTranslation } from 'react-i18next';
+import { useMemo } from 'react';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -67,7 +70,19 @@ function TabPanel(props: TabPanelProps) {
 }
 
 export const CurrencyManagementPage: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  
+  // Locale-aware date formatter
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(() => (dateString: string) => {
+    try {
+      const d = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+      return isFa ? jalaliFormat(d, 'yyyy/MM/dd') : gregorianFormat(d, 'yyyy-MM-dd');
+    } catch {
+      return new Date(dateString).toLocaleDateString();
+    }
+  }, [isFa]);
+  
   const [currencies, setCurrencies] = useState<CurrencyWithRates[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -531,7 +546,7 @@ export const CurrencyManagementPage: React.FC = () => {
                 ) : (
                   exchangeRates.map((rate) => (
                     <TableRow key={rate.id}>
-                      <TableCell>{new Date(rate.date).toLocaleDateString()}</TableCell>
+                      <TableCell>{formatDisplayDate(rate.date)}</TableCell>
                       <TableCell>
                         <Chip label={rate.from_currency} size="small" color="primary" variant="outlined" />
                       </TableCell>
@@ -684,7 +699,7 @@ export const CurrencyManagementPage: React.FC = () => {
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
                         {conversionResult ? 
-                          `${t('finance.dateLabel')} ${new Date(conversionResult.conversion_date).toLocaleDateString()}` :
+                          `${t('finance.dateLabel')} ${formatDisplayDate(conversionResult.conversion_date)}` :
                           ''
                         }
                       </Typography>
