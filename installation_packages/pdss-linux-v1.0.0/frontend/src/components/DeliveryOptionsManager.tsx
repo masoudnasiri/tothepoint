@@ -136,14 +136,14 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
       setOptions(response.data);
       if (!showError) {
         // Clear any previous errors on silent refresh
-        setListError('');
+        setError('');
       }
     } catch (err: any) {
       // Handle 404 specifically - item might not exist yet or be deleted
       if (err.response?.status === 404) {
         const errorMsg = err.response?.data?.detail || 'Project item not found';
         if (showError) {
-          setListError(`Cannot load delivery options: ${errorMsg}`);
+          setError(`Cannot load delivery options: ${errorMsg}`);
         } else {
           console.debug('Project item not found (silent):', errorMsg);
         }
@@ -152,7 +152,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
       } else {
         const errorMsg = formatApiError(err, 'load');
         if (showError) {
-          setListError(errorMsg);
+          setError(errorMsg);
         } else {
           console.debug('Error loading delivery options (silent):', errorMsg);
         }
@@ -188,7 +188,10 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
     setInvoiceTimingType(option.invoice_timing_type);
     setInvoiceIssueDate(option.invoice_issue_date ? new Date(option.invoice_issue_date) : null);
     setInvoiceDaysAfter(option.invoice_days_after_delivery || 30);
-    setInvoiceAmount(option.invoice_amount_per_unit);
+    // Ensure invoice_amount_per_unit is converted to number (API may return string for Decimal types)
+    setInvoiceAmount(typeof option.invoice_amount_per_unit === 'string' 
+      ? parseFloat(option.invoice_amount_per_unit) || 0 
+      : option.invoice_amount_per_unit || 0);
     setInvoiceCurrencyId(option.invoice_currency_id || '');
     setPreferenceRank(option.preference_rank || 1);
     setNotes(option.notes || '');
@@ -216,7 +219,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
           ? invoiceIssueDate.toISOString().split('T')[0] 
           : null,
         invoice_days_after_delivery: invoiceTimingType === 'RELATIVE' ? invoiceDaysAfter : null,
-        invoice_amount_per_unit: invoiceAmount,
+        invoice_amount_per_unit: typeof invoiceAmount === 'number' ? invoiceAmount : parseFloat(String(invoiceAmount)) || 0,
         invoice_currency_id: invoiceCurrencyId,
         preference_rank: preferenceRank,
         notes: notes || null,
@@ -366,7 +369,9 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
                   </TableCell>
                   <TableCell align="right">
                     <Typography variant="body2" fontWeight="medium">
-                      ${option.invoice_amount_per_unit.toLocaleString()}
+                      ${typeof option.invoice_amount_per_unit === 'number' 
+                        ? option.invoice_amount_per_unit.toLocaleString() 
+                        : parseFloat(String(option.invoice_amount_per_unit || 0)).toLocaleString()}
                     </Typography>
                   </TableCell>
                   <TableCell align="center">
@@ -501,7 +506,11 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
             fullWidth
             type="text"
             label="Invoice Amount per Unit *"
-            value={invoiceAmount ? addCommasWhileTyping(invoiceAmount.toString()) : ''}
+            value={invoiceAmount && typeof invoiceAmount === 'number' 
+              ? addCommasWhileTyping(invoiceAmount.toString()) 
+              : invoiceAmount 
+                ? addCommasWhileTyping(String(parseFloat(String(invoiceAmount)) || 0))
+                : ''}
             onChange={(e) => {
               const rawValue = parseFormattedNumber(e.target.value);
               const numericValue = parseFloat(rawValue) || 0;
@@ -573,7 +582,9 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
               }
             </Typography>
             <Typography variant="body2">
-              • Amount: {invoiceAmount ? addCommasWhileTyping(invoiceAmount.toFixed(2)) : '0.00'} per unit
+              • Amount: {invoiceAmount && typeof invoiceAmount === 'number' 
+                ? addCommasWhileTyping(invoiceAmount.toFixed(2)) 
+                : addCommasWhileTyping(parseFloat(String(invoiceAmount || 0)).toFixed(2))} per unit
             </Typography>
           </Alert>
         </DialogContent>

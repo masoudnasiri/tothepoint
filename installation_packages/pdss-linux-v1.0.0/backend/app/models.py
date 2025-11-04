@@ -221,9 +221,10 @@ class DeliveryOption(Base):
     invoice_days_after_delivery = Column(Integer, nullable=True, default=30)  # Used when invoice_timing_type = 'RELATIVE'
     
     # Revenue Configuration
-    invoice_amount_per_unit = Column(Numeric(12, 2), nullable=False)
+    invoice_amount_per_unit = Column(Numeric(18, 2), nullable=False)
     # Defines the revenue per unit for this specific delivery option
     # Allows different pricing for different delivery dates
+    # Precision increased from Numeric(12,2) to Numeric(18,2) to support larger values
     
     # Priority/Preference
     preference_rank = Column(Integer, nullable=True)  # 1 = most preferred, null = no preference

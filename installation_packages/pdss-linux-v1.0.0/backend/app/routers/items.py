@@ -6,7 +6,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.auth import get_current_user, require_pm, require_pmo, require_role, get_user_projects
+from app.auth import get_current_user, require_pm, require_pmo, require_pm_or_pmo, require_role, get_user_projects
 from app.crud import (
     create_project_item, get_project_item, get_project_items,
     update_project_item, delete_project_item, finalize_project_item, log_audit
@@ -156,13 +156,14 @@ async def list_project_items(
 async def create_new_project_item(
     item: ProjectItemCreate,
     request: Request,
-    current_user: User = Depends(require_pm()),
+    current_user: User = Depends(require_pm_or_pmo()),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new project item (PM only)"""
+    """Create a new project item (PM or PMO)"""
     user_projects = await get_user_projects(db, current_user)
     
     # Check if user can access this project
+    # PMO and admin can add items to any project, PM can only add to assigned projects
     if current_user.role == "pm" and item.project_id not in user_projects:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

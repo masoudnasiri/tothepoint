@@ -185,10 +185,19 @@ async def create_delivery_option(
         return new_option
     except Exception as e:
         await db.rollback()
-        logger.error(f"Error creating delivery option: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"Error creating delivery option: {error_msg}")
+        
+        # Check if it's a numeric overflow error
+        if "numeric" in error_msg.lower() or "overflow" in error_msg.lower() or "value too large" in error_msg.lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invoice amount per unit is too large. Maximum value is 999,999,999,999,999,999.99. Please enter a smaller amount."
+            )
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create delivery option: {str(e)}"
+            detail=f"Failed to create delivery option: {error_msg}"
         )
 
 
@@ -239,10 +248,19 @@ async def update_delivery_option(
                 pass
         except Exception as e:
             await db.rollback()
-            logger.error(f"Error updating delivery option: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error updating delivery option: {error_msg}")
+            
+            # Check if it's a numeric overflow error
+            if "numeric" in error_msg.lower() or "overflow" in error_msg.lower() or "value too large" in error_msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invoice amount per unit is too large. Maximum value is 999,999,999,999,999,999.99. Please enter a smaller amount."
+                )
+            
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to update delivery option: {str(e)}"
+                detail=f"Failed to update delivery option: {error_msg}"
             )
     
     # Fetch and return updated option
