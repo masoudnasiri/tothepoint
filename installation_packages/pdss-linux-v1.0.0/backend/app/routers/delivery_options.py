@@ -28,7 +28,23 @@ async def get_delivery_options_by_project_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all delivery options for a specific project item"""
+    """
+    Get all delivery options for a specific project item.
+    Works for both finalized and non-finalized items.
+    """
+    # Verify that the project item exists (but don't require finalization)
+    project_item_result = await db.execute(
+        select(ProjectItem).where(ProjectItem.id == project_item_id)
+    )
+    project_item = project_item_result.scalar_one_or_none()
+    
+    if not project_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project item with ID {project_item_id} not found"
+        )
+    
+    # Get delivery options for this item
     result = await db.execute(
         select(DeliveryOption)
         .where(DeliveryOption.project_item_id == project_item_id)
@@ -112,7 +128,22 @@ async def create_delivery_option(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new delivery option"""
+    """
+    Create a new delivery option for a project item.
+    Works for both finalized and non-finalized items.
+    """
+    # Verify that the project item exists (but don't require finalization)
+    project_item_result = await db.execute(
+        select(ProjectItem).where(ProjectItem.id == option_data.project_item_id)
+    )
+    project_item = project_item_result.scalar_one_or_none()
+    
+    if not project_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Project item with ID {option_data.project_item_id} not found"
+        )
+    
     # ✅ Auto-calculate slot based on existing options for this item
     existing_result = await db.execute(
         select(DeliveryOption)
@@ -132,25 +163,33 @@ async def create_delivery_option(
     option_dict = option_data.dict()
     option_dict['delivery_slot'] = calculated_slot
     
-    new_option = DeliveryOption(**option_dict)
-    db.add(new_option)
-    await db.commit()
-    await db.refresh(new_option)
-    
-    logger.info(f"Created delivery option for item {option_data.project_item_id}, slot {calculated_slot}")
     try:
-        await log_audit(
-            db,
-            user_id=current_user.id,
-            action="DELIVERY_OPTION_CREATE",
-            entity_type="delivery_option",
-            entity_id=new_option.id,
-            details=option_dict,
+        new_option = DeliveryOption(**option_dict)
+        db.add(new_option)
+        await db.commit()
+        await db.refresh(new_option)
+        
+        logger.info(f"Created delivery option for item {option_data.project_item_id}, slot {calculated_slot}")
+        try:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="DELIVERY_OPTION_CREATE",
+                entity_type="delivery_option",
+                entity_id=new_option.id,
+                details=option_dict,
+            )
+        except Exception:
+            pass
+        
+        return new_option
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error creating delivery option: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create delivery option: {str(e)}"
         )
-    except Exception:
-        pass
-    
-    return new_option
 
 
 @router.put("/{option_id}", response_model=DeliveryOptionSchema)
@@ -160,7 +199,10 @@ async def update_delivery_option(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update a delivery option"""
+    """
+    Update a delivery option.
+    Works for both finalized and non-finalized items.
+    """
     # Check if exists
     result = await db.execute(
         select(DeliveryOption).where(DeliveryOption.id == option_id)
@@ -177,23 +219,31 @@ async def update_delivery_option(
     update_data = option_update.dict(exclude_unset=True)
     
     if update_data:
-        await db.execute(
-            update(DeliveryOption)
-            .where(DeliveryOption.id == option_id)
-            .values(**update_data)
-        )
-        await db.commit()
         try:
-            await log_audit(
-                db,
-                user_id=current_user.id,
-                action="DELIVERY_OPTION_UPDATE",
-                entity_type="delivery_option",
-                entity_id=option_id,
-                details=update_data,
+            await db.execute(
+                update(DeliveryOption)
+                .where(DeliveryOption.id == option_id)
+                .values(**update_data)
             )
-        except Exception:
-            pass
+            await db.commit()
+            try:
+                await log_audit(
+                    db,
+                    user_id=current_user.id,
+                    action="DELIVERY_OPTION_UPDATE",
+                    entity_type="delivery_option",
+                    entity_id=option_id,
+                    details=update_data,
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Error updating delivery option: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update delivery option: {str(e)}"
+            )
     
     # Fetch and return updated option
     result = await db.execute(

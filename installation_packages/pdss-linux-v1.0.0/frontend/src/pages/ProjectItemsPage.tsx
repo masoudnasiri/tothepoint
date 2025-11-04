@@ -30,6 +30,7 @@ import {
   ListItemText,
   ListItemSecondaryAction,
   MenuItem,
+  Autocomplete,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -390,32 +391,81 @@ export const ProjectItemsPage: React.FC = () => {
   // Render form fields function for both create and edit dialogs
   const renderFormFields = () => (
     <>
-      {/* Select from Items Master */}
-      <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-        <InputLabel>{t('projectItems.selectItemFromCatalog')}</InputLabel>
-        <Select
-          value={formData.master_item_id || ''}
-          label={t('projectItems.selectItemFromCatalog')}
-          onChange={(e) => handleMasterItemSelect(e.target.value as number)}
-        >
-          {masterItems.length === 0 ? (
-            <MenuItem disabled>No items in catalog. Create items in Items Master page first.</MenuItem>
-          ) : (
-            masterItems.map((item) => (
-              <MenuItem key={item.id} value={item.id}>
-                <Box>
-                  <Typography variant="body2" fontWeight="medium">
-                    {item.item_code}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {item.company} - {item.item_name} {item.model && `(${item.model})`}
-                  </Typography>
-                </Box>
-              </MenuItem>
-            ))
-          )}
-        </Select>
-      </FormControl>
+      {/* Select from Items Master - Searchable Autocomplete */}
+      <Autocomplete
+        fullWidth
+        options={masterItems}
+        getOptionLabel={(option) => {
+          const parts = [
+            option.item_code,
+            option.item_name,
+            option.company,
+            option.model,
+            option.category
+          ].filter(Boolean);
+          return parts.join(' - ');
+        }}
+        value={selectedMasterItem}
+        onChange={(event, newValue) => {
+          if (newValue) {
+            handleMasterItemSelect(newValue.id);
+          } else {
+            // Clear selection
+            setSelectedMasterItem(null);
+            setMasterSubItems([]);
+            setFormData({
+              ...formData,
+              master_item_id: undefined,
+              item_code: '',
+              item_name: '',
+              sub_items: [],
+            });
+          }
+        }}
+        filterOptions={(options, { inputValue }) => {
+          // Custom filter to search across multiple fields
+          const searchTerm = inputValue.toLowerCase().trim();
+          if (!searchTerm) return options;
+          
+          return options.filter((item) => {
+            const searchFields = [
+              item.item_code?.toLowerCase() || '',
+              item.item_name?.toLowerCase() || '',
+              item.company?.toLowerCase() || '',
+              item.model?.toLowerCase() || '',
+              item.category?.toLowerCase() || '',
+            ];
+            
+            return searchFields.some(field => field.includes(searchTerm));
+          });
+        }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            label={t('projectItems.selectItemFromCatalog')}
+            margin="dense"
+            placeholder={masterItems.length === 0 
+              ? t('projectItems.noItemsInCatalog') 
+              : t('projectItems.searchItemPlaceholder') || 'Search by code, name, company, model, or category...'}
+          />
+        )}
+        noOptionsText={masterItems.length === 0 
+          ? t('projectItems.noItemsInCatalog') 
+          : t('projectItems.noItemsFound') || 'No items found'}
+        sx={{ mb: 2 }}
+        renderOption={(props, option) => (
+          <Box component="li" {...props} key={option.id}>
+            <Box>
+              <Typography variant="body2" fontWeight="medium">
+                {option.item_code}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {option.company} - {option.item_name} {option.model && `(${option.model})`} {option.category && `[${option.category}]`}
+              </Typography>
+            </Box>
+          </Box>
+        )}
+      />
 
       {/* Display selected master item details */}
       {selectedMasterItem && (

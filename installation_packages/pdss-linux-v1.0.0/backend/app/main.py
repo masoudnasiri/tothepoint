@@ -47,25 +47,46 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# Add CORS middleware - ensure it's applied before other middleware
+# This ensures CORS headers are included even in error responses
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
-# Global exception handler
+# Global exception handler - ensures CORS headers are always included
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    """Global exception handler for unhandled errors"""
-    logger.error(f"Unhandled exception: {str(exc)}")
-    return JSONResponse(
+    """
+    Global exception handler for unhandled errors.
+    Ensures CORS headers are included even when exceptions bypass middleware.
+    """
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    
+    # Create response with CORS headers
+    response = JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"}
     )
+    
+    # Ensure CORS headers are added even for errors
+    # CORSMiddleware should handle this, but we ensure it here as fallback
+    origin = request.headers.get("origin")
+    if origin:
+        # Check if origin is allowed (basic check)
+        allowed_origins = settings.get_allowed_origins()
+        if "*" in allowed_origins or origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+    
+    return response
 
 
 # Health check endpoint

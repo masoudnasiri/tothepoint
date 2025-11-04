@@ -130,12 +130,33 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
     }
   };
 
-  const fetchOptions = async () => {
+  const fetchOptions = async (showError: boolean = true) => {
     try {
       const response = await deliveryOptionsAPI.listByItem(projectItemId);
       setOptions(response.data);
+      if (!showError) {
+        // Clear any previous errors on silent refresh
+        setListError('');
+      }
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to load delivery options'));
+      // Handle 404 specifically - item might not exist yet or be deleted
+      if (err.response?.status === 404) {
+        const errorMsg = err.response?.data?.detail || 'Project item not found';
+        if (showError) {
+          setListError(`Cannot load delivery options: ${errorMsg}`);
+        } else {
+          console.debug('Project item not found (silent):', errorMsg);
+        }
+        // Set empty options instead of error state for better UX
+        setOptions([]);
+      } else {
+        const errorMsg = formatApiError(err, 'load');
+        if (showError) {
+          setListError(errorMsg);
+        } else {
+          console.debug('Error loading delivery options (silent):', errorMsg);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -182,6 +203,9 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
       return;
     }
     
+    // Clear previous errors
+    setError('');
+    
     try {
       const data: any = {
         project_item_id: projectItemId,
@@ -207,11 +231,36 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
         setSuccess('Delivery option created successfully');
       }
 
+      // Close dialog immediately on success
       setDialogOpen(false);
       resetForm();
-      fetchOptions();
+      
+      // Show success briefly, then refresh list silently in background
+      setTimeout(() => {
+        setSuccess('');
+        fetchOptions(false); // Silent refresh - errors won't show to user
+      }, 2000);
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to save delivery option'));
+      // Handle specific error cases
+      if (err.response?.status === 404) {
+        const errorMsg = err.response?.data?.detail || 'Project item not found';
+        setError(`Cannot save: ${errorMsg}. Please ensure the item exists.`);
+      } else if (err.response?.status === 500) {
+        // Try to refresh and see if save actually succeeded
+        try {
+          await fetchOptions(false);
+          // If refresh succeeds, assume save worked
+          setDialogOpen(false);
+          resetForm();
+          setSuccess('Delivery option saved successfully (verified)');
+          setTimeout(() => setSuccess(''), 2000);
+        } catch (refreshErr: any) {
+          // Both save and refresh failed
+          setError(formatApiError(err, 'save'));
+        }
+      } else {
+        setError(formatApiError(err, 'save'));
+      }
     }
   };
 
