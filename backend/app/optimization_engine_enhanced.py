@@ -446,18 +446,31 @@ class EnhancedProcurementOptimizer:
             for var in vars_list:
                 constraint.SetCoefficient(var, 1)
         
-        # Add budget constraints
+        # Add budget constraints (MULTI-CURRENCY SUPPORT)
+        # Group by time slot AND currency
+        time_currency_groups = {}  # {(time_slot, currency): [(var, cost), ...]}
+        
         time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
         for time_slot, var_data in time_groups.items():
-            if time_slot not in self.budget_data:
-                # Use a large budget for time slots without explicit budget data
-                budget_limit = 100000000000000.0  # $100T default for demand fulfillment
+            for var, cost, currency in var_data:
+                key = (time_slot, currency)
+                if key not in time_currency_groups:
+                    time_currency_groups[key] = []
+                time_currency_groups[key].append((var, cost))
+        
+        # Apply budget constraints per currency
+        for (time_slot, currency), var_cost_pairs in time_currency_groups.items():
+            if time_slot in self.budget_data_by_currency:
+                currency_budgets = self.budget_data_by_currency[time_slot]
+                budget_amount = currency_budgets.get(currency, Decimal(0))
+                budget_limit = float(budget_amount)
             else:
-                budget_limit = float(self.budget_data[time_slot].available_budget)
+                # No budget data for this time slot - use large default
+                budget_limit = 100000000000000.0  # $100T default
             
             constraint = solver.Constraint(0, budget_limit)
             
-            for var, cost in var_data:
+            for var, cost in var_cost_pairs:
                 constraint.SetCoefficient(var, cost)
         
         # Set objective based on strategy
@@ -557,18 +570,31 @@ class EnhancedProcurementOptimizer:
             for var in vars_list:
                 constraint.SetCoefficient(var, 1)
         
-        # Add budget constraints
+        # Add budget constraints (MULTI-CURRENCY SUPPORT)
+        # Group by time slot AND currency
+        time_currency_groups = {}  # {(time_slot, currency): [(var, cost), ...]}
+        
         time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
         for time_slot, var_data in time_groups.items():
-            if time_slot not in self.budget_data:
-                # Use a large budget for time slots without explicit budget data
-                budget_limit = 100000000000000.0  # $100T default for demand fulfillment
+            for var, cost, currency in var_data:
+                key = (time_slot, currency)
+                if key not in time_currency_groups:
+                    time_currency_groups[key] = []
+                time_currency_groups[key].append((var, cost))
+        
+        # Apply budget constraints per currency
+        for (time_slot, currency), var_cost_pairs in time_currency_groups.items():
+            if time_slot in self.budget_data_by_currency:
+                currency_budgets = self.budget_data_by_currency[time_slot]
+                budget_amount = currency_budgets.get(currency, Decimal(0))
+                budget_limit = float(budget_amount)
             else:
-                budget_limit = float(self.budget_data[time_slot].available_budget)
+                # No budget data for this time slot - use large default
+                budget_limit = 100000000000000.0  # $100T default
             
             constraint = solver.Constraint(0, budget_limit)
             
-            for var, cost in var_data:
+            for var, cost in var_cost_pairs:
                 constraint.SetCoefficient(var, cost)
         
         # Set objective
@@ -880,14 +906,41 @@ class EnhancedProcurementOptimizer:
                 "💡 Tip: All items must have at least one finalized procurement option for optimization."
             )
         
-        # Load budget data
+        # Load budget data with multi-currency support
         budget_result = await self.db.execute(
             select(BudgetData).order_by(BudgetData.budget_date)
         )
         budget_list = budget_result.scalars().all()
         self.budget_data = {}
+        self.budget_data_by_currency = {}  # NEW: Track budgets by currency {time_slot: {currency: amount}}
+        
         for idx, bd in enumerate(budget_list, start=1):
             self.budget_data[idx] = bd
+            
+            # Load multi_currency_budget if available
+            if bd.multi_currency_budget:
+                import json
+                if isinstance(bd.multi_currency_budget, str):
+                    currency_dict = json.loads(bd.multi_currency_budget)
+                else:
+                    currency_dict = bd.multi_currency_budget
+                
+                if idx not in self.budget_data_by_currency:
+                    self.budget_data_by_currency[idx] = {}
+                
+                # Store each currency separately
+                for currency, amount in currency_dict.items():
+                    currency_code = currency.strip().upper() if currency else 'IRR'
+                    if currency_code not in self.budget_data_by_currency[idx]:
+                        self.budget_data_by_currency[idx][currency_code] = Decimal(0)
+                    self.budget_data_by_currency[idx][currency_code] += Decimal(str(amount))
+            else:
+                # Fallback to legacy available_budget (assumed IRR)
+                if idx not in self.budget_data_by_currency:
+                    self.budget_data_by_currency[idx] = {}
+                if 'IRR' not in self.budget_data_by_currency[idx]:
+                    self.budget_data_by_currency[idx]['IRR'] = Decimal(0)
+                self.budget_data_by_currency[idx]['IRR'] += Decimal(str(bd.available_budget or 0))
         
         if not self.budget_data:
             raise ValueError(
@@ -897,7 +950,7 @@ class EnhancedProcurementOptimizer:
                 "   2. Click 'Budget Management' tab\n"
                 "   3. Add monthly budgets:\n"
                 "      • Select month\n"
-                "      • Enter available budget amount\n"
+                "      • Enter available budget amount (or multi-currency budget)\n"
                 "   4. Add at least 3-6 months of budget data\n\n"
                 "💡 Tip: Budget data determines when purchases can be made."
             )
@@ -993,37 +1046,65 @@ class EnhancedProcurementOptimizer:
             cash_flow_vars = []
             cash_flow_coeffs = []
             
+            # Group costs by currency (MULTI-CURRENCY SUPPORT)
+            costs_by_currency = {}  # {currency: [(var, cost), ...]}
+            
             for var, option, item in time_groups[time_slot]:
-                cost = self._calculate_effective_cost(option, item) * item.quantity
-                cash_flow_vars.append(var)
+                cost, currency = self._calculate_effective_cost(option, item)
+                total_cost = cost * item.quantity
+                
+                if currency not in costs_by_currency:
+                    costs_by_currency[currency] = []
+                costs_by_currency[currency].append((var, total_cost))
+                
+                logger.debug(
+                    f"    Cost: {total_cost:,.2f} {currency} for {item.item_code} {option.supplier_name}"
+                )
+            
+            # Apply budget constraints PER CURRENCY (not mixed)
+            for currency, var_cost_pairs in costs_by_currency.items():
+                cash_flow_vars = [v for v, _ in var_cost_pairs]
                 # Scale to thousands for numerical stability
-                cash_flow_coeffs.append(int(cost / 1000))
-                logger.debug(f"    Cost: {cost:,.2f} -> {int(cost / 1000)}K for {item.item_code} {option.supplier_name}")
-            
-            if time_slot in self.budget_data:
-                budget_limit = int(self.budget_data[time_slot].available_budget / 1000)
-                logger.info(f"Time slot {time_slot}: budget={budget_limit}K, vars={len(cash_flow_vars)}")
-            else:
-                # Use a large budget for time slots without explicit budget data
-                # Since we have over 1 trillion in total budget, use a generous default
-                budget_limit = 100000000000  # $100T default (100,000,000,000K)
-                logger.info(f"Time slot {time_slot}: DEFAULT budget={budget_limit}K, vars={len(cash_flow_vars)}")
-            
-            # Calculate total cost for this time slot
-            total_cost = sum(cash_flow_coeffs)
-            logger.info(f"  Total cost for time slot {time_slot}: {total_cost}K (budget: {budget_limit}K)")
-            
-            if cash_flow_vars:
-                # Create slack variable to allow exceeding budget
-                max_slack = max(budget_limit // 2, 500)  # At least $500K
-                slack_var = model.NewIntVar(0, max_slack, f'cpsat_budget_slack_{time_slot}')
+                cash_flow_coeffs = [int(c / 1000) for _, c in var_cost_pairs]
                 
-                # Soft constraint: spending <= budget + slack
-                total_spending = sum(v * c for v, c in zip(cash_flow_vars, cash_flow_coeffs))
-                model.Add(total_spending <= budget_limit + slack_var)
+                # Get budget for this currency and time slot
+                if time_slot in self.budget_data_by_currency:
+                    currency_budgets = self.budget_data_by_currency[time_slot]
+                    budget_amount = currency_budgets.get(currency, Decimal(0))
+                    budget_limit = int(budget_amount / 1000)
+                    logger.info(
+                        f"Time slot {time_slot} ({currency}): budget={budget_limit}K, "
+                        f"vars={len(cash_flow_vars)}"
+                    )
+                else:
+                    # No budget data for this time slot - use large default
+                    budget_limit = 100000000000  # $100T default (100,000,000,000K)
+                    logger.info(
+                        f"Time slot {time_slot} ({currency}): DEFAULT budget={budget_limit}K, "
+                        f"vars={len(cash_flow_vars)}"
+                    )
                 
-                # Store slack for penalty
-                self.cpsat_budget_slack_vars.append(slack_var)
+                # Calculate total cost for this currency in this time slot
+                total_cost = sum(cash_flow_coeffs)
+                logger.info(
+                    f"  Total cost for time slot {time_slot} ({currency}): "
+                    f"{total_cost}K (budget: {budget_limit}K)"
+                )
+                
+                if cash_flow_vars:
+                    # Create slack variable to allow exceeding budget
+                    max_slack = max(budget_limit // 2, 500)  # At least $500K
+                    slack_var = model.NewIntVar(
+                        0, max_slack, 
+                        f'cpsat_budget_slack_{time_slot}_{currency}'
+                    )
+                    
+                    # Soft constraint: spending <= budget + slack (per currency)
+                    total_spending = sum(v * c for v, c in zip(cash_flow_vars, cash_flow_coeffs))
+                    model.Add(total_spending <= budget_limit + slack_var)
+                    
+                    # Store slack for penalty
+                    self.cpsat_budget_slack_vars.append(slack_var)
     
     def _set_cpsat_objective(self, model: cp_model.CpModel, variables: Dict, strategy: OptimizationStrategy):
         """Set objective function for CP-SAT based on strategy
@@ -1052,7 +1133,8 @@ class EnhancedProcurementOptimizer:
                 continue
             
             # Calculate procurement cost
-            cost = float(self._calculate_effective_cost(option, item) * item.quantity)
+            cost, _ = self._calculate_effective_cost(option, item)
+            cost = float(cost * item.quantity)
             
             # Calculate business value (revenue from item)
             business_value = 0
@@ -1168,7 +1250,8 @@ class EnhancedProcurementOptimizer:
             if not item:
                 continue
             
-            cost = float(self._calculate_effective_cost(option, item) * item.quantity)
+            cost, _ = self._calculate_effective_cost(option, item)
+            cost = float(cost * item.quantity)
             project = self.projects.get(project_id)
             
             # Strategy-based weighting (same logic as CP-SAT)
@@ -1216,28 +1299,42 @@ class EnhancedProcurementOptimizer:
                         if i.project_id == project_id and i.item_code == item_code), None)
             
             if item:
-                cost = float(self._calculate_effective_cost(option, item) * item.quantity)
+                cost, _ = self._calculate_effective_cost(option, item)
+                cost = float(cost * item.quantity)
                 if purchase_time not in time_groups:
                     time_groups[purchase_time] = []
                 time_groups[purchase_time].append((var, cost))
         
         return time_groups
     
-    def _calculate_effective_cost(self, option: ProcurementOption, item: ProjectItem) -> Decimal:
-        """Calculate effective cost with discounts and shipping"""
+    def _calculate_effective_cost(self, option: ProcurementOption, item: ProjectItem) -> Tuple[Decimal, str]:
+        """
+        Calculate effective cost with discounts and shipping
+        
+        IMPORTANT: Returns cost AND currency to support multi-currency optimization.
+        NO currency conversion is performed - cost stays in original currency.
+        
+        Returns:
+            Tuple[cost_amount, currency_code]
+            Example: (Decimal('2000'), 'USD') or (Decimal('5000000'), 'IRR')
+        """
         # Get the original cost in its original currency
         if hasattr(option, 'cost_amount') and option.cost_amount:
             base_cost = option.cost_amount
-            cost_currency = getattr(option, 'cost_currency', 'IRR')
+            cost_currency = getattr(option, 'cost_currency', 'IRR') or 'IRR'
         else:
             # Fallback to legacy field for backward compatibility
             base_cost = option.base_cost
             cost_currency = 'IRR'
         
-        # Add shipping cost
+        # Normalize currency code
+        cost_currency = cost_currency.strip().upper() if cost_currency else 'IRR'
+        
+        # Add shipping cost (same currency)
         shipping_cost = getattr(option, 'shipping_cost', 0) or Decimal(0)
         base_cost = base_cost + shipping_cost
         
+        # Apply discounts (cost stays in same currency)
         if option.payment_terms.get('type') == 'cash':
             discount = option.payment_terms.get('discount_percent', 0)
             base_cost = base_cost * (1 - Decimal(discount) / 100)
@@ -1247,7 +1344,7 @@ class EnhancedProcurementOptimizer:
             option.discount_bundle_percent):
             base_cost = base_cost * (1 - option.discount_bundle_percent / 100)
         
-        return base_cost
+        return base_cost, cost_currency
     
     def _extract_cpsat_decisions(self, solver: cp_model.CpSolver, variables: Dict) -> List[OptimizationDecision]:
         """Extract decisions from CP-SAT solution"""
@@ -1316,7 +1413,7 @@ class EnhancedProcurementOptimizer:
         if not (option and item and project):
             return None
         
-        unit_cost = self._calculate_effective_cost(option, item)
+        unit_cost, _ = self._calculate_effective_cost(option, item)
         final_cost = unit_cost * item.quantity
         purchase_time = delivery_time - option.lomc_lead_time
         

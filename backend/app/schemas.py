@@ -324,8 +324,8 @@ class ProjectItemCreate(ProjectItemBase):
 
 
 class ProjectItemUpdate(BaseModel):
-    item_code: Optional[str] = Field(None, min_length=1, max_length=50)
-    item_name: Optional[str] = None
+    item_code: Optional[str] = Field(None, min_length=1, max_length=100)  # Match model: String(100)
+    item_name: Optional[str] = None  # No length limit - can be long
     quantity: Optional[int] = Field(None, gt=0)
     delivery_options: Optional[List[str]] = Field(None, min_items=1)
     status: Optional[ProjectItemStatusEnum] = None
@@ -394,7 +394,7 @@ class PaymentTermsInstallments(BaseModel):
 
 
 class ProcurementOptionBase(BaseModel):
-    item_code: str = Field(..., min_length=1, max_length=50)
+    item_code: str = Field(..., min_length=1, max_length=100)  # Match model: String(100)
     supplier_name: str = Field(..., min_length=1)  # Legacy field - will be deprecated
     supplier_id: Optional[int] = Field(None, description="ID of supplier from centralized suppliers table")
     base_cost: Decimal = Field(..., gt=0)
@@ -415,7 +415,7 @@ class ProcurementOptionCreate(ProcurementOptionBase):
 
 
 class ProcurementOptionUpdate(BaseModel):
-    item_code: Optional[str] = Field(None, min_length=1, max_length=50)
+    item_code: Optional[str] = Field(None, min_length=1, max_length=100)  # Match model: String(100)
     supplier_name: Optional[str] = Field(None, min_length=1)  # Legacy field - will be deprecated
     supplier_id: Optional[int] = Field(None, description="ID of supplier from centralized suppliers table")
     base_cost: Optional[Decimal] = Field(None, gt=0)

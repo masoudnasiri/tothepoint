@@ -340,13 +340,13 @@ export const ProjectsPage: React.FC = () => {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                    Total Projects
+                    {t('projects.totalProjects')}
                   </Typography>
                   <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
                     {formatNumber(totalProjects)}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
-                    {activeProjects} active
+                    {t('projects.active', { count: activeProjects })}
                   </Typography>
                 </Box>
                 <Box sx={{ 
@@ -370,13 +370,13 @@ export const ProjectsPage: React.FC = () => {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                    Total Items
+                    {t('projects.totalItems')}
                   </Typography>
                   <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#2e7d32' }}>
                     {formatNumber(totalItems)}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
-                    Across all projects
+                    {t('projects.acrossAllProjects')}
                   </Typography>
                 </Box>
                 <Box sx={{ 
@@ -400,13 +400,13 @@ export const ProjectsPage: React.FC = () => {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                    Total Quantity
+                    {t('projects.totalQuantity')}
                   </Typography>
                   <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#ed6c02' }}>
                     {formatNumber(totalQuantity)}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
-                    Units to procure
+                    {t('projects.unitsToProcure')}
                   </Typography>
                 </Box>
                 <Box sx={{ 
@@ -430,13 +430,13 @@ export const ProjectsPage: React.FC = () => {
               <Box display="flex" alignItems="center" justifyContent="space-between">
                 <Box>
                   <Typography color="textSecondary" gutterBottom variant="subtitle2">
-                    Total Invoice Value
+                    {t('projects.totalInvoiceValue')}
                   </Typography>
                   <Typography variant="h4" component="h2" sx={{ fontWeight: 'bold', color: '#9c27b0' }}>
                     {formatCurrency(totalEstimatedRevenue || 0)}
                   </Typography>
                   <Typography variant="caption" color="textSecondary">
-                    Expected revenue
+                    {t('projects.expectedRevenue')}
                   </Typography>
                 </Box>
                 <Box sx={{ 

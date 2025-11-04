@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Card,
@@ -43,6 +43,9 @@ import {
   ComposedChart,
 } from 'recharts';
 import { decisionsAPI } from '../services/api.ts';
+import { useTranslation } from 'react-i18next';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
+import { format as gregorianFormat } from 'date-fns';
 
 interface BudgetAnalysisProps {
   projectIds?: number[];
@@ -68,13 +71,19 @@ interface PeriodData {
   currencies: Record<string, CurrencyData>;
 }
 
+interface RecommendationItem {
+  type: 'header' | 'divider' | 'currency_header' | 'info' | 'warning' | 'success' | 'action';
+  key: string;
+  params?: Record<string, any>;
+}
+
 interface BudgetAnalysisData {
   status: string;
   periods: PeriodData[];
   total_needed_by_currency: Record<string, number>;
   total_available_by_currency: Record<string, number>;
   gap_by_currency: Record<string, number>;
-  recommendations: string[];
+  recommendations: (string | RecommendationItem)[]; // Support both old string format and new structured format
   critical_months: string[];
 }
 
@@ -84,9 +93,28 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
   endDate,
   onAnalysisComplete,
 }) => {
+  const { t, i18n } = useTranslation();
+  const isFa = i18n.language?.startsWith('fa');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<BudgetAnalysisData | null>(null);
+
+  // Format period labels for charts and displays (convert YYYY-MM to Jalali if needed)
+  const formatPeriodLabel = useMemo(() => (period: string) => {
+    if (!period || period.length !== 7 || !period.match(/^\d{4}-\d{2}$/)) {
+      return period;
+    }
+    try {
+      if (isFa) {
+        const iso = `${period}-01`;
+        const d = jalaliParseISO(iso);
+        return jalaliFormat(d, 'yyyy/MM');
+      }
+      return period;
+    } catch {
+      return period;
+    }
+  }, [isFa]);
 
   useEffect(() => {
     fetchBudgetAnalysis();
@@ -214,7 +242,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
   if (error) {
     return (
       <Alert severity="error">
-        <AlertTitle>Error Loading Budget Analysis</AlertTitle>
+        <AlertTitle>{t('optimization.errorLoadingBudgetAnalysis')}</AlertTitle>
         {error}
       </Alert>
     );
@@ -223,8 +251,8 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
   if (!analysisData) {
     return (
       <Alert severity="info">
-        <AlertTitle>No Data</AlertTitle>
-        No budget analysis data available.
+        <AlertTitle>{t('optimization.noData')}</AlertTitle>
+        {t('optimization.noBudgetAnalysisDataAvailable')}
       </Alert>
     );
   }
@@ -242,7 +270,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
             <Box display="flex" alignItems="center" gap={2}>
               {getStatusIcon(analysisData.status)}
               <Typography variant="h5">
-                Budget Analysis Status: {analysisData.status}
+                {t('optimization.budgetAnalysisStatus', { status: analysisData.status })}
               </Typography>
             </Box>
             <Chip
@@ -260,9 +288,11 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       {/* Critical Months Alert */}
       {analysisData.critical_months.length > 0 && (
         <Alert severity="error" sx={{ mb: 3 }}>
-          <AlertTitle>⚠️ Critical Months Detected</AlertTitle>
+          <AlertTitle>⚠️ {t('optimization.criticalMonthsDetected')}</AlertTitle>
           <Typography variant="body2">
-            Budget deficits found in: <strong>{analysisData.critical_months.join(', ')}</strong>
+            {t('optimization.budgetDeficitsFoundIn', { 
+              months: analysisData.critical_months.map(p => formatPeriodLabel(p)).join(', ') 
+            })}
           </Typography>
         </Alert>
       )}
@@ -274,13 +304,13 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  {currencyData.currency} Budget Summary
+                  {t('optimization.budgetSummary', { currency: currencyData.currency })}
                 </Typography>
                 <Divider sx={{ my: 2 }} />
                 
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="body2" color="textSecondary">
-                    Total Needed
+                    {t('optimization.totalNeeded')}
                   </Typography>
                   <Typography variant="h5" sx={{ color: '#2196f3' }}>
                     {formatCurrency(currencyData.needed, currencyData.currency)}
@@ -289,7 +319,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
 
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="body2" color="textSecondary">
-                    Total Available
+                    {t('optimization.totalAvailable')}
                   </Typography>
                   <Typography variant="h5" sx={{ color: '#4caf50' }}>
                     {formatCurrency(currencyData.available, currencyData.currency)}
@@ -298,7 +328,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
 
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="body2" color="textSecondary">
-                    Gap
+                    {t('optimization.gap')}
                   </Typography>
                   <Box display="flex" alignItems="center" gap={1}>
                     <Typography 
@@ -314,7 +344,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                     )}
                   </Box>
                   <Typography variant="caption" color="textSecondary">
-                    {currencyData.gap >= 0 ? 'Surplus' : 'Deficit'}
+                    {currencyData.gap >= 0 ? t('optimization.surplus') : t('optimization.deficit')}
                   </Typography>
                 </Box>
               </CardContent>
@@ -327,21 +357,25 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            Cumulative Cash Flow & Budget by Period
+            {t('optimization.cumulativeCashFlowBudgetByPeriod')}
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Shows cumulative outflows (costs), inflows (invoices), budget, and net position over time
+            {t('optimization.showsCumulativeOutflows')}
           </Typography>
           <ResponsiveContainer width="100%" height={400}>
             <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="period" />
+              <XAxis 
+                dataKey="period" 
+                tickFormatter={formatPeriodLabel}
+              />
               <YAxis />
               <Tooltip 
                 formatter={(value: number, name: string) => {
                   const currency = name.split('_')[0];
                   return formatCurrency(value, currency);
                 }}
+                labelFormatter={formatPeriodLabel}
               />
               <Legend />
               {currencies.map((currency, index) => (
@@ -349,13 +383,13 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                   <Bar 
                     dataKey={`${currency}_outflow`} 
                     fill={index === 0 ? '#f44336' : '#ff5722'} 
-                    name={`${currency} Cumulative Outflow`}
+                    name={t('optimization.cumulativeOutflowLabel', { currency })}
                     stackId={`stack${index}`}
                   />
                   <Bar 
                     dataKey={`${currency}_inflow`} 
                     fill={index === 0 ? '#4caf50' : '#8bc34a'} 
-                    name={`${currency} Cumulative Inflow`}
+                    name={t('optimization.cumulativeInflowLabel', { currency })}
                     stackId={`stack${index}`}
                   />
                   <Line 
@@ -363,7 +397,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                     dataKey={`${currency}_budget`} 
                     stroke={index === 0 ? '#2196f3' : '#ff9800'} 
                     strokeWidth={3}
-                    name={`${currency} Cumulative Budget`}
+                    name={t('optimization.cumulativeBudgetLabel', { currency })}
                     dot={{ r: 4 }}
                   />
                   <Line 
@@ -372,7 +406,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                     stroke={index === 0 ? '#9c27b0' : '#e91e63'} 
                     strokeWidth={2}
                     strokeDasharray="5 5"
-                    name={`${currency} Net Position`}
+                    name={t('optimization.netPositionLabel', { currency })}
                     dot={{ r: 3 }}
                   />
                 </React.Fragment>
@@ -386,18 +420,22 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            Budget Gap by Period
+            {t('optimization.budgetGapByPeriod')}
           </Typography>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="period" />
+              <XAxis 
+                dataKey="period" 
+                tickFormatter={formatPeriodLabel}
+              />
               <YAxis />
               <Tooltip 
                 formatter={(value: number, name: string) => {
                   const currency = name.split('_')[0];
                   return formatCurrency(value, currency);
                 }}
+                labelFormatter={formatPeriodLabel}
               />
               <Legend />
               {currencies.map((currency, index) => (
@@ -405,7 +443,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                   key={currency}
                   dataKey={`${currency}_gap`} 
                   fill={index === 0 ? '#9c27b0' : '#e91e63'} 
-                  name={`${currency} Gap`}
+                  name={t('optimization.gapLabel', { currency })}
                 >
                   {chartData.map((entry: any, idx: number) => (
                     <Cell 
@@ -424,17 +462,17 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            Detailed Period Breakdown
+            {t('optimization.detailedPeriodBreakdown')}
           </Typography>
           {analysisData.periods.map((period) => (
             <Accordion key={period.period}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                 <Box display="flex" alignItems="center" gap={2} width="100%">
                   <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                    {period.period}
+                    {formatPeriodLabel(period.period)}
                   </Typography>
                   {analysisData.critical_months.includes(period.period) && (
-                    <Chip label="Critical" color="error" size="small" />
+                    <Chip label={t('optimization.critical')} color="error" size="small" />
                   )}
                 </Box>
               </AccordionSummary>
@@ -448,31 +486,33 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                         </Typography>
                         <Box sx={{ mt: 1 }}>
                           <Typography variant="body2" color="textSecondary">
-                            Period Outflow: <strong>{formatCurrency(data.outflow, currency)}</strong>
+                            {t('optimization.periodOutflow')}: <strong>{formatCurrency(data.outflow, currency)}</strong>
                           </Typography>
                           <Typography variant="body2" color="textSecondary">
-                            Period Inflow: <strong>{formatCurrency(data.inflow, currency)}</strong>
+                            {t('optimization.periodInflow')}: <strong>{formatCurrency(data.inflow, currency)}</strong>
                           </Typography>
                           <Divider sx={{ my: 1 }} />
                           <Typography variant="body2">
-                            Cumulative Outflow: <strong style={{ color: '#f44336' }}>{formatCurrency(data.cumulative_outflow, currency)}</strong>
+                            {t('optimization.cumulativeOutflow')}: <strong style={{ color: '#f44336' }}>{formatCurrency(data.cumulative_outflow, currency)}</strong>
                           </Typography>
                           <Typography variant="body2">
-                            Cumulative Inflow: <strong style={{ color: '#4caf50' }}>{formatCurrency(data.cumulative_inflow, currency)}</strong>
+                            {t('optimization.cumulativeInflow')}: <strong style={{ color: '#4caf50' }}>{formatCurrency(data.cumulative_inflow, currency)}</strong>
                           </Typography>
                           <Typography variant="body2">
-                            Cumulative Budget: <strong style={{ color: '#2196f3' }}>{formatCurrency(data.cumulative_budget, currency)}</strong>
+                            {t('optimization.cumulativeBudget')}: <strong style={{ color: '#2196f3' }}>{formatCurrency(data.cumulative_budget, currency)}</strong>
                           </Typography>
                           <Divider sx={{ my: 1 }} />
                           <Typography 
                             variant="body2" 
                             sx={{ color: data.gap >= 0 ? '#4caf50' : '#f44336', fontWeight: 'bold' }}
                           >
-                            Net Position: {formatCurrency(Math.abs(data.cumulative_position), currency)} 
-                            ({data.gap >= 0 ? 'Surplus' : 'Deficit'})
+                            {t('optimization.netPosition', {
+                              amount: formatCurrency(Math.abs(data.cumulative_position), currency),
+                              type: data.gap >= 0 ? t('optimization.surplus') : t('optimization.deficit')
+                            })}
                           </Typography>
                           <Typography variant="caption" color="textSecondary">
-                            {data.gap_percentage.toFixed(1)}% of cumulative outflow
+                            {t('optimization.ofCumulativeOutflow', { percentage: data.gap_percentage.toFixed(1) })}
                           </Typography>
                         </Box>
                       </Paper>
@@ -489,32 +529,79 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       <Card>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            💡 Recommendations & Actions
+            💡 {t('optimization.recommendationsActions')}
           </Typography>
           <List>
-            {analysisData.recommendations.map((recommendation, index) => (
-              <ListItem key={index}>
-                <ListItemIcon>
-                  {recommendation.includes('✅') ? (
-                    <CheckCircleIcon sx={{ color: '#4caf50' }} />
-                  ) : recommendation.includes('🔴') ? (
-                    <ErrorIcon sx={{ color: '#f44336' }} />
-                  ) : recommendation.includes('⚠️') ? (
-                    <WarningIcon sx={{ color: '#ff9800' }} />
-                  ) : (
-                    <InfoIcon sx={{ color: '#2196f3' }} />
-                  )}
-                </ListItemIcon>
-                <ListItemText 
-                  primary={recommendation}
-                  primaryTypographyProps={{
-                    sx: {
-                      fontWeight: recommendation.includes('🔴') || recommendation.includes('⚠️') ? 'bold' : 'normal'
-                    }
-                  }}
-                />
-              </ListItem>
-            ))}
+            {analysisData.recommendations.map((recommendation, index) => {
+              // Handle both old string format (backward compatibility) and new structured format
+              if (typeof recommendation === 'string') {
+                const isWarning = recommendation.includes('🔴') || recommendation.includes('⚠️');
+                const isSuccess = recommendation.includes('✅');
+                const isInfo = recommendation.includes('📊') || recommendation.includes('📋');
+                
+                return (
+                  <ListItem key={index}>
+                    <ListItemIcon>
+                      {isSuccess ? (
+                        <CheckCircleIcon sx={{ color: '#4caf50' }} />
+                      ) : isWarning ? (
+                        <WarningIcon sx={{ color: '#ff9800' }} />
+                      ) : (
+                        <InfoIcon sx={{ color: '#2196f3' }} />
+                      )}
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary={recommendation}
+                      primaryTypographyProps={{
+                        sx: {
+                          fontWeight: isWarning ? 'bold' : 'normal',
+                          whiteSpace: 'pre-wrap'
+                        }
+                      }}
+                    />
+                  </ListItem>
+                );
+              }
+              
+              // Handle new structured format
+              const rec = recommendation as RecommendationItem;
+              const translatedText = rec.params 
+                ? t(rec.key, rec.params)
+                : t(rec.key);
+              
+              let icon = <InfoIcon sx={{ color: '#2196f3' }} />;
+              let fontWeight: 'normal' | 'bold' = 'normal';
+              
+              if (rec.type === 'divider') {
+                return <Divider key={index} sx={{ my: 1 }} />;
+              }
+              
+              if (rec.type === 'success') {
+                icon = <CheckCircleIcon sx={{ color: '#4caf50' }} />;
+              } else if (rec.type === 'warning') {
+                icon = <WarningIcon sx={{ color: '#ff9800' }} />;
+                fontWeight = 'bold';
+              } else if (rec.type === 'action') {
+                icon = <InfoIcon sx={{ color: '#1976d2' }} />;
+              } else if (rec.type === 'header') {
+                fontWeight = 'bold';
+              }
+              
+              return (
+                <ListItem key={index}>
+                  <ListItemIcon>{icon}</ListItemIcon>
+                  <ListItemText 
+                    primary={translatedText}
+                    primaryTypographyProps={{
+                      sx: {
+                        fontWeight,
+                        whiteSpace: 'pre-wrap'
+                      }
+                    }}
+                  />
+                </ListItem>
+              );
+            })}
           </List>
         </CardContent>
       </Card>

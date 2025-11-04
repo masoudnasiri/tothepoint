@@ -61,6 +61,8 @@ import { useTranslation } from 'react-i18next';
 import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -106,6 +108,19 @@ export const ReportsPage: React.FC = () => {
         }
       }
       return value;
+    }
+  }, [isFa]);
+
+  // Locale-aware date formatter for display
+  const formatDisplayDate = useMemo(() => (dateString: string | Date) => {
+    try {
+      const date = typeof dateString === 'string' ? new Date(dateString) : dateString;
+      if (isFa) {
+        return jalaliFormat(date, 'yyyy/MM/dd');
+      }
+      return gregorianFormat(date, 'yyyy-MM-dd');
+    } catch {
+      return typeof dateString === 'string' ? dateString : dateString.toISOString().split('T')[0];
     }
   }, [isFa]);
   
@@ -189,7 +204,8 @@ export const ReportsPage: React.FC = () => {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `Reports_${new Date().toISOString().split('T')[0]}.xlsx`);
+      const exportDate = formatDisplayDate(new Date());
+      link.setAttribute('download', `Reports_${exportDate}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -259,24 +275,36 @@ export const ReportsPage: React.FC = () => {
         </Typography>
         <Grid container spacing={2}>
           <Grid item xs={12} md={3}>
-            <TextField
-              fullWidth
-              label={t('reports.startDate')}
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('reports.startDate')}
+                value={startDate ? new Date(startDate) : null}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setStartDate(newValue.toISOString().split('T')[0]);
+                  } else {
+                    setStartDate('');
+                  }
+                }}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </LocalizedDateProvider>
           </Grid>
           <Grid item xs={12} md={3}>
-            <TextField
-              fullWidth
-              label={t('reports.endDate')}
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('reports.endDate')}
+                value={endDate ? new Date(endDate) : null}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setEndDate(newValue.toISOString().split('T')[0]);
+                  } else {
+                    setEndDate('');
+                  }
+                }}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </LocalizedDateProvider>
           </Grid>
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>

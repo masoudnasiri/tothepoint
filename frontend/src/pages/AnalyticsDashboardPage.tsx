@@ -926,10 +926,14 @@ export const AnalyticsDashboardPage: React.FC = () => {
                     {cashflowData.gap_intervals.length > 0 && (
                       <Alert severity="warning" sx={{ mt: 2 }}>
                         <Typography variant="body2" fontWeight="medium">
-                          ⚠️ {cashflowData.gap_intervals.length} period(s) with negative balance detected
+                          ⚠️ {t('analytics.negativeBalanceDetected', { 
+                            count: cashflowData.gap_intervals.length 
+                          })}
                         </Typography>
                         <Typography variant="caption">
-                          Maximum deficit: {formatCurrency(Math.max(...cashflowData.gap_intervals.map((g: any) => g.deficit)))}
+                          {t('analytics.maximumDeficit', {
+                            amount: formatCurrency(Math.max(...cashflowData.gap_intervals.map((g: any) => g.deficit)))
+                          })}
                         </Typography>
                       </Alert>
                     )}
