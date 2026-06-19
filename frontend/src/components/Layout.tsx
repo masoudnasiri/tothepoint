@@ -389,6 +389,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <Toolbar />
           {children}
         </Box>
+        
       </Box>
     </Box>
   );

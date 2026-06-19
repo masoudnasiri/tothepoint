@@ -501,10 +501,20 @@ async def save_proposal_as_decisions(
             
             final_cost_value = Decimal(str(decision_data['final_cost']))
             
+            # Phase 3: Resolve package_id from project_item_id if enabled
+            from app.services.package_service import get_package_for_project_item
+            from app.config import settings
+            package_id = None
+            if settings.enable_package_procurement:
+                package_info = await get_package_for_project_item(db, project_item.id)
+                if package_info:
+                    package_id = package_info.get('package_id')
+            
             decision = FinalizedDecision(
                 run_id=run_uuid,
                 project_id=project_id,
                 project_item_id=project_item.id,
+                package_id=package_id,  # Phase 3: Package-aware reference
                 item_code=item_code,
                 procurement_option_id=decision_data['procurement_option_id'],
                 delivery_option_id=delivery_opt.id if delivery_opt else None,
@@ -869,11 +879,21 @@ async def save_batch_decisions(
             if existing_check.scalars().first():
                 continue  # Skip duplicate
             
+            # Phase 3: Resolve package_id from project_item_id if enabled
+            from app.services.package_service import get_package_for_project_item
+            from app.config import settings
+            package_id = None
+            if settings.enable_package_procurement:
+                package_info = await get_package_for_project_item(db, project_item.id)
+                if package_info:
+                    package_id = package_info.get('package_id')
+            
             # Create the finalized decision
             decision = FinalizedDecision(
                 run_id=run_uuid,
                 project_id=opt_result.project_id,
                 project_item_id=project_item.id,
+                package_id=package_id,  # Phase 3: Package-aware reference
                 item_code=opt_result.item_code,
                 procurement_option_id=option_id,
                 delivery_option_id=delivery_opt.id if delivery_opt else None,

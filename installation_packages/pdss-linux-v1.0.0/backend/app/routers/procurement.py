@@ -174,16 +174,34 @@ async def create_new_procurement_option(
     db: AsyncSession = Depends(get_db),
     request: Request = None
 ):
-    """Create a new procurement option (procurement specialist only)"""
+    """Create a new procurement option with Phase 3 dual-mode support (procurement specialist only)"""
     import logging
+    from app.config import settings
+    from app.services.package_service import get_package_for_project_item
+    from app.services.audit_service import log_feature_flag_event
+    
     logger = logging.getLogger(__name__)
     
     try:
-        logger.info(f"🔍 DEBUG: Creating new procurement option")
-        logger.info(f"🔍 DEBUG: Option data: {option}")
-        logger.info(f"🔍 DEBUG: Current user: {current_user.username} (role: {current_user.role})")
+        # Phase 3: Log feature flag usage
+        await log_feature_flag_event(
+            db, "ENABLE_PACKAGE_PROCUREMENT", settings.enable_package_procurement,
+            context="create_procurement_option", user_id=current_user.id
+        )
+        
+        logger.info(f"Creating new procurement option (package_mode={settings.enable_package_procurement})")
         
         result = await create_procurement_option(db, option)
+        
+        # Phase 3: Enrich response with package context if available
+        if result.package_id:
+            package_info = await get_package_for_project_item(
+                db, result.project_item_id if result.project_item_id else None
+            )
+            if package_info:
+                result.package_name = package_info.get('package_name')
+                result.package_type = package_info.get('package_type')
+        
         # Audit
         try:
             client_host = request.client.host if request and request.client else None
@@ -194,20 +212,31 @@ async def create_new_procurement_option(
                 action="PROCUREMENT_OPTION_CREATE",
                 entity_type="procurement_option",
                 entity_id=result.id,
-                details={"item_code": result.item_code, "supplier_name": result.supplier_name},
+                details={
+                    "item_code": result.item_code,
+                    "supplier_name": result.supplier_name,
+                    "package_id": result.package_id,
+                    "project_item_id": result.project_item_id
+                },
                 ip_address=client_host,
                 user_agent=ua,
             )
         except Exception:
             pass
-        logger.info(f"🔍 DEBUG: Successfully created procurement option with ID: {result.id}")
+        
+        logger.info(f"Successfully created procurement option with ID: {result.id}")
         return result
         
+    except ValueError as e:
+        logger.warning(f"Validation error creating procurement option: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
-        logger.error(f"❌ ERROR: Failed to create procurement option: {str(e)}")
-        logger.error(f"❌ ERROR: Exception type: {type(e).__name__}")
+        logger.error(f"Failed to create procurement option: {str(e)}")
         import traceback
-        logger.error(f"❌ ERROR: Traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create procurement option: {str(e)}"

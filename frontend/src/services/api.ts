@@ -116,6 +116,8 @@ export const itemsAPI = {
   finalizeAll: (projectId: number) => api.put(`/items/project/${projectId}/finalize-all`, {}),
   listFinalized: (params?: { skip?: number; limit?: number }) =>
     api.get('/items/finalized', { params }),
+  listProjectItemSubItems: (projectItemId: number) =>
+    api.get(`/items/${projectItemId}/subitems`),
 };
 
 // Project Phases API
@@ -448,6 +450,28 @@ export const currencyAPI = {
     getSupportedCurrencies: () => api.get('/brs-api/supported-currencies'),
     healthCheck: () => api.get('/brs-api/health')
   },
+};
+
+// Config API
+export const configAPI = {
+  getFeatureFlags: () => api.get('/config/feature-flags'),
+};
+
+// Packages API (Phase 3)
+export const packagesAPI = {
+  listByProjectItem: (projectItemId: number, activeOnly: boolean = true) =>
+    api.get(`/packages/by-project-item/${projectItemId}`, { params: { active_only: activeOnly } }),
+  listByProject: (projectId: number, activeOnly: boolean = true) =>
+    api.get(`/projects/${projectId}/packages`, { params: { active_only: activeOnly } }),
+  get: (packageId: number) => api.get(`/packages/${packageId}`),
+  create: (data: any) => api.post('/packages/', data),
+  update: (packageId: number, data: any) => api.put(`/packages/${packageId}`, data),
+  delete: (packageId: number) => api.delete(`/packages/${packageId}`),
+  createSubItem: (data: any) => api.post('/packages/subitems/', data),
+  updateSubItem: (subItemId: number, data: any) => api.put(`/packages/subitems/${subItemId}`, data),
+  deleteSubItem: (subItemId: number) => api.delete(`/packages/subitems/${subItemId}`),
+  getCoverageSummary: (projectItemId: number) => api.get(`/packages/coverage/${projectItemId}`),
+  getProjectCoverageSummary: (projectId: number) => api.get(`/projects/${projectId}/coverage-summary`),
 };
 
 // Supplier Payments API

@@ -129,28 +129,62 @@ async def create_delivery_option(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new delivery option for a project item.
+    Create a new delivery option with Phase 3 dual-mode support.
     Works for both finalized and non-finalized items.
+    Supports both package_id and project_item_id references.
     """
-    # Verify that the project item exists (but don't require finalization)
-    project_item_result = await db.execute(
-        select(ProjectItem).where(ProjectItem.id == option_data.project_item_id)
-    )
-    project_item = project_item_result.scalar_one_or_none()
+    from app.crud import create_delivery_option as crud_create_delivery_option
+    from app.services.package_service import get_package_for_project_item
+    from app.services.audit_service import log_feature_flag_event
+    from app.config import settings
+    from sqlalchemy import select
     
-    if not project_item:
+    # Phase 3: Log feature flag usage
+    await log_feature_flag_event(
+        db, "ENABLE_PACKAGE_PROCUREMENT", settings.enable_package_procurement,
+        context="create_delivery_option", user_id=current_user.id
+    )
+    
+    # Phase 3: Verify reference exists
+    if option_data.package_id:
+        from app.models import ProcurementPackage
+        package_result = await db.execute(
+            select(ProcurementPackage).where(ProcurementPackage.id == option_data.package_id)
+        )
+        package = package_result.scalar_one_or_none()
+        if not package:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Package with ID {option_data.package_id} not found"
+            )
+        # Set project_item_id from package for backward compatibility
+        if not option_data.project_item_id:
+            option_data.project_item_id = package.project_item_id
+    elif option_data.project_item_id:
+        # Verify that the project item exists
+        project_item_result = await db.execute(
+            select(ProjectItem).where(ProjectItem.id == option_data.project_item_id)
+        )
+        project_item = project_item_result.scalar_one_or_none()
+        if not project_item:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project item with ID {option_data.project_item_id} not found"
+            )
+    else:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Project item with ID {option_data.project_item_id} not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either package_id or project_item_id must be provided"
         )
     
-    # ✅ Auto-calculate slot based on existing options for this item
-    existing_result = await db.execute(
-        select(DeliveryOption)
-        .where(DeliveryOption.project_item_id == option_data.project_item_id)
-        .where(DeliveryOption.is_active == True)
-        .order_by(DeliveryOption.delivery_date)
-    )
+    # Auto-calculate slot based on existing options
+    query = select(DeliveryOption).where(DeliveryOption.is_active == True)
+    if option_data.package_id:
+        query = query.where(DeliveryOption.package_id == option_data.package_id)
+    elif option_data.project_item_id:
+        query = query.where(DeliveryOption.project_item_id == option_data.project_item_id)
+    
+    existing_result = await db.execute(query.order_by(DeliveryOption.delivery_date))
     existing_options = existing_result.scalars().all()
     
     # Calculate slot: count existing + 1, or use provided slot
@@ -164,12 +198,17 @@ async def create_delivery_option(
     option_dict['delivery_slot'] = calculated_slot
     
     try:
-        new_option = DeliveryOption(**option_dict)
-        db.add(new_option)
-        await db.commit()
-        await db.refresh(new_option)
+        new_option = await crud_create_delivery_option(db, option_data)
         
-        logger.info(f"Created delivery option for item {option_data.project_item_id}, slot {calculated_slot}")
+        # Phase 3: Enrich response with package context
+        if new_option.package_id:
+            package_info = await get_package_for_project_item(
+                db, new_option.project_item_id if new_option.project_item_id else None
+            )
+            if package_info:
+                new_option.package_name = package_info.get('package_name')
+        
+        logger.info(f"Created delivery option for {'package' if option_data.package_id else 'project_item'} {option_data.package_id or option_data.project_item_id}, slot {calculated_slot}")
         try:
             await log_audit(
                 db,
@@ -177,12 +216,22 @@ async def create_delivery_option(
                 action="DELIVERY_OPTION_CREATE",
                 entity_type="delivery_option",
                 entity_id=new_option.id,
-                details=option_dict,
+                details={
+                    "package_id": new_option.package_id,
+                    "project_item_id": new_option.project_item_id
+                },
             )
         except Exception:
             pass
         
         return new_option
+    except ValueError as e:
+        await db.rollback()
+        logger.warning(f"Validation error creating delivery option: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         await db.rollback()
         error_msg = str(e)

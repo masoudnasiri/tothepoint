@@ -348,9 +348,57 @@ async def finalize_project_item(db: AsyncSession, item_id: int, finalized_by: in
 
 # Procurement Option CRUD operations
 async def create_procurement_option(db: AsyncSession, option: ProcurementOptionCreate) -> ProcurementOption:
-    """Create a new procurement option"""
+    """Create a new procurement option with Phase 3 dual-mode validation"""
+    from app.validators.package_validators import (
+        validate_package_or_legacy_reference,
+        validate_supplier_reference,
+        resolve_package_from_project_item,
+        log_feature_flag_usage
+    )
+    from app.services.audit_service import log_phase3_operation
+    from app.config import settings
+    from app.models import User
+    
+    # Phase 3: Validate package/legacy reference
+    try:
+        ref_info = validate_package_or_legacy_reference(
+            package_id=getattr(option, 'package_id', None),
+            project_item_id=getattr(option, 'project_item_id', None),
+            item_code=getattr(option, 'item_code', None),
+            context="procurement option"
+        )
+    except Exception as e:
+        raise ValueError(str(e))
+    
+    # Phase 3: Resolve package_id from project_item_id if needed
+    package_id_to_use = ref_info.get('package_id')
+    if not package_id_to_use and ref_info.get('project_item_id') and settings.enable_package_procurement:
+        package_id_to_use = await resolve_package_from_project_item(
+            db, ref_info['project_item_id'], create_if_missing=False
+        )
+        if package_id_to_use:
+            ref_info['package_id'] = package_id_to_use
+    
+    # Phase 3: Validate supplier reference
+    supplier_info = await validate_supplier_reference(
+        db,
+        supplier_id=getattr(option, 'supplier_id', None),
+        supplier_name=getattr(option, 'supplier_name', None),
+        context="procurement option"
+    )
+    
     # Convert to dict and handle Decimal serialization for JSON fields
     option_data = option.dict()
+    
+    # Phase 3: Set package_id from ref_info (preserves provided package_id even if flag is off)
+    if ref_info.get('package_id'):
+        option_data['package_id'] = ref_info['package_id']
+    
+    # Phase 3: Set supplier_id if validated
+    if supplier_info.get('supplier_id'):
+        option_data['supplier_id'] = supplier_info['supplier_id']
+        if not option_data.get('supplier_name'):
+            option_data['supplier_name'] = supplier_info.get('supplier_name')
     
     # Convert Decimal values in payment_terms to float for JSON serialization
     if 'payment_terms' in option_data and option_data['payment_terms']:
@@ -364,6 +412,22 @@ async def create_procurement_option(db: AsyncSession, option: ProcurementOptionC
     db.add(db_option)
     await db.commit()
     await db.refresh(db_option)
+    
+    # Phase 3: Log operation
+    try:
+        await log_phase3_operation(
+            db,
+            operation="create",
+            record_type="procurement_option",
+            record_id=db_option.id,
+            used_package_id=bool(ref_info.get('package_id')),
+            used_legacy_reference=bool(ref_info.get('project_item_id') or ref_info.get('item_code')),
+            user_id=None,
+            metadata={"ref_type": ref_info.get('reference_type')}
+        )
+    except Exception:
+        pass
+    
     return db_option
 
 
@@ -408,10 +472,54 @@ async def get_unique_item_codes(db: AsyncSession) -> List[str]:
 
 async def update_procurement_option(db: AsyncSession, option_id: int, 
                                   option_update: ProcurementOptionUpdate) -> Optional[ProcurementOption]:
-    """Update procurement option"""
+    """Update procurement option with Phase 3 dual-mode validation"""
+    from app.validators.package_validators import (
+        validate_package_or_legacy_reference,
+        validate_supplier_reference,
+        resolve_package_from_project_item
+    )
+    from app.services.audit_service import log_phase3_operation
+    from app.config import settings
+    
+    # Get existing option to preserve current values
+    existing = await get_procurement_option(db, option_id)
+    if not existing:
+        return None
+    
     update_data = option_update.dict(exclude_unset=True)
     if not update_data:
-        return await get_procurement_option(db, option_id)
+        return existing
+    
+    # Phase 3: Validate package/legacy reference if provided
+    if 'package_id' in update_data or 'project_item_id' in update_data or 'item_code' in update_data:
+        try:
+            ref_info = validate_package_or_legacy_reference(
+                package_id=update_data.get('package_id', existing.package_id),
+                project_item_id=update_data.get('project_item_id', existing.project_item_id),
+                item_code=update_data.get('item_code', existing.item_code),
+                context="procurement option update"
+            )
+            # Resolve package_id if needed
+            resolved_package_id = ref_info.get('package_id')
+            if not resolved_package_id and ref_info.get('project_item_id') and settings.enable_package_procurement:
+                resolved_package_id = await resolve_package_from_project_item(
+                    db, ref_info['project_item_id'], create_if_missing=False
+                )
+                if resolved_package_id:
+                    update_data['package_id'] = resolved_package_id
+        except Exception as e:
+            raise ValueError(str(e))
+    
+    # Phase 3: Validate supplier reference if provided
+    if 'supplier_id' in update_data or 'supplier_name' in update_data:
+        supplier_info = await validate_supplier_reference(
+            db,
+            supplier_id=update_data.get('supplier_id', existing.supplier_id),
+            supplier_name=update_data.get('supplier_name', existing.supplier_name),
+            context="procurement option update"
+        )
+        if supplier_info.get('supplier_id'):
+            update_data['supplier_id'] = supplier_info['supplier_id']
     
     # Convert Decimal values in payment_terms to float for JSON serialization
     if 'payment_terms' in update_data and update_data['payment_terms']:
@@ -425,7 +533,24 @@ async def update_procurement_option(db: AsyncSession, option_id: int,
         update(ProcurementOption).where(ProcurementOption.id == option_id).values(**update_data)
     )
     await db.commit()
-    return await get_procurement_option(db, option_id)
+    
+    updated = await get_procurement_option(db, option_id)
+    
+    # Phase 3: Log operation
+    try:
+        await log_phase3_operation(
+            db,
+            operation="update",
+            record_type="procurement_option",
+            record_id=option_id,
+            used_package_id=bool(updated.package_id if updated else False),
+            used_legacy_reference=bool((updated.project_item_id if updated else None) or (updated.item_code if updated else None)),
+            user_id=None
+        )
+    except Exception:
+        pass
+    
+    return updated
 
 
 async def delete_procurement_option(db: AsyncSession, option_id: int) -> bool:
@@ -518,11 +643,71 @@ async def delete_budget_data(db: AsyncSession, budget_date: str) -> bool:
 
 # Delivery Option CRUD operations
 async def create_delivery_option(db: AsyncSession, delivery_option: DeliveryOptionCreate) -> DeliveryOption:
-    """Create a new delivery option for a project item"""
-    db_option = DeliveryOption(**delivery_option.dict())
+    """Create a new delivery option with Phase 3 dual-mode validation"""
+    from app.validators.package_validators import (
+        validate_package_or_legacy_reference,
+        resolve_package_from_project_item
+    )
+    from app.services.audit_service import log_phase3_operation
+    from app.config import settings
+    
+    # Phase 3: Validate package/legacy reference
+    try:
+        ref_info = validate_package_or_legacy_reference(
+            package_id=getattr(delivery_option, 'package_id', None),
+            project_item_id=getattr(delivery_option, 'project_item_id', None),
+            item_code=None,
+            context="delivery option"
+        )
+    except Exception as e:
+        raise ValueError(str(e))
+    
+    # Phase 3: Resolve package_id from project_item_id if needed
+    package_id_to_use = ref_info.get('package_id')
+    if not package_id_to_use and ref_info.get('project_item_id') and settings.enable_package_procurement:
+        package_id_to_use = await resolve_package_from_project_item(
+            db, ref_info['project_item_id'], create_if_missing=False
+        )
+        if package_id_to_use:
+            ref_info['package_id'] = package_id_to_use
+    
+    option_data = delivery_option.dict()
+    
+    # Phase 3: Set package_id from ref_info (preserves provided package_id even if flag is off)
+    if ref_info.get('package_id'):
+        option_data['package_id'] = ref_info['package_id']
+    
+    # Ensure project_item_id is set if package_id is used (for backward compatibility)
+    if ref_info.get('package_id') and not option_data.get('project_item_id'):
+        from app.models import ProcurementPackage
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ProcurementPackage).where(ProcurementPackage.id == ref_info.get('package_id'))
+        )
+        package = result.scalar_one_or_none()
+        if package:
+            option_data['project_item_id'] = package.project_item_id
+    
+    db_option = DeliveryOption(**option_data)
     db.add(db_option)
     await db.commit()
     await db.refresh(db_option)
+    
+    # Phase 3: Log operation
+    try:
+        await log_phase3_operation(
+        db,
+        operation="create",
+        record_type="delivery_option",
+        record_id=db_option.id,
+        used_package_id=bool(ref_info.get('package_id')),
+        used_legacy_reference=bool(ref_info.get('project_item_id')),
+        user_id=None,
+        metadata={"ref_type": ref_info.get('reference_type')}
+    )
+    except Exception:
+        pass
+    
     return db_option
 
 

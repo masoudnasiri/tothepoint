@@ -287,6 +287,10 @@ export interface ProcurementOption {
   updated_at: string | null;
   is_active: boolean;
   is_finalized: boolean;
+  // Phase 3: Package support
+  package_id?: number | null;
+  package_name?: string | null;
+  package_type?: string | null; // 'FULL' | 'PARTIAL' | 'CUSTOM'
 }
 
 export interface ProcurementOptionCreate {
@@ -299,6 +303,9 @@ export interface ProcurementOptionCreate {
   discount_bundle_percent?: number;
   payment_terms: PaymentTerms;
   is_finalized?: boolean;
+  // Phase 3: Package support
+  package_id?: number | null;
+  project_item_id?: number | null;
 }
 
 export interface ProcurementOptionUpdate {

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import joinedload
 from sqlalchemy import and_, or_, func, select, update
 from typing import List, Optional
 import os
@@ -229,11 +229,23 @@ async def list_all_contacts(
 @router.get("/{supplier_id}", response_model=SupplierWithRelations)
 async def get_supplier(
     supplier_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get supplier by ID with contacts and documents"""
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    
+    result = await db.execute(
+        select(Supplier)
+        .options(
+            selectinload(Supplier.contacts),
+            selectinload(Supplier.documents)
+        )
+        .where(Supplier.id == supplier_id)
+    )
+    supplier = result.scalar_one_or_none()
+    
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
@@ -395,19 +407,29 @@ async def list_supplier_contacts(
     supplier_id: int,
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """List contacts for a supplier"""
+    from sqlalchemy import select
+    
     # Check if supplier exists
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
+    supplier = result.scalar_one_or_none()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
-    query = db.query(SupplierContact).filter(SupplierContact.supplier_id == supplier_id)
+    # Count total
+    count_result = await db.execute(
+        select(func.count()).select_from(SupplierContact).where(SupplierContact.supplier_id == supplier_id)
+    )
+    total = count_result.scalar()
     
-    total = query.count()
-    contacts = query.offset((page - 1) * size).limit(size).all()
+    # Get contacts with pagination
+    query = select(SupplierContact).where(SupplierContact.supplier_id == supplier_id)
+    query = query.offset((page - 1) * size).limit(size)
+    result = await db.execute(query)
+    contacts = result.scalars().all()
     
     return SupplierContactListResponse(
         contacts=contacts,
@@ -477,37 +499,46 @@ async def update_supplier_contact(
     supplier_id: int,
     contact_id: int,
     contact_data: SupplierContactUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Update supplier contact"""
-    contact = db.query(SupplierContact).filter(
-        and_(
-            SupplierContact.id == contact_id,
-            SupplierContact.supplier_id == supplier_id
+    from sqlalchemy import select, update as sql_update
+    
+    result = await db.execute(
+        select(SupplierContact).where(
+            and_(
+                SupplierContact.id == contact_id,
+                SupplierContact.supplier_id == supplier_id
+            )
         )
-    ).first()
+    )
+    contact = result.scalar_one_or_none()
     
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     
     # If this is set as primary contact, unset other primary contacts
     if contact_data.is_primary_contact:
-        db.query(SupplierContact).filter(
-            and_(
-                SupplierContact.supplier_id == supplier_id,
-                SupplierContact.id != contact_id,
-                SupplierContact.is_primary_contact == True
+        await db.execute(
+            sql_update(SupplierContact)
+            .where(
+                and_(
+                    SupplierContact.supplier_id == supplier_id,
+                    SupplierContact.id != contact_id,
+                    SupplierContact.is_primary_contact == True
+                )
             )
-        ).update({"is_primary_contact": False})
+            .values(is_primary_contact=False)
+        )
     
     # Update fields
-    update_data = contact_data.dict(exclude_unset=True)
+    update_data = contact_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(contact, field, value)
     
-    db.commit()
-    db.refresh(contact)
+    await db.commit()
+    await db.refresh(contact)
     
     return contact
 
@@ -516,22 +547,27 @@ async def update_supplier_contact(
 async def delete_supplier_contact(
     supplier_id: int,
     contact_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Delete supplier contact"""
-    contact = db.query(SupplierContact).filter(
-        and_(
-            SupplierContact.id == contact_id,
-            SupplierContact.supplier_id == supplier_id
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(SupplierContact).where(
+            and_(
+                SupplierContact.id == contact_id,
+                SupplierContact.supplier_id == supplier_id
+            )
         )
-    ).first()
+    )
+    contact = result.scalar_one_or_none()
     
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     
-    db.delete(contact)
-    db.commit()
+    await db.delete(contact)
+    await db.commit()
     
     return {"message": "Contact deleted successfully"}
 
@@ -542,19 +578,29 @@ async def list_supplier_documents(
     supplier_id: int,
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """List documents for a supplier"""
+    from sqlalchemy import select
+    
     # Check if supplier exists
-    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    result = await db.execute(select(Supplier).where(Supplier.id == supplier_id))
+    supplier = result.scalar_one_or_none()
     if not supplier:
         raise HTTPException(status_code=404, detail="Supplier not found")
     
-    query = db.query(SupplierDocument).filter(SupplierDocument.supplier_id == supplier_id)
+    # Count total
+    count_result = await db.execute(
+        select(func.count()).select_from(SupplierDocument).where(SupplierDocument.supplier_id == supplier_id)
+    )
+    total = count_result.scalar()
     
-    total = query.count()
-    documents = query.offset((page - 1) * size).limit(size).all()
+    # Get documents with pagination
+    query = select(SupplierDocument).where(SupplierDocument.supplier_id == supplier_id)
+    query = query.offset((page - 1) * size).limit(size)
+    result = await db.execute(query)
+    documents = result.scalars().all()
     
     return SupplierDocumentListResponse(
         documents=documents,
@@ -632,16 +678,21 @@ async def upload_supplier_document(
 async def download_supplier_document(
     supplier_id: int,
     document_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Download supplier document"""
-    document = db.query(SupplierDocument).filter(
-        and_(
-            SupplierDocument.id == document_id,
-            SupplierDocument.supplier_id == supplier_id
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(SupplierDocument).where(
+            and_(
+                SupplierDocument.id == document_id,
+                SupplierDocument.supplier_id == supplier_id
+            )
         )
-    ).first()
+    )
+    document = result.scalar_one_or_none()
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -662,27 +713,32 @@ async def update_supplier_document(
     supplier_id: int,
     document_id: int,
     document_data: SupplierDocumentUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Update supplier document metadata"""
-    document = db.query(SupplierDocument).filter(
-        and_(
-            SupplierDocument.id == document_id,
-            SupplierDocument.supplier_id == supplier_id
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(SupplierDocument).where(
+            and_(
+                SupplierDocument.id == document_id,
+                SupplierDocument.supplier_id == supplier_id
+            )
         )
-    ).first()
+    )
+    document = result.scalar_one_or_none()
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
     # Update fields
-    update_data = document_data.dict(exclude_unset=True)
+    update_data = document_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(document, field, value)
     
-    db.commit()
-    db.refresh(document)
+    await db.commit()
+    await db.refresh(document)
     
     return document
 
@@ -691,16 +747,21 @@ async def update_supplier_document(
 async def delete_supplier_document(
     supplier_id: int,
     document_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Delete supplier document"""
-    document = db.query(SupplierDocument).filter(
-        and_(
-            SupplierDocument.id == document_id,
-            SupplierDocument.supplier_id == supplier_id
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(SupplierDocument).where(
+            and_(
+                SupplierDocument.id == document_id,
+                SupplierDocument.supplier_id == supplier_id
+            )
         )
-    ).first()
+    )
+    document = result.scalar_one_or_none()
     
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -709,8 +770,8 @@ async def delete_supplier_document(
     if os.path.exists(document.file_path):
         os.remove(document.file_path)
     
-    db.delete(document)
-    db.commit()
+    await db.delete(document)
+    await db.commit()
     
     return {"message": "Document deleted successfully"}
 
@@ -718,13 +779,18 @@ async def delete_supplier_document(
 # Utility endpoints
 @router.get("/categories/list")
 async def list_categories(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get list of unique categories from suppliers"""
-    categories = db.query(Supplier.product_service_lines).filter(
-        Supplier.product_service_lines.isnot(None)
-    ).all()
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(Supplier.product_service_lines).where(
+            Supplier.product_service_lines.isnot(None)
+        )
+    )
+    categories = result.scalars().all()
     
     unique_categories = set()
     for category_list in categories:
@@ -736,13 +802,18 @@ async def list_categories(
 
 @router.get("/industries/list")
 async def list_industries(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get list of unique industries from suppliers"""
-    industries = db.query(Supplier.main_markets_regions).filter(
-        Supplier.main_markets_regions.isnot(None)
-    ).all()
+    from sqlalchemy import select
+    
+    result = await db.execute(
+        select(Supplier.main_markets_regions).where(
+            Supplier.main_markets_regions.isnot(None)
+        )
+    )
+    industries = result.scalars().all()
     
     unique_industries = set()
     for industry_list in industries:
@@ -754,12 +825,17 @@ async def list_industries(
 
 @router.get("/countries/list")
 async def list_countries(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """Get list of unique countries from suppliers"""
-    countries = db.query(Supplier.country).filter(
-        Supplier.country.isnot(None)
-    ).distinct().all()
+    from sqlalchemy import select, distinct
     
-    return {"countries": sorted([country[0] for country in countries if country[0]])}
+    result = await db.execute(
+        select(distinct(Supplier.country)).where(
+            Supplier.country.isnot(None)
+        )
+    )
+    countries = result.scalars().all()
+    
+    return {"countries": sorted([country for country in countries if country])}

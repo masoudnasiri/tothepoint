@@ -411,6 +411,8 @@ class ProcurementOptionBase(BaseModel):
 
 
 class ProcurementOptionCreate(ProcurementOptionBase):
+    # Phase 3: Support both package_id and project_item_id
+    package_id: Optional[int] = Field(None, description="Package ID (preferred for new records)")
     project_item_id: Optional[int] = Field(None, description="ID of the project item this option belongs to")
 
 
@@ -454,6 +456,67 @@ class SupplierSummary(BaseModel):
 class ProcurementOptionWithSupplier(ProcurementOption):
     """Procurement option with supplier information included"""
     supplier: Optional[SupplierSummary] = None  # Include supplier details
+    
+    model_config = {"from_attributes": True}
+
+
+# Procurement Package Schemas (Phase 3)
+class ProcurementPackageBase(BaseModel):
+    project_item_id: int = Field(..., description="Project item this package belongs to")
+    package_name: Optional[str] = Field(None, description="Human-readable package name")
+    package_type: str = Field(..., pattern="^(FULL|PARTIAL|CUSTOM)$", description="Package type")
+    supplier_id: Optional[int] = Field(None, description="Preferred supplier for this package")
+    description: Optional[str] = Field(None, description="Package description")
+    is_active: bool = Field(True, description="Is this package active?")
+    main_item_quantity: Optional[int] = Field(None, ge=0, description="Quantity of main item covered")
+
+
+class ProcurementPackageCreate(ProcurementPackageBase):
+    pass
+
+
+class ProcurementPackageUpdate(BaseModel):
+    package_name: Optional[str] = None
+    package_type: Optional[str] = Field(None, pattern="^(FULL|PARTIAL|CUSTOM)$")
+    supplier_id: Optional[int] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    main_item_quantity: Optional[int] = Field(None, ge=0)
+
+
+class ProcurementPackageResponse(ProcurementPackageBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    supplier: Optional[SupplierSummary] = None
+    subitems: Optional[List["PackageSubItemResponse"]] = Field(None, description="Sub-items included in this package")
+    
+    model_config = {"from_attributes": True}
+
+
+# Package SubItem Schemas (Phase 3)
+class PackageSubItemBase(BaseModel):
+    package_id: int = Field(..., description="Package this sub-item belongs to")
+    project_item_subitem_id: int = Field(..., description="Project item sub-item being covered")
+    quantity_covered: int = Field(..., ge=0, description="Quantity of this sub-item covered")
+    is_fully_covered: bool = Field(False, description="Whether this package fully satisfies the sub-item requirement")
+    coverage_percentage: Optional[Decimal] = Field(None, ge=0, le=100, description="Percentage of required quantity covered (0-100)")
+
+
+class PackageSubItemCreate(PackageSubItemBase):
+    pass
+
+
+class PackageSubItemUpdate(BaseModel):
+    quantity_covered: Optional[int] = Field(None, ge=0)
+    is_fully_covered: Optional[bool] = None
+    coverage_percentage: Optional[Decimal] = Field(None, ge=0, le=100)
+
+
+class PackageSubItemResponse(PackageSubItemBase):
+    id: int
+    created_at: datetime
     
     model_config = {"from_attributes": True}
 
@@ -582,7 +645,7 @@ class OptimizationRun(OptimizationRunBase):
 class FinalizedDecisionBase(BaseModel):
     run_id: Optional[uuid.UUID] = None
     project_id: int
-    project_item_id: int
+    project_item_id: int  # Required for aggregation/backward compatibility
     item_code: str
     procurement_option_id: int
     purchase_date: date
@@ -590,6 +653,9 @@ class FinalizedDecisionBase(BaseModel):
     quantity: int
     final_cost: Decimal
     decision_maker_id: int
+    
+    # Phase 3: Package-aware reference
+    package_id: Optional[int] = Field(None, description="Package ID (for package-level execution tracking)")
     
     # Lifecycle
     status: str = Field(default='PROPOSED', pattern="^(PROPOSED|LOCKED|REVERTED)$")
@@ -663,6 +729,10 @@ class FinalizedDecision(FinalizedDecisionBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_final_invoice: bool = Field(default=False, description="Is this the final invoice for this item?")
+    
+    # Phase 3: Package context in response
+    package_name: Optional[str] = Field(None, description="Package name (if package_id is set)")
+    package_type: Optional[str] = Field(None, description="Package type: FULL, PARTIAL, CUSTOM")
     
     model_config = {"from_attributes": True}
 
@@ -746,7 +816,9 @@ class DeliveryOptionBase(BaseModel):
 
 
 class DeliveryOptionCreate(DeliveryOptionBase):
-    project_item_id: int
+    # Phase 3: Support both package_id and project_item_id
+    package_id: Optional[int] = Field(None, description="Package ID (preferred for new records)")
+    project_item_id: Optional[int] = Field(None, description="Project item ID (legacy, required if package_id not provided)")
 
 
 class DeliveryOptionUpdate(BaseModel):
@@ -762,9 +834,13 @@ class DeliveryOptionUpdate(BaseModel):
 
 class DeliveryOption(DeliveryOptionBase):
     id: int
-    project_item_id: int
+    package_id: Optional[int] = Field(None, description="Package ID (if package-level delivery)")
+    project_item_id: Optional[int] = Field(None, description="Project item ID (legacy)")
     created_at: datetime
     updated_at: Optional[datetime] = None
+    
+    # Phase 3: Package context in response
+    package_name: Optional[str] = Field(None, description="Package name (if package_id is set)")
     
     model_config = {"from_attributes": True}
 
@@ -996,6 +1072,7 @@ class SupplierPaymentResponse(SupplierPayment):
 Currency.model_rebuild()
 ExchangeRate.model_rebuild()
 CurrencyWithRates.model_rebuild()
+ProcurementPackageResponse.model_rebuild()  # Resolve forward reference to PackageSubItemResponse
 
 
 # Supplier Management Schemas

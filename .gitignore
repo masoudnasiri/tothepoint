@@ -28,6 +28,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv
+.venv/
 
 # Node
 node_modules/
@@ -43,6 +44,7 @@ lerna-debug.log*
 
 # Docker
 *.log
+uploads/
 
 # IDE
 .vscode/
@@ -72,9 +74,13 @@ Desktop.ini
 *.sqlite
 *.sqlite3
 postgres_data/
+*.dump
 
 # Environment variables
 .env
+.env.*
+!.env.example
+!**/.env.example
 .env.local
 .env.development.local
 .env.test.local

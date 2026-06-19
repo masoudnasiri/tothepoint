@@ -1247,7 +1247,1270 @@ The design enables procurement teams to:
 
 ---
 
+## Prompt 3 — Migration & Rollout Plan
+
+This section provides an executable migration and rollout blueprint for engineering teams implementing the future-state procurement data model. All SQL migrations are production-ready and include transaction management, error handling, and rollback capabilities.
+
+---
+
+### Migration Phases → SQL Tasks
+
+#### Phase 1: Additive Changes (No Breaking Changes)
+
+**Strategy:** Online migration, no downtime required. All changes are additive (new columns nullable, new tables).
+
+**Dependencies:** None (can run independently)
+
+**Transaction Strategy:** Each migration script uses `BEGIN;` / `COMMIT;` for atomicity. Can run in parallel with application, but recommend running during low-traffic period.
+
+##### 1.1 Create `procurement_packages` Table
+
+**File:** `backend/migrations/001_create_procurement_packages.sql`
+
+```sql
+-- Migration: Create procurement_packages table
+-- Phase: 1.1 - Additive Changes
+-- Strategy: Online (no downtime)
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS procurement_packages (
+    id SERIAL PRIMARY KEY,
+    project_item_id INTEGER NOT NULL REFERENCES project_items(id) ON DELETE CASCADE,
+    package_name TEXT,
+    package_type VARCHAR(20) NOT NULL CHECK (package_type IN ('FULL', 'PARTIAL', 'CUSTOM')),
+    supplier_id INTEGER REFERENCES suppliers(id),
+    description TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE,
+    created_by_id INTEGER REFERENCES users(id),
+    
+    -- Constraints
+    CONSTRAINT check_package_type CHECK (package_type IN ('FULL', 'PARTIAL', 'CUSTOM'))
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_project_item_id 
+    ON procurement_packages(project_item_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_supplier_id 
+    ON procurement_packages(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_package_type 
+    ON procurement_packages(package_type);
+CREATE INDEX IF NOT EXISTS idx_procurement_packages_is_active 
+    ON procurement_packages(is_active);
+
+-- Unique constraint: package_name per project_item (or allow NULL)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_procurement_packages_unique_name 
+    ON procurement_packages(project_item_id, package_name) 
+    WHERE package_name IS NOT NULL;
+
+COMMENT ON TABLE procurement_packages IS 'Groups sub-items into procurement units (packages)';
+COMMENT ON COLUMN procurement_packages.package_type IS 'FULL: all sub-items, PARTIAL: subset, CUSTOM: user-defined';
+
+COMMIT;
+```
+
+##### 1.2 Create `package_subitems` Table
+
+**File:** `backend/migrations/002_create_package_subitems.sql`
+
+```sql
+-- Migration: Create package_subitems table
+-- Phase: 1.2 - Additive Changes
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS package_subitems (
+    id SERIAL PRIMARY KEY,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    project_item_subitem_id INTEGER NOT NULL REFERENCES project_item_subitems(id) ON DELETE CASCADE,
+    quantity_covered INTEGER NOT NULL CHECK (quantity_covered >= 0),
+    is_fully_covered BOOLEAN DEFAULT FALSE,
+    coverage_percentage NUMERIC(5,2) CHECK (coverage_percentage >= 0 AND coverage_percentage <= 100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Prevent duplicate mappings
+    CONSTRAINT unique_package_subitem UNIQUE (package_id, project_item_subitem_id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_package_subitems_package_id 
+    ON package_subitems(package_id);
+CREATE INDEX IF NOT EXISTS idx_package_subitems_subitem_id 
+    ON package_subitems(project_item_subitem_id);
+
+COMMENT ON TABLE package_subitems IS 'Maps sub-items to packages with coverage details';
+
+COMMIT;
+```
+
+##### 1.3 Create `package_payments` Table
+
+**File:** `backend/migrations/003_create_package_payments.sql`
+
+```sql
+-- Migration: Create package_payments table
+-- Phase: 1.3 - Additive Changes
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS package_payments (
+    id SERIAL PRIMARY KEY,
+    decision_id INTEGER NOT NULL REFERENCES finalized_decisions(id) ON DELETE CASCADE,
+    package_id INTEGER NOT NULL REFERENCES procurement_packages(id) ON DELETE CASCADE,
+    supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+    payment_amount NUMERIC(12,2) NOT NULL CHECK (payment_amount > 0),
+    currency VARCHAR(10) NOT NULL DEFAULT 'IRR',
+    payment_date DATE NOT NULL,
+    payment_method VARCHAR(50) NOT NULL CHECK (payment_method IN ('cash', 'bank_transfer', 'check', 'credit_card')),
+    reference_number TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'completed' CHECK (status IN ('pending', 'completed', 'failed', 'cancelled')),
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE,
+    created_by_id INTEGER REFERENCES users(id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_package_payments_decision_id 
+    ON package_payments(decision_id);
+CREATE INDEX IF NOT EXISTS idx_package_payments_package_id 
+    ON package_payments(package_id);
+CREATE INDEX IF NOT EXISTS idx_package_payments_supplier_id 
+    ON package_payments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_package_payments_payment_date 
+    ON package_payments(payment_date);
+CREATE INDEX IF NOT EXISTS idx_package_payments_status 
+    ON package_payments(status);
+
+COMMENT ON TABLE package_payments IS 'Payment tracking at package level';
+
+COMMIT;
+```
+
+##### 1.4 Add `package_id` Columns (Nullable)
+
+**File:** `backend/migrations/004_add_package_id_columns.sql`
+
+```sql
+-- Migration: Add package_id columns to existing tables
+-- Phase: 1.4 - Additive Changes
+-- Strategy: Online (no downtime, columns nullable)
+
+BEGIN;
+
+-- Add package_id to procurement_options
+ALTER TABLE procurement_options 
+ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES procurement_packages(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_procurement_options_package_id 
+    ON procurement_options(package_id);
+
+-- Add package_id to finalized_decisions
+ALTER TABLE finalized_decisions 
+ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES procurement_packages(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_finalized_decisions_package_id 
+    ON finalized_decisions(package_id);
+
+-- Add package_id to delivery_options
+ALTER TABLE delivery_options 
+ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES procurement_packages(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_delivery_options_package_id 
+    ON delivery_options(package_id);
+
+-- Add package_id to invoices (if table exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'invoices') THEN
+        ALTER TABLE invoices 
+        ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES procurement_packages(id) ON DELETE SET NULL;
+        
+        CREATE INDEX IF NOT EXISTS idx_invoices_package_id 
+            ON invoices(package_id);
+    END IF;
+END $$;
+
+-- Add package_id to payments (if table exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'payments') THEN
+        ALTER TABLE payments 
+        ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES procurement_packages(id) ON DELETE SET NULL;
+        
+        CREATE INDEX IF NOT EXISTS idx_payments_package_id 
+            ON payments(package_id);
+    END IF;
+END $$;
+
+-- Add package_id to supplier_payments (if table exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'supplier_payments') THEN
+        ALTER TABLE supplier_payments 
+        ADD COLUMN IF NOT EXISTS package_id INTEGER REFERENCES procurement_packages(id) ON DELETE SET NULL;
+        
+        CREATE INDEX IF NOT EXISTS idx_supplier_payments_package_id 
+            ON supplier_payments(package_id);
+    END IF;
+END $$;
+
+COMMIT;
+```
+
+##### 1.5 Make `project_item_id` Nullable in `delivery_options`
+
+**File:** `backend/migrations/005_make_delivery_options_project_item_nullable.sql`
+
+```sql
+-- Migration: Make project_item_id nullable in delivery_options
+-- Phase: 1.5 - Additive Changes
+-- Strategy: Online (requires CHECK constraint update)
+
+BEGIN;
+
+-- First, add CHECK constraint to ensure at least one of project_item_id OR package_id is present
+ALTER TABLE delivery_options 
+ADD CONSTRAINT IF NOT EXISTS check_delivery_option_reference 
+    CHECK (project_item_id IS NOT NULL OR package_id IS NOT NULL);
+
+-- Then make project_item_id nullable
+ALTER TABLE delivery_options 
+ALTER COLUMN project_item_id DROP NOT NULL;
+
+COMMENT ON CONSTRAINT check_delivery_option_reference ON delivery_options IS 
+    'Ensures delivery option references either project_item_id (legacy) or package_id (new)';
+
+COMMIT;
+```
+
+##### 1.6 Add `supplier_id` to `supplier_payments`
+
+**File:** `backend/migrations/006_add_supplier_id_to_supplier_payments.sql`
+
+```sql
+-- Migration: Add supplier_id FK to supplier_payments
+-- Phase: 1.6 - Additive Changes
+
+BEGIN;
+
+-- Add supplier_id column (nullable during transition)
+ALTER TABLE supplier_payments 
+ADD COLUMN IF NOT EXISTS supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier_id 
+    ON supplier_payments(supplier_id);
+
+-- Add CHECK constraint: at least one of supplier_id OR supplier_name must be present
+ALTER TABLE supplier_payments 
+ADD CONSTRAINT IF NOT EXISTS check_supplier_reference 
+    CHECK (supplier_id IS NOT NULL OR supplier_name IS NOT NULL);
+
+COMMENT ON COLUMN supplier_payments.supplier_id IS 
+    'FK to suppliers table. Required for new records, nullable during transition.';
+
+COMMIT;
+```
+
+##### 1.7 Increase `invoice_amount_per_unit` Precision
+
+**File:** `backend/migrations/007_increase_invoice_amount_precision.sql`
+
+```sql
+-- Migration: Increase invoice_amount_per_unit precision
+-- Phase: 1.7 - Additive Changes
+-- Reference: backend/increase_invoice_amount_precision.sql
+
+BEGIN;
+
+ALTER TABLE delivery_options 
+ALTER COLUMN invoice_amount_per_unit TYPE NUMERIC(18, 2);
+
+COMMENT ON COLUMN delivery_options.invoice_amount_per_unit IS 
+    'Invoice amount per unit. Precision increased from Numeric(12,2) to Numeric(18,2) to support larger values (max: 999,999,999,999,999,999.99)';
+
+COMMIT;
+```
+
+##### 1.8 Add CHECK Constraints for `procurement_options`
+
+**File:** `backend/migrations/008_add_procurement_options_check_constraint.sql`
+
+```sql
+-- Migration: Add CHECK constraint to procurement_options
+-- Phase: 1.8 - Additive Changes
+-- Ensures at least one of package_id, project_item_id, or item_code is present
+
+BEGIN;
+
+ALTER TABLE procurement_options 
+ADD CONSTRAINT IF NOT EXISTS check_procurement_option_reference 
+    CHECK (
+        (package_id IS NOT NULL) OR 
+        (project_item_id IS NOT NULL) OR 
+        (item_code IS NOT NULL)
+    );
+
+COMMENT ON CONSTRAINT check_procurement_option_reference ON procurement_options IS 
+    'Ensures procurement option references package_id (new), project_item_id (legacy), or item_code (legacy)';
+
+COMMIT;
+```
+
+**Phase 1 Summary:**
+- **Downtime Required:** None (online migration)
+- **Rollback Strategy:** Drop new tables/columns, remove constraints
+- **Validation:** Run data validation queries (see Testing section)
+- **Dependencies:** None (independent phase)
+
+---
+
+#### Phase 2: Data Migration
+
+**Strategy:** Online migration with data backfill. Can run in batches. Requires application-level feature flags to handle both legacy and new data.
+
+**Dependencies:** Phase 1 must be complete
+
+**Transaction Strategy:** Use batched transactions for large datasets. Each batch is atomic. Can pause/resume migration.
+
+##### 2.1 Create FULL Packages for Existing Project Items
+
+**File:** `backend/migrations/009_create_full_packages.sql`
+
+```sql
+-- Migration: Create FULL packages for existing project items
+-- Phase: 2.1 - Data Migration
+-- Strategy: Batch processing, online migration
+
+BEGIN;
+
+-- Create FULL packages for project items that have sub-items
+INSERT INTO procurement_packages (project_item_id, package_name, package_type, created_at)
+SELECT 
+    pi.id,
+    COALESCE(pi.item_code, 'ITEM-' || pi.id::text) || ' - Full Package',
+    'FULL',
+    NOW()
+FROM project_items pi
+WHERE pi.id IN (
+    SELECT DISTINCT project_item_id 
+    FROM project_item_subitems
+)
+AND NOT EXISTS (
+    SELECT 1 
+    FROM procurement_packages pp 
+    WHERE pp.project_item_id = pi.id 
+    AND pp.package_type = 'FULL'
+);
+
+-- Log created packages
+DO $$
+DECLARE
+    packages_created INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO packages_created 
+    FROM procurement_packages 
+    WHERE package_type = 'FULL';
+    
+    RAISE NOTICE 'Created % FULL packages', packages_created;
+END $$;
+
+COMMIT;
+```
+
+##### 2.2 Create `package_subitems` for FULL Packages
+
+**File:** `backend/migrations/010_create_package_subitems_for_full_packages.sql`
+
+```sql
+-- Migration: Create package_subitems for FULL packages
+-- Phase: 2.2 - Data Migration
+
+BEGIN;
+
+-- Link all sub-items to FULL packages
+INSERT INTO package_subitems (
+    package_id, 
+    project_item_subitem_id, 
+    quantity_covered, 
+    is_fully_covered, 
+    coverage_percentage,
+    created_at
+)
+SELECT 
+    pp.id,
+    pis.id,
+    pis.quantity,
+    TRUE,
+    100.0,
+    NOW()
+FROM procurement_packages pp
+JOIN project_items pi ON pi.id = pp.project_item_id
+JOIN project_item_subitems pis ON pis.project_item_id = pi.id
+WHERE pp.package_type = 'FULL'
+AND NOT EXISTS (
+    SELECT 1 
+    FROM package_subitems psi 
+    WHERE psi.package_id = pp.id 
+    AND psi.project_item_subitem_id = pis.id
+);
+
+-- Validate coverage
+DO $$
+DECLARE
+    missing_coverage INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO missing_coverage
+    FROM project_item_subitems pis
+    WHERE NOT EXISTS (
+        SELECT 1 
+        FROM package_subitems psi
+        JOIN procurement_packages pp ON pp.id = psi.package_id
+        WHERE psi.project_item_subitem_id = pis.id
+        AND pp.package_type = 'FULL'
+    );
+    
+    IF missing_coverage > 0 THEN
+        RAISE WARNING 'Found % sub-items without FULL package coverage. Review required.', missing_coverage;
+    END IF;
+END $$;
+
+COMMIT;
+```
+
+##### 2.3 Link Existing `procurement_options` to FULL Packages
+
+**File:** `backend/migrations/011_link_procurement_options_to_packages.sql`
+
+```sql
+-- Migration: Link existing procurement_options to FULL packages
+-- Phase: 2.3 - Data Migration
+
+BEGIN;
+
+-- Link options that have project_item_id
+UPDATE procurement_options po
+SET package_id = (
+    SELECT pp.id
+    FROM procurement_packages pp
+    WHERE pp.project_item_id = po.project_item_id
+    AND pp.package_type = 'FULL'
+    LIMIT 1
+)
+WHERE po.project_item_id IS NOT NULL
+AND po.package_id IS NULL;
+
+-- Log migration results
+DO $$
+DECLARE
+    options_linked INTEGER;
+    options_unlinked INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO options_linked
+    FROM procurement_options
+    WHERE package_id IS NOT NULL;
+    
+    SELECT COUNT(*) INTO options_unlinked
+    FROM procurement_options
+    WHERE package_id IS NULL
+    AND project_item_id IS NULL
+    AND item_code IS NULL;
+    
+    RAISE NOTICE 'Linked % procurement options to packages', options_linked;
+    
+    IF options_unlinked > 0 THEN
+        RAISE WARNING 'Found % procurement options without any reference. Review required.', options_unlinked;
+    END IF;
+END $$;
+
+COMMIT;
+```
+
+##### 2.4 Migrate `supplier_name` to `supplier_id` in `procurement_options`
+
+**File:** `backend/migrations/012_migrate_supplier_name_to_supplier_id.sql`
+
+```sql
+-- Migration: Migrate supplier_name to supplier_id in procurement_options
+-- Phase: 2.4 - Data Migration
+-- Strategy: Fuzzy matching with reconciliation report
+
+BEGIN;
+
+-- Step 1: Match exact supplier names (case-insensitive, trimmed)
+UPDATE procurement_options po
+SET supplier_id = (
+    SELECT s.id
+    FROM suppliers s
+    WHERE LOWER(TRIM(s.company_name)) = LOWER(TRIM(po.supplier_name))
+    LIMIT 1
+)
+WHERE po.supplier_id IS NULL
+AND po.supplier_name IS NOT NULL
+AND EXISTS (
+    SELECT 1
+    FROM suppliers s
+    WHERE LOWER(TRIM(s.company_name)) = LOWER(TRIM(po.supplier_name))
+);
+
+-- Step 2: Create reconciliation report for unmatched suppliers
+CREATE TEMP TABLE IF NOT EXISTS unmatched_suppliers AS
+SELECT DISTINCT
+    po.id as option_id,
+    po.supplier_name,
+    po.item_code,
+    po.project_item_id
+FROM procurement_options po
+WHERE po.supplier_id IS NULL
+AND po.supplier_name IS NOT NULL;
+
+-- Log unmatched suppliers
+DO $$
+DECLARE
+    unmatched_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO unmatched_count FROM unmatched_suppliers;
+    
+    IF unmatched_count > 0 THEN
+        RAISE WARNING 'Found % procurement options with unmatched supplier names. Review required.', unmatched_count;
+        
+        -- Export unmatched suppliers for manual review
+        RAISE NOTICE 'Unmatched suppliers saved to temp table: unmatched_suppliers';
+    END IF;
+END $$;
+
+-- Step 3: Enforce supplier_id for new records (application-level, not DB constraint yet)
+-- This will be done in Phase 3
+
+COMMIT;
+```
+
+##### 2.5 Migrate `supplier_name` to `supplier_id` in `supplier_payments`
+
+**File:** `backend/migrations/013_migrate_supplier_payments_supplier_id.sql`
+
+```sql
+-- Migration: Migrate supplier_name to supplier_id in supplier_payments
+-- Phase: 2.5 - Data Migration
+
+BEGIN;
+
+-- Match supplier names to supplier_id
+UPDATE supplier_payments sp
+SET supplier_id = (
+    SELECT s.id
+    FROM suppliers s
+    WHERE LOWER(TRIM(s.company_name)) = LOWER(TRIM(sp.supplier_name))
+    LIMIT 1
+)
+WHERE sp.supplier_id IS NULL
+AND sp.supplier_name IS NOT NULL
+AND EXISTS (
+    SELECT 1
+    FROM suppliers s
+    WHERE LOWER(TRIM(s.company_name)) = LOWER(TRIM(sp.supplier_name))
+);
+
+-- Log results
+DO $$
+DECLARE
+    payments_linked INTEGER;
+    payments_unlinked INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO payments_linked
+    FROM supplier_payments
+    WHERE supplier_id IS NOT NULL;
+    
+    SELECT COUNT(*) INTO payments_unlinked
+    FROM supplier_payments
+    WHERE supplier_id IS NULL
+    AND supplier_name IS NULL;
+    
+    RAISE NOTICE 'Linked % supplier payments to supplier FK', payments_linked;
+    
+    IF payments_unlinked > 0 THEN
+        RAISE WARNING 'Found % supplier payments without supplier reference. Review required.', payments_unlinked;
+    END IF;
+END $$;
+
+COMMIT;
+```
+
+##### 2.6 Link Financial Records to Packages
+
+**File:** `backend/migrations/014_link_financial_records_to_packages.sql`
+
+```sql
+-- Migration: Link financial records (invoices, payments, supplier_payments) to packages
+-- Phase: 2.6 - Data Migration
+
+BEGIN;
+
+-- Link invoices to packages (via decision → FULL package)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'invoices') THEN
+        UPDATE invoices i
+        SET package_id = (
+            SELECT pp.id
+            FROM finalized_decisions fd
+            JOIN procurement_packages pp ON pp.project_item_id = fd.project_item_id
+            WHERE fd.id = i.decision_id
+            AND pp.package_type = 'FULL'
+            LIMIT 1
+        )
+        WHERE i.package_id IS NULL
+        AND EXISTS (
+            SELECT 1
+            FROM finalized_decisions fd
+            JOIN procurement_packages pp ON pp.project_item_id = fd.project_item_id
+            WHERE fd.id = i.decision_id
+            AND pp.package_type = 'FULL'
+        );
+        
+        RAISE NOTICE 'Linked invoices to packages';
+    END IF;
+END $$;
+
+-- Link payments to packages (via invoice or decision)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'payments') THEN
+        UPDATE payments p
+        SET package_id = COALESCE(
+            -- Try via invoice first
+            (SELECT i.package_id FROM invoices i WHERE i.id = p.invoice_id),
+            -- Fallback to decision
+            (SELECT pp.id
+             FROM finalized_decisions fd
+             JOIN procurement_packages pp ON pp.project_item_id = fd.project_item_id
+             WHERE fd.id = p.decision_id
+             AND pp.package_type = 'FULL'
+             LIMIT 1)
+        )
+        WHERE p.package_id IS NULL;
+        
+        RAISE NOTICE 'Linked payments to packages';
+    END IF;
+END $$;
+
+-- Link supplier_payments to packages (via decision)
+UPDATE supplier_payments sp
+SET package_id = (
+    SELECT pp.id
+    FROM finalized_decisions fd
+    JOIN procurement_packages pp ON pp.project_item_id = fd.project_item_id
+    WHERE fd.id = sp.decision_id
+    AND pp.package_type = 'FULL'
+    LIMIT 1
+)
+WHERE sp.package_id IS NULL
+AND EXISTS (
+    SELECT 1
+    FROM finalized_decisions fd
+    JOIN procurement_packages pp ON pp.project_item_id = fd.project_item_id
+    WHERE fd.id = sp.decision_id
+    AND pp.package_type = 'FULL'
+);
+
+RAISE NOTICE 'Linked supplier_payments to packages';
+
+COMMIT;
+```
+
+**Phase 2 Summary:**
+- **Downtime Required:** None (online migration, batched)
+- **Rollback Strategy:** Set `package_id = NULL`, remove `package_subitems` entries, delete FULL packages
+- **Validation:** Run reconciliation queries (see Testing section)
+- **Dependencies:** Phase 1 complete
+
+---
+
+#### Phase 3: Transition Period
+
+**Strategy:** Dual-mode operation. Application code handles both legacy and package-aware logic. Feature flags control behavior.
+
+**Dependencies:** Phase 2 complete
+
+**Transaction Strategy:** No database changes. Application-level feature flags.
+
+##### 3.1 Add `migration_complete` Flag (Optional)
+
+**File:** `backend/migrations/015_add_migration_complete_flag.sql`
+
+```sql
+-- Migration: Add migration_complete flag to procurement_options
+-- Phase: 3.1 - Transition Period (Optional)
+-- Purpose: Track which options have been migrated to package-aware logic
+
+BEGIN;
+
+ALTER TABLE procurement_options 
+ADD COLUMN IF NOT EXISTS migration_complete BOOLEAN DEFAULT FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_procurement_options_migration_complete 
+    ON procurement_options(migration_complete);
+
+-- Mark options with package_id as migrated
+UPDATE procurement_options 
+SET migration_complete = TRUE 
+WHERE package_id IS NOT NULL;
+
+COMMENT ON COLUMN procurement_options.migration_complete IS 
+    'Flag indicating option has been migrated to package-aware logic';
+
+COMMIT;
+```
+
+**Phase 3 Summary:**
+- **Downtime Required:** None (application changes only)
+- **Rollback Strategy:** Disable feature flags, revert to legacy logic
+- **Validation:** A/B testing, monitoring
+- **Dependencies:** Phase 2 complete
+
+---
+
+#### Phase 4: Deprecation (Future)
+
+**Strategy:** Requires downtime for constraint changes. Remove legacy fields after migration validation.
+
+**Dependencies:** Phase 3 complete, all data migrated
+
+**Transaction Strategy:** Maintenance window required. Full backup before execution.
+
+##### 4.1 Enforce `supplier_id` NOT NULL in `supplier_payments`
+
+**File:** `backend/migrations/016_enforce_supplier_id_not_null.sql`
+
+```sql
+-- Migration: Enforce supplier_id NOT NULL in supplier_payments
+-- Phase: 4.1 - Deprecation
+-- Strategy: Requires downtime (constraint change)
+
+BEGIN;
+
+-- First, verify all records have supplier_id
+DO $$
+DECLARE
+    records_without_supplier_id INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO records_without_supplier_id
+    FROM supplier_payments
+    WHERE supplier_id IS NULL;
+    
+    IF records_without_supplier_id > 0 THEN
+        RAISE EXCEPTION 'Cannot enforce NOT NULL: % records still have NULL supplier_id. Complete migration first.', 
+            records_without_supplier_id;
+    END IF;
+END $$;
+
+-- Remove CHECK constraint
+ALTER TABLE supplier_payments 
+DROP CONSTRAINT IF EXISTS check_supplier_reference;
+
+-- Add NOT NULL constraint
+ALTER TABLE supplier_payments 
+ALTER COLUMN supplier_id SET NOT NULL;
+
+COMMIT;
+```
+
+##### 4.2 Remove `supplier_name` from `supplier_payments`
+
+**File:** `backend/migrations/017_remove_supplier_name_from_supplier_payments.sql`
+
+```sql
+-- Migration: Remove supplier_name column from supplier_payments
+-- Phase: 4.2 - Deprecation
+-- Strategy: Requires downtime
+
+BEGIN;
+
+-- Verify supplier_id is NOT NULL (should be enforced in 4.1)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_name = 'supplier_payments' 
+        AND column_name = 'supplier_id' 
+        AND is_nullable = 'YES'
+    ) THEN
+        RAISE EXCEPTION 'supplier_id must be NOT NULL before removing supplier_name';
+    END IF;
+END $$;
+
+-- Drop index on supplier_name
+DROP INDEX IF EXISTS idx_supplier_payments_supplier_name;
+
+-- Remove column
+ALTER TABLE supplier_payments 
+DROP COLUMN IF EXISTS supplier_name;
+
+COMMIT;
+```
+
+##### 4.3 Remove `supplier_name` from `procurement_options`
+
+**File:** `backend/migrations/018_remove_supplier_name_from_procurement_options.sql`
+
+```sql
+-- Migration: Remove supplier_name from procurement_options
+-- Phase: 4.3 - Deprecation
+
+BEGIN;
+
+-- Verify all records have supplier_id
+DO $$
+DECLARE
+    records_without_supplier_id INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO records_without_supplier_id
+    FROM procurement_options
+    WHERE supplier_id IS NULL;
+    
+    IF records_without_supplier_id > 0 THEN
+        RAISE EXCEPTION 'Cannot remove supplier_name: % records still have NULL supplier_id', 
+            records_without_supplier_id;
+    END IF;
+END $$;
+
+ALTER TABLE procurement_options 
+DROP COLUMN IF EXISTS supplier_name;
+
+COMMIT;
+```
+
+**Phase 4 Summary:**
+- **Downtime Required:** Yes (maintenance window)
+- **Rollback Strategy:** Restore from backup, re-add columns
+- **Validation:** Full data integrity checks
+- **Dependencies:** Phase 3 complete, all data migrated
+
+---
+
+### Backfill & Script Details
+
+#### Deriving Package Records from Existing Data
+
+**Pseudocode for FULL Package Creation:**
+
+```python
+def create_full_packages_for_project_items(db_session):
+    """
+    Creates FULL packages for all project items that have sub-items.
+    Strategy: One FULL package per project item.
+    """
+    project_items_with_subitems = db_session.query(ProjectItem).join(
+        ProjectItemSubitem
+    ).distinct().all()
+    
+    for project_item in project_items_with_subitems:
+        # Check if FULL package already exists
+        existing_full = db_session.query(ProcurementPackage).filter(
+            ProcurementPackage.project_item_id == project_item.id,
+            ProcurementPackage.package_type == 'FULL'
+        ).first()
+        
+        if not existing_full:
+            # Create FULL package
+            full_package = ProcurementPackage(
+                project_item_id=project_item.id,
+                package_name=f"{project_item.item_code} - Full Package",
+                package_type='FULL',
+                is_active=True
+            )
+            db_session.add(full_package)
+            db_session.flush()
+            
+            # Create package_subitems entries
+            for subitem in project_item.sub_items:
+                package_subitem = PackageSubItem(
+                    package_id=full_package.id,
+                    project_item_subitem_id=subitem.id,
+                    quantity_covered=subitem.quantity,
+                    is_fully_covered=True,
+                    coverage_percentage=100.0
+                )
+                db_session.add(package_subitem)
+    
+    db_session.commit()
+```
+
+#### Error Handling and Reconciliation
+
+**Unmatched Suppliers Report:**
+
+```sql
+-- Query: Find procurement options with unmatched supplier names
+SELECT 
+    po.id,
+    po.supplier_name,
+    po.item_code,
+    po.project_item_id,
+    pi.item_code as project_item_code
+FROM procurement_options po
+LEFT JOIN project_items pi ON pi.id = po.project_item_id
+WHERE po.supplier_id IS NULL
+AND po.supplier_name IS NOT NULL
+ORDER BY po.supplier_name;
+
+-- Query: Find supplier_payments with unmatched supplier names
+SELECT 
+    sp.id,
+    sp.supplier_name,
+    sp.item_code,
+    sp.decision_id,
+    fd.project_item_id
+FROM supplier_payments sp
+LEFT JOIN finalized_decisions fd ON fd.id = sp.decision_id
+WHERE sp.supplier_id IS NULL
+AND sp.supplier_name IS NOT NULL
+ORDER BY sp.supplier_name;
+```
+
+**Reconciliation Script:**
+
+```sql
+-- Manual reconciliation: Update unmatched suppliers
+-- Step 1: Review unmatched_suppliers table
+-- Step 2: Create missing suppliers or map to existing
+-- Step 3: Update procurement_options/supplier_payments
+
+-- Example: Create new supplier and link
+INSERT INTO suppliers (supplier_id, company_name, status)
+VALUES ('SUP-NEW-001', 'Unmatched Supplier Name', 'active')
+RETURNING id;
+
+-- Then update procurement_options
+UPDATE procurement_options
+SET supplier_id = <new_supplier_id>
+WHERE supplier_name = 'Unmatched Supplier Name';
+```
+
+---
+
+### Application Touchpoints
+
+#### Phase 1-2: Model Updates
+
+**Files to Update:**
+
+1. **`backend/app/models.py`**
+   - Add `ProcurementPackage` model
+   - Add `PackageSubItem` model
+   - Add `PackagePayment` model
+   - Add `package_id` columns to existing models
+   - Add `supplier_id` to `SupplierPayment` model
+
+2. **`backend/app/schemas.py`**
+   - Add Pydantic schemas for new models
+   - Update existing schemas to include `package_id`
+   - Add validation for package-aware operations
+
+#### Phase 3: API/Service Updates
+
+**Routers to Update:**
+
+1. **`backend/app/routers/procurement.py`**
+   - Update `create_procurement_option` to accept `package_id`
+   - Update `get_procurement_options` to filter by package
+   - Add package-aware validation
+
+2. **`backend/app/routers/delivery_options.py`**
+   - Update endpoints to accept `package_id` OR `project_item_id`
+   - Add validation for CHECK constraint compliance
+
+3. **`backend/app/routers/decisions.py`**
+   - Update decision creation to link to packages
+   - Update decision queries to include package information
+
+**Services to Update:**
+
+1. **`backend/app/optimization_engine_enhanced.py`**
+   - Update `_load_data()` to read package-based options
+   - Update cost calculation to use package costs
+   - Update decision creation to link `package_id`
+
+2. **`backend/app/budget_analysis_service.py`**
+   - Update to aggregate by package when `package_id` present
+   - Maintain backward compatibility for legacy decisions
+
+3. **Finance Modules** (if exists):
+   - Update invoice creation to accept `package_id`
+   - Update payment tracking to link to packages
+   - Update supplier payment tracking to use `supplier_id` FK
+
+#### Feature Flags
+
+**Configuration File:** `backend/app/config.py`
+
+```python
+# Feature flags for package-aware procurement
+ENABLE_PACKAGE_AWARE_PROCUREMENT = os.getenv("ENABLE_PACKAGE_AWARE_PROCUREMENT", "false").lower() == "true"
+ENABLE_PACKAGE_BASED_OPTIMIZATION = os.getenv("ENABLE_PACKAGE_BASED_OPTIMIZATION", "false").lower() == "true"
+REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS = os.getenv("REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS", "false").lower() == "true"
+```
+
+**Usage in Code:**
+
+```python
+# Example: Procurement option creation
+def create_procurement_option(data, db):
+    if ENABLE_PACKAGE_AWARE_PROCUREMENT:
+        # Require package_id for new options
+        if REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS and not data.package_id:
+            raise ValueError("package_id is required for new procurement options")
+        
+        # Use package-aware logic
+        return create_package_aware_option(data, db)
+    else:
+        # Legacy logic (project_item_id or item_code)
+        return create_legacy_option(data, db)
+```
+
+#### Background Workers
+
+**Jobs to Update:**
+
+1. **Package Creation Worker** (new):
+   - Auto-create FULL packages for new project items
+   - Monitor for orphaned options (no package_id, no project_item_id)
+
+2. **Supplier Reconciliation Worker** (new):
+   - Periodically match unmatched `supplier_name` to `supplier_id`
+   - Alert on unmatched suppliers
+
+---
+
+### Testing & Rollback
+
+#### Test Suites by Phase
+
+##### Phase 1 Tests
+
+**Unit Tests:**
+- `test_procurement_packages_model.py`: Test model creation, relationships
+- `test_package_subitems_model.py`: Test coverage calculations
+- `test_package_id_columns.py`: Test nullable columns, constraints
+
+**Integration Tests:**
+- `test_create_full_package.py`: Test FULL package creation workflow
+- `test_package_relationships.py`: Test FK relationships
+
+**Data Validation Queries:**
+
+```sql
+-- Verify all new tables exist
+SELECT table_name 
+FROM information_schema.tables 
+WHERE table_name IN ('procurement_packages', 'package_subitems', 'package_payments');
+
+-- Verify package_id columns added
+SELECT column_name, is_nullable, data_type
+FROM information_schema.columns
+WHERE table_name IN ('procurement_options', 'finalized_decisions', 'delivery_options')
+AND column_name = 'package_id';
+
+-- Verify CHECK constraints
+SELECT constraint_name, table_name
+FROM information_schema.table_constraints
+WHERE constraint_type = 'CHECK'
+AND constraint_name LIKE '%package%' OR constraint_name LIKE '%supplier%';
+```
+
+##### Phase 2 Tests
+
+**Unit Tests:**
+- `test_full_package_creation.py`: Test FULL package creation for project items
+- `test_package_subitems_creation.py`: Test sub-item linking
+- `test_supplier_migration.py`: Test supplier_name to supplier_id migration
+
+**Integration Tests:**
+- `test_procurement_option_linking.py`: Test linking options to packages
+- `test_financial_record_linking.py`: Test linking invoices/payments to packages
+
+**Data Validation Queries:**
+
+```sql
+-- Verify FULL packages created for all project items with sub-items
+SELECT 
+    pi.id,
+    pi.item_code,
+    COUNT(DISTINCT pp.id) as full_packages_count
+FROM project_items pi
+LEFT JOIN project_item_subitems pis ON pis.project_item_id = pi.id
+LEFT JOIN procurement_packages pp ON pp.project_item_id = pi.id AND pp.package_type = 'FULL'
+WHERE EXISTS (SELECT 1 FROM project_item_subitems WHERE project_item_id = pi.id)
+GROUP BY pi.id, pi.item_code
+HAVING COUNT(DISTINCT pp.id) = 0;  -- Should return 0 rows
+
+-- Verify package coverage (all sub-items covered)
+SELECT 
+    pis.id,
+    pis.project_item_id,
+    SUM(psi.quantity_covered) as total_covered,
+    pis.quantity as required_quantity
+FROM project_item_subitems pis
+LEFT JOIN package_subitems psi ON psi.project_item_subitem_id = pis.id
+LEFT JOIN procurement_packages pp ON pp.id = psi.package_id AND pp.package_type = 'FULL'
+GROUP BY pis.id, pis.project_item_id, pis.quantity
+HAVING SUM(psi.quantity_covered) < pis.quantity;  -- Should return 0 rows
+
+-- Verify supplier_id migration
+SELECT 
+    COUNT(*) as total_options,
+    COUNT(supplier_id) as options_with_supplier_id,
+    COUNT(*) - COUNT(supplier_id) as options_without_supplier_id
+FROM procurement_options
+WHERE supplier_name IS NOT NULL;
+
+-- Verify financial record linking
+SELECT 
+    'invoices' as table_name,
+    COUNT(*) as total,
+    COUNT(package_id) as linked_to_package
+FROM invoices
+UNION ALL
+SELECT 
+    'payments',
+    COUNT(*),
+    COUNT(package_id)
+FROM payments
+UNION ALL
+SELECT 
+    'supplier_payments',
+    COUNT(*),
+    COUNT(package_id)
+FROM supplier_payments;
+```
+
+##### Phase 3 Tests
+
+**Unit Tests:**
+- `test_dual_mode_operation.py`: Test legacy and package-aware logic side-by-side
+- `test_feature_flags.py`: Test feature flag toggling
+
+**Integration Tests:**
+- `test_api_backward_compatibility.py`: Test API accepts both legacy and new formats
+- `test_optimization_engine_package_aware.py`: Test optimization with packages
+
+##### Phase 4 Tests
+
+**Unit Tests:**
+- `test_supplier_id_not_null.py`: Test NOT NULL constraint enforcement
+- `test_legacy_field_removal.py`: Test supplier_name removal
+
+**Data Validation Queries:**
+
+```sql
+-- Verify all records have supplier_id before Phase 4
+SELECT 
+    'procurement_options' as table_name,
+    COUNT(*) as total,
+    COUNT(supplier_id) as with_supplier_id,
+    COUNT(*) - COUNT(supplier_id) as without_supplier_id
+FROM procurement_options
+WHERE supplier_name IS NOT NULL
+UNION ALL
+SELECT 
+    'supplier_payments',
+    COUNT(*),
+    COUNT(supplier_id),
+    COUNT(*) - COUNT(supplier_id)
+FROM supplier_payments
+WHERE supplier_name IS NOT NULL;
+```
+
+#### Rollback Strategies
+
+##### Phase 1 Rollback
+
+```sql
+-- Rollback: Remove new tables and columns
+BEGIN;
+
+-- Drop new tables
+DROP TABLE IF EXISTS package_payments CASCADE;
+DROP TABLE IF EXISTS package_subitems CASCADE;
+DROP TABLE IF EXISTS procurement_packages CASCADE;
+
+-- Remove package_id columns
+ALTER TABLE procurement_options DROP COLUMN IF EXISTS package_id;
+ALTER TABLE finalized_decisions DROP COLUMN IF EXISTS package_id;
+ALTER TABLE delivery_options DROP COLUMN IF EXISTS package_id;
+
+-- Remove constraints
+ALTER TABLE delivery_options DROP CONSTRAINT IF EXISTS check_delivery_option_reference;
+ALTER TABLE procurement_options DROP CONSTRAINT IF EXISTS check_procurement_option_reference;
+
+-- Revert project_item_id to NOT NULL in delivery_options
+ALTER TABLE delivery_options ALTER COLUMN project_item_id SET NOT NULL;
+
+COMMIT;
+```
+
+##### Phase 2 Rollback
+
+```sql
+-- Rollback: Unlink packages, set package_id to NULL
+BEGIN;
+
+-- Unlink procurement_options
+UPDATE procurement_options SET package_id = NULL;
+
+-- Unlink finalized_decisions
+UPDATE finalized_decisions SET package_id = NULL;
+
+-- Unlink delivery_options
+UPDATE delivery_options SET package_id = NULL;
+
+-- Unlink financial records
+UPDATE invoices SET package_id = NULL WHERE package_id IS NOT NULL;
+UPDATE payments SET package_id = NULL WHERE package_id IS NOT NULL;
+UPDATE supplier_payments SET package_id = NULL WHERE package_id IS NOT NULL;
+
+-- Remove package_subitems
+DELETE FROM package_subitems;
+
+-- Delete FULL packages (optional - keep for reference)
+-- DELETE FROM procurement_packages WHERE package_type = 'FULL';
+
+COMMIT;
+```
+
+##### Phase 3 Rollback
+
+**Application-Level:**
+- Disable feature flags: `ENABLE_PACKAGE_AWARE_PROCUREMENT=false`
+- Revert code to legacy logic
+- No database changes required
+
+##### Phase 4 Rollback
+
+**Requires Backup Restoration:**
+- Restore database from pre-Phase 4 backup
+- OR manually re-add columns:
+
+```sql
+-- Re-add supplier_name columns
+ALTER TABLE supplier_payments 
+ADD COLUMN supplier_name VARCHAR(200);
+
+ALTER TABLE procurement_options 
+ADD COLUMN supplier_name TEXT;
+
+-- Re-populate from backup or supplier_id FK
+-- Then remove NOT NULL constraint
+ALTER TABLE supplier_payments 
+ALTER COLUMN supplier_id DROP NOT NULL;
+```
+
+---
+
 *Design Document: Future-State Procurement Data Model*
 *Date: 2025-01-XX*
-*Status: Conceptual Design (No SQL Implementation)*
+*Status: Conceptual Design + Implementation Plan*
 

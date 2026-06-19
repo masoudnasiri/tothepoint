@@ -196,8 +196,65 @@ class ProjectItem(Base):
     # Relationships
     project = relationship("Project", back_populates="project_items")
     master_item = relationship("ItemMaster", back_populates="project_items")
+    packages = relationship("ProcurementPackage", back_populates="project_item", cascade="all, delete-orphan")
     delivery_options_rel = relationship("DeliveryOption", back_populates="project_item", cascade="all, delete-orphan")
     finalized_decisions = relationship("FinalizedDecision", back_populates="project_item", cascade="all, delete-orphan")
+
+
+class ProcurementPackage(Base):
+    """
+    Groups sub-items into procurement units (packages).
+    Supports FULL (entire project item), PARTIAL (subset), and CUSTOM packages.
+    Phase 1: Base table, Phase 3: Used for package-aware operations
+    """
+    __tablename__ = "procurement_packages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    package_name = Column(Text, nullable=True)
+    package_type = Column(String(20), nullable=False)  # FULL, PARTIAL, CUSTOM
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    main_item_quantity = Column(Integer, nullable=True, default=0)  # Quantity of main item covered
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Relationships
+    project_item = relationship("ProjectItem", back_populates="packages")
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    subitems = relationship("PackageSubItem", back_populates="package", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        CheckConstraint("package_type IN ('FULL', 'PARTIAL', 'CUSTOM')", name='check_package_type'),
+    )
+
+
+class PackageSubItem(Base):
+    """
+    Maps sub-items to packages with coverage details (quantities, percentages).
+    Defines which sub-items are included in each package and how much of each sub-item requirement is covered.
+    """
+    __tablename__ = "package_subitems"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_item_subitem_id = Column(Integer, ForeignKey("project_item_subitems.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantity_covered = Column(Integer, nullable=False)
+    is_fully_covered = Column(Boolean, default=False)
+    coverage_percentage = Column(Numeric(5, 2), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    package = relationship("ProcurementPackage", back_populates="subitems")
+    project_item_subitem = relationship("ProjectItemSubItem")
+    
+    __table_args__ = (
+        CheckConstraint("quantity_covered >= 0", name='check_positive_quantity'),
+        CheckConstraint("coverage_percentage IS NULL OR (coverage_percentage >= 0 AND coverage_percentage <= 100)", name='check_coverage_percentage'),
+    )
 
 
 class DeliveryOption(Base):
@@ -208,7 +265,9 @@ class DeliveryOption(Base):
     __tablename__ = "delivery_options"
     
     id = Column(Integer, primary_key=True, index=True)
-    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Phase 3: Support both package_id and project_item_id (package_id preferred)
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=True, index=True)
     
     # Delivery Timing
     delivery_slot = Column(Integer, nullable=True)  # For optimization engine compatibility (1, 2, 3...)
@@ -236,6 +295,7 @@ class DeliveryOption(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
+    package = relationship("ProcurementPackage", foreign_keys=[package_id])
     project_item = relationship("ProjectItem", back_populates="delivery_options_rel")
 
 
@@ -243,8 +303,14 @@ class ProcurementOption(Base):
     __tablename__ = "procurement_options"
     
     id = Column(Integer, primary_key=True, index=True)
+    # Phase 3: Package-aware reference (preferred)
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Legacy references
     item_code = Column(String(50), nullable=False, index=True)
-    supplier_name = Column(Text, nullable=False)  # Legacy field - will be deprecated
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    # Supplier reference
+    supplier_name = Column(Text, nullable=True)  # Legacy field - will be deprecated
     supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=True)  # New centralized supplier reference
     
     # Updated financial fields with proper currency support
@@ -260,7 +326,6 @@ class ProcurementOption(Base):
     purchase_date = Column(Date, nullable=True)  # When to place the order (purchase date)
     expected_delivery_date = Column(Date, nullable=True)  # Expected delivery date from supplier
     delivery_option_id = Column(Integer, ForeignKey("delivery_options.id"), nullable=True)  # Link to project item's delivery option
-    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=True, index=True)  # Link to specific project item
     discount_bundle_threshold = Column(Integer)
     discount_bundle_percent = Column(Numeric(5, 2))
     payment_terms = Column(JSON, nullable=False)  # Structured JSON for payment terms
@@ -270,6 +335,7 @@ class ProcurementOption(Base):
     is_finalized = Column(Boolean, default=False)  # Whether procurement team has finalized this option for optimization
     
     # Relationships
+    package = relationship("ProcurementPackage", foreign_keys=[package_id])
     currency = relationship("Currency")  # Keep for backward compatibility
     supplier = relationship("Supplier", foreign_keys=[supplier_id])  # Centralized supplier data
     optimization_results = relationship("OptimizationResult", back_populates="procurement_option")
@@ -278,6 +344,7 @@ class ProcurementOption(Base):
     # Add check constraints
     __table_args__ = (
         CheckConstraint('cost_amount > 0', name='check_positive_cost'),
+        CheckConstraint('package_id IS NOT NULL OR project_item_id IS NOT NULL OR item_code IS NOT NULL', name='check_procurement_option_reference'),
     )
 
 
@@ -344,6 +411,8 @@ class FinalizedDecision(Base):
     run_id = Column(UUID(as_uuid=True), ForeignKey("optimization_runs.run_id"), nullable=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=False)
+    # Phase 3: Package-aware reference (for package-level execution tracking)
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="SET NULL"), nullable=True, index=True)
     item_code = Column(String(50), nullable=False, index=True)
     procurement_option_id = Column(Integer, ForeignKey("procurement_options.id"), nullable=False)
     purchase_date = Column(Date, nullable=False)
@@ -429,6 +498,7 @@ class FinalizedDecision(Base):
     # Relationships
     project = relationship("Project", foreign_keys=[project_id])
     project_item = relationship("ProjectItem", back_populates="finalized_decisions")
+    package = relationship("ProcurementPackage", foreign_keys=[package_id])
     procurement_option = relationship("ProcurementOption", foreign_keys=[procurement_option_id])
     delivery_option = relationship("DeliveryOption", foreign_keys=[delivery_option_id])
     optimization_run = relationship("OptimizationRun", back_populates="finalized_decisions")
@@ -441,6 +511,8 @@ class FinalizedDecision(Base):
     currency = relationship("Currency")
     cashflow_events = relationship("CashflowEvent", back_populates="related_decision", cascade="all, delete-orphan")
     supplier_payments = relationship("SupplierPayment", back_populates="decision", cascade="all, delete-orphan")
+    invoices = relationship("Invoice", back_populates="decision", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="decision", cascade="all, delete-orphan")
 
 
 class DecisionFactorWeight(Base):
@@ -532,7 +604,10 @@ class SupplierPayment(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     decision_id = Column(Integer, ForeignKey("finalized_decisions.id"), nullable=False)
-    supplier_name = Column(String(200), nullable=False)
+    # Phase 3: Package-aware reference and supplier normalization
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="SET NULL"), nullable=True, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True, index=True)
+    supplier_name = Column(String(200), nullable=True)  # Legacy field - will be deprecated
     item_code = Column(String(100), nullable=False, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     payment_date = Column(Date, nullable=False)
@@ -549,6 +624,8 @@ class SupplierPayment(Base):
     
     # Relationships
     decision = relationship("FinalizedDecision", back_populates="supplier_payments")
+    package = relationship("ProcurementPackage", foreign_keys=[package_id])
+    supplier = relationship("Supplier", foreign_keys=[supplier_id])
     project = relationship("Project")
     created_by = relationship("User", foreign_keys=[created_by_id])
 

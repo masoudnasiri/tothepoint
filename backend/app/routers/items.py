@@ -349,6 +349,61 @@ async def get_project_item_by_id(
     return item_dict
 
 
+@router.get("/{item_id}/subitems")
+async def get_project_item_subitems(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get sub-items for a specific project item.
+    Returns list of project_item_subitems with their sub-item details.
+    """
+    # Verify project item exists
+    item = await get_project_item(db, item_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project item not found"
+        )
+    
+    user_projects = await get_user_projects(db, current_user)
+    
+    # Check access
+    if current_user.role == "pm" and item.project_id not in user_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this project item"
+        )
+    
+    # Load sub-items quantities
+    from sqlalchemy import select
+    from app.models import ProjectItemSubItem, ItemSubItem
+    
+    result = await db.execute(
+        select(ProjectItemSubItem, ItemSubItem)
+        .where(ProjectItemSubItem.project_item_id == item_id)
+        .join(ItemSubItem, ItemSubItem.id == ProjectItemSubItem.item_subitem_id)
+    )
+    
+    subitems_list = []
+    for rel, sub in result.fetchall():
+        subitems_list.append({
+            "id": rel.id,  # project_item_subitems.id (the ID we need for package subitems)
+            "item_subitem_id": rel.item_subitem_id,  # For reference
+            "project_item_id": rel.project_item_id,
+            "quantity": rel.quantity,
+            "sub_item": {
+                "id": sub.id,  # items_subitems.id (the master sub-item ID)
+                "name": sub.name,
+                "part_number": sub.part_number,
+                "description": sub.description,
+            }
+        })
+    
+    return subitems_list
+
+
 @router.put("/{item_id}", response_model=ProjectItem)
 async def update_project_item_by_id(
     item_id: int,

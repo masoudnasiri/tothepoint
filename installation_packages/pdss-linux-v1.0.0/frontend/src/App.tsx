@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
 import { AuthProvider } from './contexts/AuthContext.tsx';
+import { FeatureFlagsProvider } from './hooks/useFeatureFlags.tsx';
 import { ProtectedRoute } from './components/ProtectedRoute.tsx';
 import { Layout } from './components/Layout.tsx';
 import { LoginPage } from './pages/LoginPage.tsx';
@@ -178,8 +179,9 @@ function AppContent() {
 
   return (
     <ThemeProvider theme={theme}>
-      <AuthProvider>
-        <Routes>
+      <FeatureFlagsProvider>
+        <AuthProvider>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/*"
@@ -211,8 +213,9 @@ function AppContent() {
               </ProtectedRoute>
             }
           />
-        </Routes>
-      </AuthProvider>
+          </Routes>
+        </AuthProvider>
+      </FeatureFlagsProvider>
     </ThemeProvider>
   );
 }

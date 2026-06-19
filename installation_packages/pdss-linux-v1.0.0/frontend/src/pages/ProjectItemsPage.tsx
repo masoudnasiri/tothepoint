@@ -53,7 +53,9 @@ import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { useParams, useNavigate } from 'react-router-dom';
-import { itemsAPI, itemsMasterAPI, excelAPI, deliveryOptionsAPI } from '../services/api.ts';
+import { itemsAPI, itemsMasterAPI, excelAPI, deliveryOptionsAPI, packagesAPI } from '../services/api.ts';
+import { useFeatureFlags } from '../hooks/useFeatureFlags.tsx';
+import { ProcurementPackage } from '../types/packages.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
 import { ProjectItem, ProjectItemCreate, ItemMaster, ItemSubItem } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
@@ -105,6 +107,9 @@ export const ProjectItemsPage: React.FC = () => {
   const [deliveryOptionsDialogOpen, setDeliveryOptionsDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ProjectItem | null>(null);
   const [viewItemDeliveryOptions, setViewItemDeliveryOptions] = useState<any[]>([]);
+  const [itemPackages, setItemPackages] = useState<Record<number, ProcurementPackage[]>>({});
+  
+  const { flags, isPackageMode } = useFeatureFlags();
   
   // Pagination and filter state
   const [page, setPage] = useState(0);
@@ -880,6 +885,16 @@ export const ProjectItemsPage: React.FC = () => {
                         console.error('Failed to load delivery options', err);
                         setViewItemDeliveryOptions([]);
                       }
+                      // Fetch packages for this item if package mode is enabled
+                      if (isPackageMode) {
+                        try {
+                          const packagesResponse = await packagesAPI.listByProjectItem(item.id, true);
+                          setItemPackages(prev => ({ ...prev, [item.id]: packagesResponse.data }));
+                        } catch (err) {
+                          console.error('Failed to load packages', err);
+                          setItemPackages(prev => ({ ...prev, [item.id]: [] }));
+                        }
+                      }
                       setViewDialogOpen(true);
                     }}
                     title={t('projectItems.viewItemDetails')}
@@ -1224,6 +1239,60 @@ export const ProjectItemsPage: React.FC = () => {
                     </Typography>
                   )}
                 </Paper>
+
+                {/* Packages Section (Phase 3) */}
+                {isPackageMode && (
+                  <Paper elevation={1} sx={{ p: 2 }}>
+                    <Typography variant="subtitle2" color="textSecondary" gutterBottom>
+                      {t('procurement.packages')}
+                    </Typography>
+                    {itemPackages[selectedItem.id] && itemPackages[selectedItem.id].length > 0 ? (
+                      <Box sx={{ display: 'grid', gap: 1, mt: 1 }}>
+                        {itemPackages[selectedItem.id].map((pkg) => (
+                          <Paper 
+                            key={pkg.id} 
+                            elevation={0} 
+                            sx={{ 
+                              p: 1.5, 
+                              bgcolor: pkg.package_type === 'FULL' ? 'primary.lighter' : 'grey.50', 
+                              border: '1px solid', 
+                              borderColor: pkg.package_type === 'FULL' ? 'primary.main' : 'grey.200' 
+                            }}
+                          >
+                            <Box display="flex" justifyContent="space-between" alignItems="center">
+                              <Box>
+                                <Typography variant="body2" fontWeight="medium">
+                                  {pkg.package_name || `${selectedItem.item_code} - ${t(`procurement.packageType${pkg.package_type}`)}`}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {t('procurement.packageType')}: {t(`procurement.packageType${pkg.package_type}`)}
+                                  {pkg.supplier_id && ` • ${t('procurement.supplier')}: ${pkg.supplier_id}`}
+                                </Typography>
+                                {pkg.is_active ? (
+                                  <Chip label={t('procurement.active')} size="small" color="success" sx={{ mt: 0.5 }} />
+                                ) : (
+                                  <Chip label={t('procurement.inactive')} size="small" color="default" sx={{ mt: 0.5 }} />
+                                )}
+                              </Box>
+                              {pkg.package_type === 'FULL' && (
+                                <Chip 
+                                  label={t('procurement.default')} 
+                                  size="small" 
+                                  color="primary" 
+                                  variant="outlined"
+                                />
+                              )}
+                            </Box>
+                          </Paper>
+                        ))}
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+                        {t('procurement.noPackages')}
+                      </Typography>
+                    )}
+                  </Paper>
+                )}
 
                 <Paper elevation={1} sx={{ p: 2 }}>
                   <Typography variant="subtitle2" color="textSecondary" gutterBottom>

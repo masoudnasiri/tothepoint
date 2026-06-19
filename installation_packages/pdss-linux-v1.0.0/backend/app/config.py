@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List
+import os
 
 
 class Settings(BaseSettings):
@@ -20,6 +21,22 @@ class Settings(BaseSettings):
     # Example: ALLOWED_ORIGINS=http://yourdomain.com,https://yourdomain.com
     # Set to "*" to allow all origins (for development only)
     allowed_origins: Optional[str] = None
+    
+    # Phase 3: Feature Flags for Package-Aware Procurement
+    # Enable package-aware procurement operations (prefer package_id over project_item_id)
+    enable_package_procurement: bool = os.getenv("ENABLE_PACKAGE_PROCUREMENT", "false").lower() == "true"
+    
+    # Allow legacy project_item_id/item_code operations when package_id not available
+    legacy_project_item_fallback: bool = os.getenv("LEGACY_PROJECT_ITEM_FALLBACK", "true").lower() == "true"
+    
+    # Enforce supplier_id usage (block string-based supplier_name for new records)
+    supplier_normalization_enforced: bool = os.getenv("SUPPLIER_NORMALIZATION_ENFORCED", "false").lower() == "true"
+    
+    # Enable package-based optimization (Phase 3 gradual rollout)
+    enable_package_based_optimization: bool = os.getenv("ENABLE_PACKAGE_BASED_OPTIMIZATION", "false").lower() == "true"
+    
+    # Require package_id for new procurement options (stricter enforcement)
+    require_package_id_for_new_options: bool = os.getenv("REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS", "false").lower() == "true"
     
     class Config:
         env_file = ".env"

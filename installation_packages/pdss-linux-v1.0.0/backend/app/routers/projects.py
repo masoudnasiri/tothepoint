@@ -2,9 +2,10 @@
 Project management endpoints
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.database import get_db
 from app.auth import get_current_user, require_admin, require_pmo, get_user_projects
 from app.crud import (
@@ -12,10 +13,10 @@ from app.crud import (
     assign_user_to_project, remove_user_from_project, get_user_project_assignments,
     get_project_summaries, log_audit
 )
-from app.models import User
+from app.models import User, ProcurementPackage, ProjectItem
 from app.schemas import (
     Project, ProjectCreate, ProjectUpdate, ProjectAssignmentCreate,
-    ProjectAssignment, ProjectSummary
+    ProjectAssignment, ProjectSummary, ProcurementPackageResponse
 )
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -196,3 +197,83 @@ async def get_project_assignments_endpoint(
         .order_by(ProjectAssignment.assigned_at)
     )
     return result.scalars().all()
+
+
+@router.get("/{project_id}/packages", response_model=List[ProcurementPackageResponse])
+async def list_packages_by_project(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    active_only: bool = Query(True, description="Filter to active packages only")
+):
+    """
+    List all procurement packages for a project.
+    """
+    # Verify project exists and user has access
+    user_projects = await get_user_projects(db, current_user)
+    if current_user.role == "pm" and project_id not in user_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this project"
+        )
+    
+    query = select(ProcurementPackage).join(ProjectItem).where(
+        ProjectItem.project_id == project_id
+    )
+    
+    if active_only:
+        query = query.where(ProcurementPackage.is_active == True)
+    
+    query = query.order_by(
+        ProcurementPackage.package_type,
+        ProcurementPackage.id
+    )
+    
+    result = await db.execute(query)
+    packages = result.scalars().all()
+    
+    return packages
+
+
+@router.get("/{project_id}/coverage-summary")
+async def get_project_coverage_summary(
+    project_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get coverage summary for all items in a project.
+    """
+    # Verify project exists and user has access
+    user_projects = await get_user_projects(db, current_user)
+    if current_user.role == "pm" and project_id not in user_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this project"
+        )
+    
+    # Import helper function from package service
+    from app.services.package_service import calculate_coverage_summary
+    
+    # Get all project items
+    result = await db.execute(
+        select(ProjectItem).where(ProjectItem.project_id == project_id)
+    )
+    project_items = result.scalars().all()
+    
+    coverage_summaries = []
+    for item in project_items:
+        # Get coverage for this item
+        try:
+            coverage_result = await calculate_coverage_summary(db, item.id)
+            coverage_summaries.append(coverage_result)
+        except Exception as e:
+            # Skip items with errors
+            continue
+    
+    return {
+        "project_id": project_id,
+        "items": coverage_summaries,
+        "total_items": len(project_items),
+        "fully_covered_items": sum(1 for c in coverage_summaries if c.get("is_fully_covered", False))
+    }

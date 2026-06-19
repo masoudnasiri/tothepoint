@@ -1,0 +1,78 @@
+{
+  "start_time": "2025-11-04T21:10:51.600496",
+  "end_time": "2025-11-04T21:10:53.544184",
+  "flag_states": {
+    "ENABLE_PACKAGE_PROCUREMENT": false,
+    "LEGACY_PROJECT_ITEM_FALLBACK": true,
+    "SUPPLIER_NORMALIZATION_ENFORCED": false,
+    "ENABLE_PACKAGE_BASED_OPTIMIZATION": false,
+    "REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS": false
+  },
+  "scenarios": [
+    {
+      "name": "Procurement Option - Package First",
+      "success": true,
+      "details": {
+        "package_id": 1,
+        "project_item_id": null,
+        "supplier_id": 3,
+        "option_id": 47,
+        "flag_enabled": false
+      },
+      "timestamp": "2025-11-04T21:10:53.280262"
+    },
+    {
+      "name": "Procurement Option - Legacy Fallback",
+      "success": true,
+      "details": {
+        "package_id": null,
+        "project_item_id": 18,
+        "supplier_id": 3,
+        "option_id": 48,
+        "package_resolved": false
+      },
+      "timestamp": "2025-11-04T21:10:53.384815"
+    },
+    {
+      "name": "Delivery Option - Package First",
+      "success": true,
+      "details": {
+        "package_id": 1,
+        "project_item_id": 18,
+        "option_id": 54,
+        "flag_enabled": false
+      },
+      "timestamp": "2025-11-04T21:10:53.433286"
+    },
+    {
+      "name": "Delivery Option - Legacy Fallback",
+      "success": true,
+      "details": {
+        "package_id": null,
+        "project_item_id": 18,
+        "option_id": 55,
+        "package_resolved": false
+      },
+      "timestamp": "2025-11-04T21:10:53.472482"
+    },
+    {
+      "name": "Supplier Normalization",
+      "success": true,
+      "details": {
+        "supplier_id_test": true,
+        "supplier_name_test": true,
+        "normalization_enforced": false
+      },
+      "timestamp": "2025-11-04T21:10:53.543990"
+    }
+  ],
+  "warnings": [],
+  "errors": [],
+  "summary": {
+    "total_scenarios": 5,
+    "passed": 5,
+    "failed": 0,
+    "warnings_count": 0,
+    "errors_count": 0
+  }
+}

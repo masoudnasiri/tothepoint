@@ -4,7 +4,8 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
 
-Base = declarative_base()
+# Use same Base as models.py to ensure compatibility
+from app.database import Base
 
 class InvoiceStatus(str, enum.Enum):
     DRAFT = "draft"
@@ -30,6 +31,8 @@ class Invoice(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     decision_id = Column(Integer, ForeignKey("finalized_decisions.id"), nullable=False)
+    # Phase 3: Package-aware reference
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="SET NULL"), nullable=True, index=True)
     invoice_number = Column(String(100), unique=True, nullable=False)
     invoice_date = Column(DateTime(timezone=True), nullable=False)
     invoice_amount = Column(Numeric(15, 2), nullable=False)
@@ -43,6 +46,7 @@ class Invoice(Base):
     
     # Relationships
     decision = relationship("FinalizedDecision", back_populates="invoices")
+    package = relationship("ProcurementPackage", foreign_keys=[package_id])
     payments = relationship("Payment", back_populates="invoice")
 
 class Payment(Base):
@@ -51,6 +55,8 @@ class Payment(Base):
     id = Column(Integer, primary_key=True, index=True)
     invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=False)
     decision_id = Column(Integer, ForeignKey("finalized_decisions.id"), nullable=False)
+    # Phase 3: Package-aware reference
+    package_id = Column(Integer, ForeignKey("procurement_packages.id", ondelete="SET NULL"), nullable=True, index=True)
     payment_date = Column(DateTime(timezone=True), nullable=False)
     payment_amount = Column(Numeric(15, 2), nullable=False)
     currency = Column(String(3), nullable=False, default="IRR")
@@ -64,3 +70,4 @@ class Payment(Base):
     # Relationships
     invoice = relationship("Invoice", back_populates="payments")
     decision = relationship("FinalizedDecision", back_populates="payments")
+    package = relationship("ProcurementPackage", foreign_keys=[package_id])
