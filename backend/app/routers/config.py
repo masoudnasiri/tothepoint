@@ -26,7 +26,8 @@ async def get_feature_flags(
             "legacy_project_item_fallback": settings.legacy_project_item_fallback,
             "supplier_normalization_enforced": settings.supplier_normalization_enforced,
             "enable_package_based_optimization": settings.enable_package_based_optimization,
-            "require_package_id_for_new_options": settings.require_package_id_for_new_options
+            "require_package_id_for_new_options": settings.require_package_id_for_new_options,
+            "enforce_package_coverage_on_lock": settings.enforce_package_coverage_on_lock
         }
     except Exception as e:
         # Fallback to defaults if settings are not available
@@ -35,6 +36,7 @@ async def get_feature_flags(
             "legacy_project_item_fallback": False,
             "supplier_normalization_enforced": False,
             "enable_package_based_optimization": False,
-            "require_package_id_for_new_options": False
+            "require_package_id_for_new_options": False,
+            "enforce_package_coverage_on_lock": False
         }
 

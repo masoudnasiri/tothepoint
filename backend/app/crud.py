@@ -400,6 +400,24 @@ async def create_procurement_option(db: AsyncSession, option: ProcurementOptionC
         if not option_data.get('supplier_name'):
             option_data['supplier_name'] = supplier_info.get('supplier_name')
     
+    # Backward-compatible financial mapping:
+    # keep legacy base_cost/currency_id while populating required new columns.
+    if option_data.get('base_cost') is not None and option_data.get('cost_amount') is None:
+        option_data['cost_amount'] = option_data['base_cost']
+
+    if not option_data.get('cost_currency'):
+        currency_code = 'IRR'
+        currency_id = option_data.get('currency_id')
+        if currency_id is not None:
+            from app.models import Currency
+            currency_result = await db.execute(
+                select(Currency.code).where(Currency.id == currency_id)
+            )
+            resolved_code = currency_result.scalar_one_or_none()
+            if resolved_code:
+                currency_code = resolved_code
+        option_data['cost_currency'] = currency_code
+
     # Convert Decimal values in payment_terms to float for JSON serialization
     if 'payment_terms' in option_data and option_data['payment_terms']:
         payment_terms = option_data['payment_terms'].copy()
@@ -528,6 +546,10 @@ async def update_procurement_option(db: AsyncSession, option_id: int,
             if hasattr(value, '__float__'):  # Convert Decimal to float
                 payment_terms[key] = float(value)
         update_data['payment_terms'] = payment_terms
+
+    # Keep required financial field in sync when legacy base_cost is updated.
+    if 'base_cost' in update_data and 'cost_amount' not in update_data:
+        update_data['cost_amount'] = update_data['base_cost']
     
     await db.execute(
         update(ProcurementOption).where(ProcurementOption.id == option_id).values(**update_data)

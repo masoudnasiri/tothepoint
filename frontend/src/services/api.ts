@@ -5,8 +5,11 @@ declare const process: any;
 
 // Configure axios
 // Note: In development, the proxy in package.json handles routing to the backend
-// In production, set REACT_APP_API_URL to the actual backend URL
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+// In production, set REACT_APP_API_URL to the actual backend URL.
+// Windows/Docker environments can resolve localhost to IPv6 (::1), while the
+// mapped backend port is reliably reachable on IPv4 loopback.
+const rawApiBaseUrl = process.env.REACT_APP_API_URL || '';
+const API_BASE_URL = rawApiBaseUrl.replace('://localhost:', '://127.0.0.1:');
 console.log('API Base URL:', API_BASE_URL || '(using proxy from package.json)');
 
 const api = axios.create({

@@ -10,7 +10,13 @@ from fastapi import HTTPException, status
 import logging
 
 from app.config import settings
-from app.models import ProjectItem, ProjectItemSubItem
+from app.models import (
+    ProjectItem,
+    ProjectItemSubItem,
+    ProcurementPackage,
+    PackageSubItem,
+    FinalizedDecision,
+)
 from app.validators.package_validators import (
     validate_package_or_legacy_reference,
     resolve_package_from_project_item,
@@ -287,4 +293,271 @@ async def calculate_coverage_summary(
             for p in packages
         ]
     }
+
+
+async def validate_main_item_quantity(
+    db: AsyncSession,
+    project_item_id: int,
+    main_item_quantity: Optional[int]
+) -> None:
+    """
+    Validate package main-item quantity against project item demand.
+
+    Rules:
+    - quantity must be >= 0
+    - quantity cannot exceed project_item.quantity
+    """
+    if main_item_quantity is None:
+        return
+
+    if main_item_quantity < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="main_item_quantity must be greater than or equal to 0"
+        )
+
+    result = await db.execute(
+        select(ProjectItem).where(ProjectItem.id == project_item_id)
+    )
+    project_item = result.scalar_one_or_none()
+    if not project_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project item not found"
+        )
+
+    required_quantity = int(project_item.quantity or 0)
+    if main_item_quantity > required_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"main_item_quantity ({main_item_quantity}) cannot exceed required project item "
+                f"quantity ({required_quantity})"
+            )
+        )
+
+
+async def validate_and_compute_subitem_coverage(
+    db: AsyncSession,
+    package_id: int,
+    project_item_subitem_id: int,
+    quantity_covered: int,
+    *,
+    exclude_package_subitem_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Validate package sub-item mapping and compute normalized coverage fields.
+
+    Rules:
+    - package and project_item_subitem must exist
+    - project_item_subitem must belong to package.project_item_id
+    - quantity_covered cannot exceed required sub-item quantity
+    - total coverage across ACTIVE packages for this sub-item cannot exceed requirement
+    """
+    package_result = await db.execute(
+        select(ProcurementPackage).where(ProcurementPackage.id == package_id)
+    )
+    package = package_result.scalar_one_or_none()
+    if not package:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Package not found"
+        )
+
+    subitem_result = await db.execute(
+        select(ProjectItemSubItem).where(ProjectItemSubItem.id == project_item_subitem_id)
+    )
+    project_subitem = subitem_result.scalar_one_or_none()
+    if not project_subitem:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project item sub-item not found"
+        )
+
+    if project_subitem.project_item_id != package.project_item_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sub-item does not belong to the same project item as the package"
+        )
+
+    required_quantity = int(project_subitem.quantity or 0)
+    if quantity_covered > required_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"quantity_covered ({quantity_covered}) cannot exceed required sub-item "
+                f"quantity ({required_quantity})"
+            )
+        )
+
+    total_query = (
+        select(func.coalesce(func.sum(PackageSubItem.quantity_covered), 0))
+        .select_from(PackageSubItem)
+        .join(ProcurementPackage, ProcurementPackage.id == PackageSubItem.package_id)
+        .where(PackageSubItem.project_item_subitem_id == project_item_subitem_id)
+        .where(ProcurementPackage.is_active == True)
+    )
+    if exclude_package_subitem_id is not None:
+        total_query = total_query.where(PackageSubItem.id != exclude_package_subitem_id)
+
+    total_result = await db.execute(total_query)
+    existing_coverage = int(total_result.scalar() or 0)
+    total_after = existing_coverage + int(quantity_covered)
+    if total_after > required_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Coverage overflow for this sub-item: existing active coverage ({existing_coverage}) + "
+                f"new quantity ({quantity_covered}) exceeds required quantity ({required_quantity})"
+            )
+        )
+
+    coverage_percentage = None
+    if required_quantity > 0:
+        coverage_percentage = round((float(quantity_covered) / float(required_quantity)) * 100, 2)
+    else:
+        coverage_percentage = 100.0 if quantity_covered == 0 else 0.0
+
+    return {
+        "required_quantity": required_quantity,
+        "is_fully_covered": quantity_covered >= required_quantity,
+        "coverage_percentage": coverage_percentage,
+    }
+
+
+async def validate_package_coverage_for_lock(
+    db: AsyncSession,
+    decision_ids: List[int],
+) -> None:
+    """
+    Enforce package/sub-item coverage before decisions are locked.
+
+    Policy:
+    - active only when both package procurement and lock enforcement flags are enabled
+    - checks project items that have sub-item requirements and package-based decisions
+    - uses union of existing LOCKED packages + currently locking package decisions
+    - blocks lock if any required sub-item remains uncovered
+    """
+    if not decision_ids:
+        return
+
+    if not (settings.enable_package_procurement and settings.enforce_package_coverage_on_lock):
+        return
+
+    target_result = await db.execute(
+        select(FinalizedDecision).where(FinalizedDecision.id.in_(decision_ids))
+    )
+    target_decisions = target_result.scalars().all()
+    if not target_decisions:
+        return
+
+    # Only project-items that are actually using package decisions are validated.
+    project_item_ids = {
+        d.project_item_id
+        for d in target_decisions
+        if d.project_item_id is not None and d.package_id is not None
+    }
+
+    for project_item_id in project_item_ids:
+        target_package_ids = {
+            d.package_id
+            for d in target_decisions
+            if d.project_item_id == project_item_id and d.package_id is not None
+        }
+        if not target_package_ids:
+            continue
+
+        locked_result = await db.execute(
+            select(FinalizedDecision.package_id).where(
+                FinalizedDecision.project_item_id == project_item_id,
+                FinalizedDecision.status == "LOCKED",
+                FinalizedDecision.package_id.isnot(None),
+            )
+        )
+        locked_package_ids = {row[0] for row in locked_result.all() if row[0] is not None}
+        package_ids_to_validate = target_package_ids | locked_package_ids
+
+        await _validate_project_item_subitem_coverage_for_packages(
+            db,
+            project_item_id=project_item_id,
+            package_ids=package_ids_to_validate,
+        )
+
+
+async def _validate_project_item_subitem_coverage_for_packages(
+    db: AsyncSession,
+    *,
+    project_item_id: int,
+    package_ids: set,
+) -> None:
+    """Validate aggregate sub-item coverage for selected packages of one project item."""
+    if not package_ids:
+        return
+
+    requirements_result = await db.execute(
+        select(ProjectItemSubItem).where(ProjectItemSubItem.project_item_id == project_item_id)
+    )
+    requirements = requirements_result.scalars().all()
+    if not requirements:
+        # No sub-item breakdown -> skip enforcement for this project item.
+        return
+
+    active_packages_result = await db.execute(
+        select(ProcurementPackage.id).where(
+            ProcurementPackage.project_item_id == project_item_id,
+            ProcurementPackage.is_active == True,
+            ProcurementPackage.id.in_(list(package_ids)),
+        )
+    )
+    active_package_ids = {row[0] for row in active_packages_result.all()}
+    if not active_package_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot lock package decisions: no active packages found for coverage validation "
+                f"(project_item_id={project_item_id})."
+            ),
+        )
+
+    coverage_result = await db.execute(
+        select(
+            PackageSubItem.project_item_subitem_id,
+            func.coalesce(func.sum(PackageSubItem.quantity_covered), 0),
+        )
+        .where(PackageSubItem.package_id.in_(list(active_package_ids)))
+        .group_by(PackageSubItem.project_item_subitem_id)
+    )
+    covered_by_subitem = {row[0]: int(row[1] or 0) for row in coverage_result.all()}
+
+    uncovered = []
+    for requirement in requirements:
+        required = int(requirement.quantity or 0)
+        covered = int(covered_by_subitem.get(requirement.id, 0))
+        if covered < required:
+            uncovered.append(
+                {
+                    "project_item_subitem_id": requirement.id,
+                    "required": required,
+                    "covered": covered,
+                    "remaining": required - covered,
+                }
+            )
+
+    if uncovered:
+        preview = ", ".join(
+            [
+                f"subitem {row['project_item_subitem_id']}: {row['covered']}/{row['required']}"
+                for row in uncovered[:5]
+            ]
+        )
+        if len(uncovered) > 5:
+            preview += ", ..."
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Cannot lock decisions: package coverage is incomplete for required sub-items "
+                f"(project_item_id={project_item_id}; {preview})."
+            ),
+        )
 

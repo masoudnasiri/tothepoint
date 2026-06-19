@@ -84,21 +84,18 @@ class TestProcurementOptionCRUD:
     
     @pytest.mark.asyncio
     async def test_create_no_reference(self, db_session, test_supplier, test_currency):
-        """Test creating procurement option with no reference (should fail)"""
-        from fastapi import HTTPException
-        option_data = ProcurementOptionCreate(
-            item_code="",  # Empty item_code
-            supplier_name=test_supplier.company_name,  # Required legacy field
-            supplier_id=test_supplier.id,
-            base_cost=Decimal("1000.00"),  # Required legacy field
-            currency_id=test_currency.id,  # Required legacy field
-            payment_terms={"type": "cash"}
-        )
-        
-        # This should raise HTTPException from validator
-        with pytest.raises(HTTPException) as exc_info:
-            await create_procurement_option(db_session, option_data)
-        assert exc_info.value.status_code == 400
+        """Empty item_code is rejected by schema validation."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ProcurementOptionCreate(
+                item_code="",  # Empty item_code
+                supplier_name=test_supplier.company_name,  # Required legacy field
+                supplier_id=test_supplier.id,
+                base_cost=Decimal("1000.00"),  # Required legacy field
+                currency_id=test_currency.id,  # Required legacy field
+                payment_terms={"type": "cash"}
+            )
     
     @pytest.mark.asyncio
     async def test_update_package_id(

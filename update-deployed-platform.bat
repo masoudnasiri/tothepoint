@@ -2,6 +2,7 @@
 REM ============================================================================
 REM  PDSS Platform Update Script (Windows)
 REM  Updates a deployed PDSS platform with latest code changes
+REM  Safety: aborts update if backup cannot be verified.
 REM ============================================================================
 
 setlocal enabledelayedexpansion
@@ -32,13 +33,14 @@ if exist "%CD%\docker-compose.yml" (
 echo [OK] Found deployment at: %DEPLOY_DIR%
 echo.
 cd /d "%DEPLOY_DIR%"
+set UPDATE_DIR=%DEPLOY_DIR%\..\update_files
 
 echo ============================================================================
 echo   PRE-UPDATE CHECKS
 echo ============================================================================
 echo.
 
-echo [1/5] Checking if platform is running...
+echo [1/6] Checking if platform is running...
 docker-compose ps | findstr "Up" >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] Platform is running
@@ -49,8 +51,7 @@ if %errorlevel% equ 0 (
 )
 echo.
 
-echo [2/5] Checking for update files...
-set UPDATE_DIR=%DEPLOY_DIR%\..\update_files
+echo [2/6] Checking for update files...
 if not exist "%UPDATE_DIR%" (
     echo [INFO] No update_files directory found
     echo.
@@ -59,9 +60,9 @@ if not exist "%UPDATE_DIR%" (
     echo Structure:
     echo   update_files\
     echo   ^|-- backend\
-    echo   ^|   ^`-- (updated backend files)
+    echo   ^|   ^`-- ^(updated backend files^)
     echo   ^`-- frontend\
-    echo       ^`-- (updated frontend files)
+    echo       ^`-- ^(updated frontend files^)
     echo.
     set /p CONTINUE="Continue anyway? (yes/no): "
     if not "!CONTINUE!"=="yes" (
@@ -74,26 +75,7 @@ if not exist "%UPDATE_DIR%" (
 )
 echo.
 
-echo [3/5] Creating backup...
-set BACKUP_DIR=%USERPROFILE%\pdss_backups
-if not exist "%BACKUP_DIR%" mkdir "%BACKUP_DIR%"
-
-REM Get timestamp
-for /f "tokens=2 delims==" %%a in ('wmic OS Get localdatetime /value') do set "dt=%%a"
-set "BACKUP_DATE=%dt:~0,4%%dt:~4,2%%dt:~6,2%_%dt:~8,2%%dt:~10,2%%dt:~12,2%"
-
-REM Backup database
-echo   Backing up database...
-docker-compose exec -T db pg_dump -U postgres procurement_dss > "%BACKUP_DIR%\db_backup_%BACKUP_DATE%.sql" 2>nul || echo   [WARNING] Could not backup database
-
-REM Backup current code
-echo   Backing up current code...
-powershell -command "Compress-Archive -Path backend,frontend -DestinationPath '%BACKUP_DIR%\code_backup_%BACKUP_DATE%.zip' -Force" 2>nul || echo   [WARNING] Could not backup code
-
-echo [OK] Backup created at: %BACKUP_DIR%
-echo.
-
-echo [4/5] Checking Docker...
+echo [3/6] Checking Docker...
 docker ps >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Docker is not running!
@@ -104,9 +86,106 @@ if %errorlevel% neq 0 (
 echo [OK] Docker is running
 echo.
 
-echo [5/5] Checking disk space...
+echo [4/6] Detecting database service...
+set DB_SERVICE=
+for /f "delims=" %%S in ('docker-compose config --services 2^>nul') do (
+    if /I "%%S"=="postgres" set DB_SERVICE=postgres
+)
+if not defined DB_SERVICE (
+    for /f "delims=" %%S in ('docker-compose config --services 2^>nul') do (
+        if /I "%%S"=="db" set DB_SERVICE=db
+    )
+)
+if not defined DB_SERVICE (
+    echo [ERROR] Could not find database service in docker-compose.yml ^(expected 'postgres' or 'db'^)
+    pause
+    exit /b 1
+)
+echo [OK] Using database service: !DB_SERVICE!
+echo.
+
+echo [5/6] Creating backup (required)...
+set BACKUP_DIR=%USERPROFILE%\pdss_backups
+if not exist "%BACKUP_DIR%" mkdir "%BACKUP_DIR%"
+
+for /f %%a in ('powershell -NoProfile -Command "(Get-Date).ToString(\"yyyyMMdd_HHmmss\")"') do set BACKUP_DATE=%%a
+set DB_BACKUP_FILE=%BACKUP_DIR%\db_backup_%BACKUP_DATE%.sql
+set CODE_BACKUP_FILE=%BACKUP_DIR%\code_backup_%BACKUP_DATE%.zip
+
+echo   Ensuring database service is running...
+docker-compose ps !DB_SERVICE! | findstr "Up" >nul 2>&1
+if !errorlevel! neq 0 (
+    docker-compose up -d !DB_SERVICE!
+    if !errorlevel! neq 0 (
+        echo [ERROR] Failed to start database service !DB_SERVICE!
+        pause
+        exit /b 1
+    )
+)
+
+echo   Waiting for database readiness...
+set DB_READY=false
+for /l %%I in (1,1,20) do (
+    docker-compose exec -T !DB_SERVICE! pg_isready -U postgres >nul 2>&1
+    if !errorlevel! equ 0 (
+        set DB_READY=true
+        goto :db_ready
+    )
+    timeout /t 2 /nobreak >nul
+)
+:db_ready
+if not "!DB_READY!"=="true" (
+    echo [ERROR] Database did not become ready; update aborted.
+    pause
+    exit /b 1
+)
+
+echo   Backing up database...
+docker-compose exec -T !DB_SERVICE! pg_dump -U postgres procurement_dss > "%DB_BACKUP_FILE%"
+if %errorlevel% neq 0 (
+    echo [ERROR] Database backup failed; update aborted.
+    pause
+    exit /b 1
+)
+if not exist "%DB_BACKUP_FILE%" (
+    echo [ERROR] Database backup file missing; update aborted.
+    pause
+    exit /b 1
+)
+for %%A in ("%DB_BACKUP_FILE%") do set DBSIZE=%%~zA
+if !DBSIZE! LEQ 0 (
+    echo [ERROR] Database backup file is empty; update aborted.
+    pause
+    exit /b 1
+)
+
+echo   Backing up current code...
+powershell -NoProfile -Command "Compress-Archive -Path 'backend','frontend' -DestinationPath '%CODE_BACKUP_FILE%' -Force" >nul
+if %errorlevel% neq 0 (
+    echo [ERROR] Code backup failed; update aborted.
+    pause
+    exit /b 1
+)
+if not exist "%CODE_BACKUP_FILE%" (
+    echo [ERROR] Code backup file missing; update aborted.
+    pause
+    exit /b 1
+)
+for %%A in ("%CODE_BACKUP_FILE%") do set CODESIZE=%%~zA
+if !CODESIZE! LEQ 0 (
+    echo [ERROR] Code backup file is empty; update aborted.
+    pause
+    exit /b 1
+)
+
+echo [OK] Backup verified
+echo   Database: %DB_BACKUP_FILE%
+echo   Code: %CODE_BACKUP_FILE%
+echo.
+
+echo [6/6] Checking disk space...
 for /f "tokens=3" %%a in ('dir /-c "%DEPLOY_DIR%" ^| findstr "bytes free"') do set AVAILABLE=%%a
-echo [OK] Disk space available
+echo [OK] Disk space check complete
 echo.
 
 echo ============================================================================
@@ -125,7 +204,6 @@ echo.
 
 echo [2/6] Applying code updates...
 
-REM Update backend if files exist
 if exist "%UPDATE_DIR%\backend" (
     echo   Updating backend files...
     xcopy "%UPDATE_DIR%\backend\*" "backend\" /E /I /Y >nul 2>&1
@@ -134,7 +212,6 @@ if exist "%UPDATE_DIR%\backend" (
     echo [SKIP] No backend updates
 )
 
-REM Update frontend if files exist
 if exist "%UPDATE_DIR%\frontend" (
     echo   Updating frontend files...
     xcopy "%UPDATE_DIR%\frontend\*" "frontend\" /E /I /Y >nul 2>&1
@@ -173,17 +250,17 @@ echo [6/6] Verifying update...
 docker-compose ps
 echo.
 
-REM Check if all containers are up
-docker-compose ps | findstr "Exit" >nul 2>&1
+docker-compose ps | findstr /R /C:"Exit" /C:"Restarting" >nul 2>&1
 if %errorlevel% equ 0 (
     echo [ERROR] Some containers failed to start!
     echo.
     echo View logs with: docker-compose logs
     echo.
     echo To rollback:
-    echo   1. Extract backup: powershell Expand-Archive %BACKUP_DIR%\code_backup_%BACKUP_DATE%.zip
+    echo   1. Extract code backup: powershell Expand-Archive "%CODE_BACKUP_FILE%" -DestinationPath .
     echo   2. Rebuild: docker-compose build --no-cache
     echo   3. Start: docker-compose up -d
+    echo   4. Optional DB restore: docker-compose exec -T !DB_SERVICE! psql -U postgres -d procurement_dss ^< "%DB_BACKUP_FILE%"
     pause
     exit /b 1
 )
@@ -194,18 +271,17 @@ echo   UPDATE COMPLETE!
 echo ============================================================================
 echo.
 echo + Platform updated successfully
-echo + Backup saved to: %BACKUP_DIR%
+echo + Backup verified and saved
 echo + All services running
 echo.
 echo Access your platform:
 echo   URL: http://localhost:3000
 echo.
 echo Backup files:
-echo   Database: %BACKUP_DIR%\db_backup_%BACKUP_DATE%.sql
-echo   Code: %BACKUP_DIR%\code_backup_%BACKUP_DATE%.zip
+echo   Database: %DB_BACKUP_FILE%
+echo   Code: %CODE_BACKUP_FILE%
 echo.
 echo View logs: docker-compose logs -f
 echo.
 echo ============================================================================
 pause
-

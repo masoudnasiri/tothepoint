@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     
     # Require package_id for new procurement options (stricter enforcement)
     require_package_id_for_new_options: bool = os.getenv("REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS", "false").lower() == "true"
+
+    # Enforce full package/sub-item coverage before locking decisions
+    enforce_package_coverage_on_lock: bool = os.getenv("ENFORCE_PACKAGE_COVERAGE_ON_LOCK", "false").lower() == "true"
     
     class Config:
         env_file = ".env"

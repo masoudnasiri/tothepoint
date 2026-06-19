@@ -98,7 +98,8 @@ sudo ./pdss-update-script.sh
 
 The script will:
 - ✅ Automatically find your deployment directory
-- ✅ Create backups (database + code)
+- ✅ Detect the database service name automatically (`postgres` or `db`)
+- ✅ Create and verify backups (database + code)
 - ✅ Stop the platform
 - ✅ Apply updates
 - ✅ Rebuild Docker images
@@ -185,7 +186,7 @@ cd ~/pdss  # or ~/pdss-linux-v1.0.0
 
 # 2. Create backup
 mkdir -p ~/pdss_backups
-docker-compose exec -T db pg_dump -U postgres procurement_dss > ~/pdss_backups/backup_$(date +%Y%m%d).sql
+docker-compose exec -T postgres pg_dump -U postgres procurement_dss > ~/pdss_backups/backup_$(date +%Y%m%d).sql
 tar -czf ~/pdss_backups/code_backup_$(date +%Y%m%d).tar.gz backend/ frontend/
 
 # 3. Stop platform
@@ -219,7 +220,7 @@ cd %USERPROFILE%\pdss
 
 REM 2. Create backup
 mkdir %USERPROFILE%\pdss_backups
-docker-compose exec -T db pg_dump -U postgres procurement_dss > %USERPROFILE%\pdss_backups\backup.sql
+docker-compose exec -T postgres pg_dump -U postgres procurement_dss > %USERPROFILE%\pdss_backups\backup.sql
 powershell Compress-Archive -Path backend,frontend -DestinationPath %USERPROFILE%\pdss_backups\code_backup.zip
 
 REM 3. Stop platform
@@ -255,7 +256,7 @@ docker-compose ps
 
 # Should show:
 # NAME                STATUS
-# pdss-db-1          Up
+# pdss-postgres-1    Up
 # pdss-backend-1     Up  
 # pdss-frontend-1    Up
 ```
@@ -309,7 +310,7 @@ docker-compose build --no-cache
 docker-compose up -d
 
 # Restore database if needed
-cat ~/pdss_backups/db_backup_YYYYMMDD_HHMMSS.sql | docker-compose exec -T db psql -U postgres procurement_dss
+cat ~/pdss_backups/db_backup_YYYYMMDD_HHMMSS.sql | docker-compose exec -T postgres psql -U postgres procurement_dss
 ```
 
 ### Windows Rollback
@@ -328,7 +329,7 @@ docker-compose build --no-cache
 docker-compose up -d
 
 REM Restore database if needed
-type %USERPROFILE%\pdss_backups\db_backup_YYYYMMDD.sql | docker-compose exec -T db psql -U postgres procurement_dss
+type %USERPROFILE%\pdss_backups\db_backup_YYYYMMDD.sql | docker-compose exec -T postgres psql -U postgres procurement_dss
 ```
 
 ---
@@ -442,10 +443,10 @@ docker-compose up -d backend
 docker-compose up -d
 
 # Try backup again
-docker-compose exec -T db pg_dump -U postgres procurement_dss > backup.sql
+docker-compose exec -T postgres pg_dump -U postgres procurement_dss > backup.sql
 
 # Check if database is accessible
-docker-compose exec db psql -U postgres -c "SELECT 1"
+docker-compose exec postgres psql -U postgres -c "SELECT 1"
 ```
 
 ---

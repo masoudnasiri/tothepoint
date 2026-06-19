@@ -75,6 +75,7 @@ Desktop.ini
 *.sqlite3
 postgres_data/
 *.dump
+database_backups/*.sql
 
 # Environment variables
 .env

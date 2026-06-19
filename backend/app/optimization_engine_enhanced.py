@@ -16,6 +16,7 @@ from app.models import (
     OptimizationResult, FinalizedDecision, OptimizationRun
 )
 from app.schemas import OptimizationRunRequest, OptimizationRunResponse, OptimizationProposal, OptimizationDecision
+from app.config import settings
 import logging
 from enum import Enum
 import networkx as nx
@@ -731,13 +732,23 @@ class EnhancedProcurementOptimizer:
                 "💡 Tip: A project must have items before optimization can run."
             )
         
-        # Load items that are already decided (LOCKED or PROPOSED)
-        # These items should not be re-optimized
+        # Load items/packges already decided (LOCKED or PROPOSED).
         decided_query = await self.db.execute(
-            select(FinalizedDecision.project_item_id)
+            select(FinalizedDecision.project_item_id, FinalizedDecision.package_id)
             .where(FinalizedDecision.status.in_(['LOCKED', 'PROPOSED']))
         )
-        decided_project_item_ids = {row.project_item_id for row in decided_query.all() if row.project_item_id is not None}
+        decided_rows = decided_query.all()
+        decided_project_item_ids = {
+            row.project_item_id
+            for row in decided_rows
+            if row.project_item_id is not None
+        }
+        blocked_package_ids = {row.package_id for row in decided_rows if row.package_id is not None}
+        blocked_legacy_project_item_ids = {
+            row.project_item_id
+            for row in decided_rows
+            if row.package_id is None and row.project_item_id is not None
+        }
         
         # Load project items with delivery options relationship
         # ONLY load items that are finalized by PMO (is_finalized == True)
@@ -751,10 +762,13 @@ class EnhancedProcurementOptimizer:
             )
         )
         all_items = list(items_result.scalars().all())
-        self.project_items = [
-            item for item in all_items
-            if item.id not in decided_project_item_ids
-        ]
+        if settings.enable_package_based_optimization:
+            self.project_items = all_items
+        else:
+            self.project_items = [
+                item for item in all_items
+                if item.id not in decided_project_item_ids
+            ]
         
         if not self.project_items:
             if all_items:
@@ -785,7 +799,16 @@ class EnhancedProcurementOptimizer:
                 ProcurementOption.is_finalized == True
             )
         )
-        self.procurement_options = {opt.id: opt for opt in options_result.scalars().all()}
+        filtered_options = []
+        for opt in options_result.scalars().all():
+            if settings.enable_package_based_optimization:
+                if opt.package_id is not None and opt.package_id in blocked_package_ids:
+                    continue
+                if opt.package_id is None and opt.project_item_id in blocked_legacy_project_item_ids:
+                    continue
+            filtered_options.append(opt)
+
+        self.procurement_options = {opt.id: opt for opt in filtered_options}
         
         logger.info(f"DEBUG: Loaded {len(self.procurement_options)} finalized procurement options:")
         for opt_id, opt in self.procurement_options.items():
@@ -1482,7 +1505,8 @@ class EnhancedProcurementOptimizer:
             unit_cost=unit_cost,
             final_cost=final_cost,
             payment_terms=str(option.payment_terms.get('type', 'unknown')),
-            project_item_id=item.id  # Add project_item_id to identify specific project item
+            project_item_id=item.id,  # Add project_item_id to identify specific project item
+            package_id=option.package_id,
         )
     
     def _calculate_weighted_cost(self, decisions: List[OptimizationDecision]) -> Decimal:

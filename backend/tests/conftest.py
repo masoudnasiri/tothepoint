@@ -7,12 +7,13 @@ import pytest_asyncio
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy import text
 
 from app.database import Base, get_db
 from app.config import Settings
 # Import all models to ensure they're registered with Base
 from app.models import (
-    User, Project, ProjectItem, Supplier, ProcurementPackage,
+    User, Project, ProjectItem, Supplier, ProcurementPackage, Currency,
     ProcurementOption, DeliveryOption, FinalizedDecision
 )
 # Import invoice/payment models to ensure they're registered
@@ -47,6 +48,21 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Phase 3 audit service writes to this SQL migration table directly.
+        # Create it for SQLite tests to avoid rollback side effects in CRUD paths.
+        await conn.execute(
+            text("""
+                CREATE TABLE IF NOT EXISTS migration_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    migration_step TEXT NOT NULL,
+                    records_processed INTEGER DEFAULT 0,
+                    records_succeeded INTEGER DEFAULT 0,
+                    records_failed INTEGER DEFAULT 0,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        )
     
     async_session = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
@@ -135,6 +151,23 @@ async def test_package(
     await db_session.commit()
     await db_session.refresh(package)
     return package
+
+
+@pytest_asyncio.fixture
+async def test_currency(db_session: AsyncSession) -> Currency:
+    """Create a test currency for procurement option tests."""
+    currency = Currency(
+        code="USD",
+        name="US Dollar",
+        symbol="$",
+        is_base_currency=True,
+        is_active=True,
+        decimal_places=2
+    )
+    db_session.add(currency)
+    await db_session.commit()
+    await db_session.refresh(currency)
+    return currency
 
 
 @pytest.fixture

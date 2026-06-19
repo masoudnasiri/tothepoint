@@ -417,6 +417,9 @@ class ProcurementOptionCreate(ProcurementOptionBase):
 
 
 class ProcurementOptionUpdate(BaseModel):
+    # Phase 3 dual-mode references
+    package_id: Optional[int] = Field(None, description="Package ID (preferred)")
+    project_item_id: Optional[int] = Field(None, description="Legacy project item reference")
     item_code: Optional[str] = Field(None, min_length=1, max_length=100)  # Match model: String(100)
     supplier_name: Optional[str] = Field(None, min_length=1)  # Legacy field - will be deprecated
     supplier_id: Optional[int] = Field(None, description="ID of supplier from centralized suppliers table")
@@ -585,6 +588,7 @@ class OptimizationDecision(BaseModel):
     payment_terms: str
     priority_score: Optional[float] = None  # For bunch splitting
     project_item_id: Optional[int] = None  # Add project_item_id to identify specific project item
+    package_id: Optional[int] = None  # Package-aware decision boundary support
 
 
 # A procurement bunch (subset of decisions)

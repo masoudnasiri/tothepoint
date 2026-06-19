@@ -11,7 +11,7 @@ from typing import List, Optional
 
 from app.database import get_db
 from app.auth import get_current_user
-from app.models import User, ProcurementPackage, ProjectItem, PackageSubItem, ProjectItemSubItem
+from app.models import User, ProcurementPackage, ProjectItem, PackageSubItem
 from app.schemas import (
     ProcurementPackageResponse,
     ProcurementPackageCreate,
@@ -19,6 +19,10 @@ from app.schemas import (
     PackageSubItemResponse,
     PackageSubItemCreate,
     PackageSubItemUpdate
+)
+from app.services.package_service import (
+    validate_main_item_quantity,
+    validate_and_compute_subitem_coverage
 )
 
 router = APIRouter(prefix="/packages", tags=["packages"])
@@ -60,6 +64,13 @@ async def create_package(
                 detail=f"A package with the name '{package_data.package_name}' already exists for this project item. Please choose a different name."
             )
     
+    # Validate package quantity boundaries for main item
+    await validate_main_item_quantity(
+        db,
+        project_item_id=package_data.project_item_id,
+        main_item_quantity=package_data.main_item_quantity
+    )
+
     # Create package
     try:
         package = ProcurementPackage(
@@ -123,9 +134,35 @@ async def update_package(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement package not found"
         )
-    
-    # Update fields
+
+    # Validate duplicate name when package_name is changed
     update_data = package_data.model_dump(exclude_unset=True)
+    new_package_name = update_data.get("package_name")
+    if new_package_name and new_package_name != package.package_name:
+        result = await db.execute(
+            select(ProcurementPackage).where(
+                ProcurementPackage.project_item_id == package.project_item_id,
+                ProcurementPackage.package_name == new_package_name,
+                ProcurementPackage.is_active == True,
+                ProcurementPackage.id != package_id
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A package with the name '{new_package_name}' already exists for this project item. Please choose a different name."
+            )
+
+    # Validate main-item quantity if provided
+    if "main_item_quantity" in update_data:
+        await validate_main_item_quantity(
+            db,
+            project_item_id=package.project_item_id,
+            main_item_quantity=update_data.get("main_item_quantity")
+        )
+
+    # Update fields
     for field, value in update_data.items():
         setattr(package, field, value)
     
@@ -258,28 +295,6 @@ async def create_package_subitem(
     """
     Create a new package sub-item mapping.
     """
-    # Verify package exists
-    result = await db.execute(
-        select(ProcurementPackage).where(ProcurementPackage.id == subitem_data.package_id)
-    )
-    package = result.scalar_one_or_none()
-    if not package:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Package not found"
-        )
-    
-    # Verify project item subitem exists
-    result = await db.execute(
-        select(ProjectItemSubItem).where(ProjectItemSubItem.id == subitem_data.project_item_subitem_id)
-    )
-    project_subitem = result.scalar_one_or_none()
-    if not project_subitem:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project item sub-item not found"
-        )
-    
     # Check for duplicate
     result = await db.execute(
         select(PackageSubItem).where(
@@ -293,9 +308,20 @@ async def create_package_subitem(
             status_code=status.HTTP_409_CONFLICT,
             detail="Package sub-item mapping already exists"
         )
-    
+
+    coverage_info = await validate_and_compute_subitem_coverage(
+        db,
+        package_id=subitem_data.package_id,
+        project_item_subitem_id=subitem_data.project_item_subitem_id,
+        quantity_covered=subitem_data.quantity_covered
+    )
+
     # Create subitem
-    subitem = PackageSubItem(**subitem_data.model_dump())
+    payload = subitem_data.model_dump()
+    payload["is_fully_covered"] = coverage_info["is_fully_covered"]
+    payload["coverage_percentage"] = coverage_info["coverage_percentage"]
+
+    subitem = PackageSubItem(**payload)
     db.add(subitem)
     await db.commit()
     await db.refresh(subitem)
@@ -323,9 +349,23 @@ async def update_package_subitem(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Package sub-item not found"
         )
-    
+
     # Update fields
     update_data = subitem_data.model_dump(exclude_unset=True)
+    next_quantity = update_data.get("quantity_covered", subitem.quantity_covered)
+    next_package_id = update_data.get("package_id", subitem.package_id)
+    next_project_item_subitem_id = update_data.get("project_item_subitem_id", subitem.project_item_subitem_id)
+
+    coverage_info = await validate_and_compute_subitem_coverage(
+        db,
+        package_id=next_package_id,
+        project_item_subitem_id=next_project_item_subitem_id,
+        quantity_covered=next_quantity,
+        exclude_package_subitem_id=subitem.id
+    )
+    update_data["is_fully_covered"] = coverage_info["is_fully_covered"]
+    update_data["coverage_percentage"] = coverage_info["coverage_percentage"]
+
     for field, value in update_data.items():
         setattr(subitem, field, value)
     

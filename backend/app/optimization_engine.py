@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.schemas import OptimizationRunRequest, OptimizationRunResponse
 from app.currency_conversion_service import CurrencyConversionService
+from app.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -140,15 +141,31 @@ class ProcurementOptimizer:
                 "   3. Make sure the project is marked as 'Active'"
             )
         
-        # Get all decided items (items that should not be re-optimized)
-        # Include both LOCKED and PROPOSED to avoid re-optimizing the same items
+        # Get all decided items that should not be re-optimized.
+        # Include both LOCKED and PROPOSED to avoid re-optimizing active decisions.
         decided_query = await self.db.execute(
-            select(FinalizedDecision.project_id, FinalizedDecision.item_code)
+            select(
+                FinalizedDecision.project_id,
+                FinalizedDecision.item_code,
+                FinalizedDecision.project_item_id,
+                FinalizedDecision.package_id,
+            )
             .where(FinalizedDecision.status.in_(['LOCKED', 'PROPOSED']))
         )
-        decided_items = {(row.project_id, row.item_code) for row in decided_query.all()}
+        decided_rows = decided_query.all()
+        decided_items_legacy = {(row.project_id, row.item_code) for row in decided_rows}
+        blocked_package_ids = {row.package_id for row in decided_rows if row.package_id is not None}
+        blocked_legacy_project_item_ids = {
+            row.project_item_id
+            for row in decided_rows
+            if row.package_id is None and row.project_item_id is not None
+        }
         
-        logger.info(f"Found {len(decided_items)} decided items (LOCKED/PROPOSED) that will be excluded from optimization")
+        logger.info(
+            "Found %s decided decisions (LOCKED/PROPOSED), package_boundary=%s",
+            len(decided_rows),
+            settings.enable_package_based_optimization,
+        )
         
         # Load project items with delivery options relationship
         from sqlalchemy.orm import selectinload
@@ -159,15 +176,24 @@ class ProcurementOptimizer:
         )
         all_items = list(items_result.scalars().all())
         
-        # Filter out decided items (LOCKED or PROPOSED)
-        self.project_items = [
-            item for item in all_items
-            if (item.project_id, item.item_code) not in decided_items
-        ]
+        # In package-boundary mode, keep project items and filter decided packages/options later.
+        # In legacy mode, exclude by (project_id, item_code) to preserve previous behavior.
+        if settings.enable_package_based_optimization:
+            self.project_items = all_items
+        else:
+            self.project_items = [
+                item for item in all_items
+                if (item.project_id, item.item_code) not in decided_items_legacy
+            ]
         
         logger.info(f"Total items loaded: {len(all_items)}")
         logger.info(f"Items after filtering decided items: {len(self.project_items)}")
-        logger.info(f"Decided items to exclude: {len(decided_items)}")
+        logger.info(
+            "Decided boundaries -> legacy_items=%s, package_ids=%s, legacy_project_items=%s",
+            len(decided_items_legacy),
+            len(blocked_package_ids),
+            len(blocked_legacy_project_item_ids),
+        )
         
         if not self.project_items:
             if all_items:
@@ -199,10 +225,22 @@ class ProcurementOptimizer:
             ).options(selectinload(ProcurementOption.project_item))
         )
         
-        # Filter to only include options that match project_items
+        # Filter to only include options that match project_items and current decision boundary mode.
         project_item_ids = {item.id for item in self.project_items}
-        options_list = [opt for opt in options_result.scalars().all() 
-                       if opt.project_item_id in project_item_ids]
+        options_list = []
+        for opt in options_result.scalars().all():
+            if opt.project_item_id not in project_item_ids:
+                continue
+
+            if settings.enable_package_based_optimization:
+                # Package-level boundary: block only already-decided packages.
+                if opt.package_id is not None and opt.package_id in blocked_package_ids:
+                    continue
+                # Legacy options (without package_id) still honor project-item boundary.
+                if opt.package_id is None and opt.project_item_id in blocked_legacy_project_item_ids:
+                    continue
+
+            options_list.append(opt)
         
         # Group procurement options by project_item_id for proper isolation
         self.procurement_options_by_item = {}

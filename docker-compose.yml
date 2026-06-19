@@ -30,7 +30,13 @@ services:
       # Dynamic values from .env (with safe defaults)
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DEBUG=${DEBUG:-true}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      - ENABLE_PACKAGE_PROCUREMENT=${ENABLE_PACKAGE_PROCUREMENT:-false}
+      - LEGACY_PROJECT_ITEM_FALLBACK=${LEGACY_PROJECT_ITEM_FALLBACK:-true}
+      - SUPPLIER_NORMALIZATION_ENFORCED=${SUPPLIER_NORMALIZATION_ENFORCED:-false}
+      - ENABLE_PACKAGE_BASED_OPTIMIZATION=${ENABLE_PACKAGE_BASED_OPTIMIZATION:-false}
+      - REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS=${REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS:-false}
+      - ENFORCE_PACKAGE_COVERAGE_ON_LOCK=${ENFORCE_PACKAGE_COVERAGE_ON_LOCK:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,11 +57,14 @@ services:
     build:
       context: ./frontend
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:8000}
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-http://127.0.0.1:8000}
     ports:
       - "3000:3000"
     environment:
+      - NODE_OPTIONS=--max-old-space-size=4096
       - CHOKIDAR_USEPOLLING=true
+      - WDS_SOCKET_HOST=127.0.0.1
+      - WDS_SOCKET_PORT=3000
     volumes:
       - ./frontend:/app
       - /app/node_modules

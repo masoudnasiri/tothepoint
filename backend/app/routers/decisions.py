@@ -5,13 +5,16 @@ Finalized decisions management endpoints
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func as sql_func, or_
+from sqlalchemy import select, update, delete, func as sql_func, or_, and_
 from sqlalchemy.orm import selectinload
 from datetime import datetime, date, timedelta
 import uuid
 from app.database import get_db
 from app.auth import get_current_user, require_pm, require_finance
 from app.models import User, FinalizedDecision, ProjectItem, ProcurementOption, OptimizationRun, CashflowEvent, OptimizationResult, DeliveryOption
+from app.config import settings
+from app.validators.package_validators import resolve_package_from_project_item
+from app.services.package_service import validate_package_coverage_for_lock
 from app import schemas
 from app.schemas import (
     FinalizedDecision as FinalizedDecisionSchema, 
@@ -30,6 +33,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/decisions", tags=["finalized-decisions"])
+
+
+def _decision_boundary_conditions(
+    *,
+    package_id: Optional[int],
+    project_item_id: Optional[int],
+    item_code: Optional[str],
+):
+    """Build decision uniqueness boundary conditions for package/legacy modes."""
+    if settings.enable_package_based_optimization and package_id is not None:
+        return [FinalizedDecision.package_id == package_id]
+
+    conditions = []
+    if project_item_id is not None:
+        conditions.append(FinalizedDecision.project_item_id == project_item_id)
+    if item_code:
+        conditions.append(FinalizedDecision.item_code == item_code)
+    return conditions
 
 
 @router.get("/", response_model=List[FinalizedDecisionSchema])
@@ -421,28 +442,53 @@ async def save_proposal_as_decisions(
                 else:
                     logger.warning(f"Project item not found: {item_code} for project {project_id}")
                 continue
+
+            # Get procurement option to fetch currency information and package boundary.
+            procurement_opt_result = await db.execute(
+                select(ProcurementOption)
+                .where(ProcurementOption.id == decision_data['procurement_option_id'])
+            )
+            procurement_opt = procurement_opt_result.scalars().first()
             
-            # Check if decision already exists
+            if not procurement_opt:
+                logger.warning(f"Procurement option not found: {decision_data['procurement_option_id']}")
+                continue
+            
+            # Resolve package-aware boundary from payload/procurement option/project item.
+            package_id = decision_data.get('package_id') or procurement_opt.package_id
+            if package_id is None and settings.enable_package_procurement:
+                package_id = await resolve_package_from_project_item(
+                    db, project_item.id, create_if_missing=False
+                )
+
+            boundary_conditions = _decision_boundary_conditions(
+                package_id=package_id,
+                project_item_id=project_item.id,
+                item_code=item_code,
+            )
+
+            # Check if decision already exists for this run/boundary.
             existing_check = await db.execute(
                 select(FinalizedDecision).where(
-                    FinalizedDecision.run_id == run_uuid,
-                    FinalizedDecision.project_item_id == project_item.id,
-                    FinalizedDecision.item_code == item_code
+                    and_(FinalizedDecision.run_id == run_uuid, *boundary_conditions)
                 )
             )
             existing_decision = existing_check.scalars().first()
             
             if existing_decision:
-                logger.info(f"Decision already exists for {item_code}, skipping")
+                logger.info(
+                    "Decision already exists for run=%s boundary(package_id=%s, project_item_id=%s, item_code=%s), skipping",
+                    run_uuid, package_id, project_item.id, item_code
+                )
                 continue
             
-            # ✅ FIX: Check for old REVERTED decisions for this item and mark them as superseded
-            # This prevents confusion when same item is re-optimized
+            # Mark previously reverted decisions in the same boundary as superseded.
             old_reverted_check = await db.execute(
                 select(FinalizedDecision).where(
-                    FinalizedDecision.project_item_id == project_item.id,
-                    FinalizedDecision.item_code == item_code,
-                    FinalizedDecision.status == 'REVERTED'
+                    and_(
+                        FinalizedDecision.status == 'REVERTED',
+                        *boundary_conditions
+                    )
                 )
             )
             old_reverted_decisions = old_reverted_check.scalars().all()
@@ -459,17 +505,6 @@ async def save_proposal_as_decisions(
             purchase_date = datetime.fromisoformat(decision_data['purchase_date'].replace('Z', '+00:00')).date() if isinstance(decision_data['purchase_date'], str) else decision_data['purchase_date']
             delivery_date = datetime.fromisoformat(decision_data['delivery_date'].replace('Z', '+00:00')).date() if isinstance(decision_data['delivery_date'], str) else decision_data['delivery_date']
             
-            # Get procurement option to fetch currency information
-            procurement_opt_result = await db.execute(
-                select(ProcurementOption)
-                .where(ProcurementOption.id == decision_data['procurement_option_id'])
-            )
-            procurement_opt = procurement_opt_result.scalars().first()
-            
-            if not procurement_opt:
-                logger.warning(f"Procurement option not found: {decision_data['procurement_option_id']}")
-                continue
-            
             # Get currency (default to IRR if not found)
             from app.models import Currency
             if procurement_opt.currency_id:
@@ -484,13 +519,23 @@ async def save_proposal_as_decisions(
                 currency_id = irr_currency.id
                 currency_code = 'IRR'
             
-            # Get invoice amount from delivery options (20% markup fallback)
-            delivery_opt_result = await db.execute(
-                select(DeliveryOption)
-                .where(DeliveryOption.project_item_id == project_item.id)
-                .limit(1)
-            )
+            # Prefer package-scoped delivery options in package boundary mode.
+            delivery_opt_query = select(DeliveryOption)
+            if settings.enable_package_based_optimization and package_id is not None:
+                delivery_opt_query = delivery_opt_query.where(DeliveryOption.package_id == package_id)
+            else:
+                delivery_opt_query = delivery_opt_query.where(DeliveryOption.project_item_id == project_item.id)
+
+            delivery_opt_result = await db.execute(delivery_opt_query.limit(1))
             delivery_opt = delivery_opt_result.scalars().first()
+
+            if not delivery_opt and package_id is not None:
+                fallback_delivery_opt_result = await db.execute(
+                    select(DeliveryOption)
+                    .where(DeliveryOption.project_item_id == project_item.id)
+                    .limit(1)
+                )
+                delivery_opt = fallback_delivery_opt_result.scalars().first()
             
             if delivery_opt and delivery_opt.invoice_amount_per_unit:
                 # Use actual invoice amount from delivery option
@@ -500,15 +545,6 @@ async def save_proposal_as_decisions(
                 forecast_invoice_amount = Decimal(str(decision_data['final_cost'])) * Decimal('1.20')
             
             final_cost_value = Decimal(str(decision_data['final_cost']))
-            
-            # Phase 3: Resolve package_id from project_item_id if enabled
-            from app.services.package_service import get_package_for_project_item
-            from app.config import settings
-            package_id = None
-            if settings.enable_package_procurement:
-                package_info = await get_package_for_project_item(db, project_item.id)
-                if package_info:
-                    package_id = package_info.get('package_id')
             
             decision = FinalizedDecision(
                 run_id=run_uuid,
@@ -847,19 +883,35 @@ async def save_batch_decisions(
             
             if not procurement_option:
                 continue
+
+            package_id = procurement_option.package_id
+            if package_id is None and settings.enable_package_procurement:
+                package_id = await resolve_package_from_project_item(
+                    db, project_item.id, create_if_missing=False
+                )
             
             # Calculate dates from optimization result
             # Convert time slots to actual dates (approximate)
             purchase_date = date.today() + timedelta(days=opt_result.purchase_time * 30)
             delivery_date = date.today() + timedelta(days=opt_result.delivery_time * 30)
             
-            # Get invoice amount from delivery options (20% markup fallback)
-            delivery_opt_result = await db.execute(
-                select(DeliveryOption)
-                .where(DeliveryOption.project_item_id == project_item.id)
-                .limit(1)
-            )
+            # Prefer package-scoped delivery options in package boundary mode.
+            delivery_opt_query = select(DeliveryOption)
+            if settings.enable_package_based_optimization and package_id is not None:
+                delivery_opt_query = delivery_opt_query.where(DeliveryOption.package_id == package_id)
+            else:
+                delivery_opt_query = delivery_opt_query.where(DeliveryOption.project_item_id == project_item.id)
+
+            delivery_opt_result = await db.execute(delivery_opt_query.limit(1))
             delivery_opt = delivery_opt_result.scalars().first()
+
+            if not delivery_opt and package_id is not None:
+                fallback_delivery_opt_result = await db.execute(
+                    select(DeliveryOption)
+                    .where(DeliveryOption.project_item_id == project_item.id)
+                    .limit(1)
+                )
+                delivery_opt = fallback_delivery_opt_result.scalars().first()
             
             if delivery_opt and delivery_opt.invoice_amount_per_unit:
                 # Use actual invoice amount from delivery option
@@ -868,25 +920,19 @@ async def save_batch_decisions(
                 # Fallback: Use 20% markup on cost
                 forecast_invoice_amount = opt_result.final_cost * Decimal('1.20')
             
-            # Check if decision already exists
+            # Check if decision already exists for this run/boundary.
+            boundary_conditions = _decision_boundary_conditions(
+                package_id=package_id,
+                project_item_id=project_item.id,
+                item_code=opt_result.item_code,
+            )
             existing_check = await db.execute(
                 select(FinalizedDecision).where(
-                    FinalizedDecision.run_id == run_uuid,
-                    FinalizedDecision.project_item_id == project_item.id,
-                    FinalizedDecision.item_code == opt_result.item_code
+                    and_(FinalizedDecision.run_id == run_uuid, *boundary_conditions)
                 )
             )
             if existing_check.scalars().first():
                 continue  # Skip duplicate
-            
-            # Phase 3: Resolve package_id from project_item_id if enabled
-            from app.services.package_service import get_package_for_project_item
-            from app.config import settings
-            package_id = None
-            if settings.enable_package_procurement:
-                package_info = await get_package_for_project_item(db, project_item.id)
-                if package_info:
-                    package_id = package_info.get('package_id')
             
             # Create the finalized decision
             decision = FinalizedDecision(
@@ -962,11 +1008,22 @@ async def finalize_decisions(
     Finance role required.
     """
     try:
+        eligible_ids: List[int] = []
+
         if request.finalize_all:
-            # Finalize all PROPOSED decisions
+            eligible_result = await db.execute(
+                select(FinalizedDecision.id)
+                .where(FinalizedDecision.status == 'PROPOSED')
+            )
+            eligible_ids = [row[0] for row in eligible_result.all()]
+
+            if eligible_ids:
+                await validate_package_coverage_for_lock(db, eligible_ids)
+
+            # Finalize all eligible PROPOSED decisions
             result = await db.execute(
                 update(FinalizedDecision)
-                .where(FinalizedDecision.status == 'PROPOSED')
+                .where(FinalizedDecision.id.in_(eligible_ids))
                 .values(
                     status='LOCKED',
                     finalized_at=datetime.utcnow(),
@@ -978,10 +1035,19 @@ async def finalize_decisions(
             # Finalize specific decisions
             # ✅ FIX: Allow finalizing both PROPOSED and REVERTED decisions
             # This allows "re-finalizing" previously reverted decisions
-            result = await db.execute(
-                update(FinalizedDecision)
+            eligible_result = await db.execute(
+                select(FinalizedDecision.id)
                 .where(FinalizedDecision.id.in_(request.decision_ids))
                 .where(FinalizedDecision.status.in_(['PROPOSED', 'REVERTED']))
+            )
+            eligible_ids = [row[0] for row in eligible_result.all()]
+
+            if eligible_ids:
+                await validate_package_coverage_for_lock(db, eligible_ids)
+
+            result = await db.execute(
+                update(FinalizedDecision)
+                .where(FinalizedDecision.id.in_(eligible_ids))
                 .values(
                     status='LOCKED',
                     finalized_at=datetime.utcnow(),
@@ -992,18 +1058,10 @@ async def finalize_decisions(
             
             # ✅ Reactivate cashflow events if re-finalizing reverted decisions
             if count > 0:
-                # Get the finalized decision IDs
-                finalized_result = await db.execute(
-                    select(FinalizedDecision.id)
-                    .where(FinalizedDecision.id.in_(request.decision_ids))
-                    .where(FinalizedDecision.status == 'LOCKED')
-                )
-                finalized_ids = [row[0] for row in finalized_result.all()]
-                
                 # Reactivate cancelled cashflow events for these decisions
                 await db.execute(
                     update(CashflowEvent)
-                    .where(CashflowEvent.related_decision_id.in_(finalized_ids))
+                    .where(CashflowEvent.related_decision_id.in_(eligible_ids))
                     .where(CashflowEvent.is_cancelled == True)
                     .values(
                         is_cancelled=False,
@@ -1012,7 +1070,7 @@ async def finalize_decisions(
                         cancellation_reason=None
                     )
                 )
-                logger.info(f"✅ Reactivated cashflow events for {len(finalized_ids)} re-finalized decision(s)")
+                logger.info(f"✅ Reactivated cashflow events for {len(eligible_ids)} re-finalized decision(s)")
         
         await db.commit()
         
@@ -1022,6 +1080,9 @@ async def finalize_decisions(
             "finalized_by": current_user.username
         }
         
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Failed to finalize decisions: {str(e)}", exc_info=True)
@@ -1066,6 +1127,7 @@ async def update_decision_status(
     update_data = {'status': status_update.status}
     
     if status_update.status == 'LOCKED':
+        await validate_package_coverage_for_lock(db, [decision_id])
         update_data['finalized_at'] = datetime.utcnow()
         update_data['finalized_by_id'] = current_user.id
     

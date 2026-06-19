@@ -65,6 +65,21 @@ export const FeatureFlagsProvider = ({ children }: { children: ReactNode }) => {
     try {
       setLoading(true);
       setError(null);
+      const token = localStorage.getItem('token');
+
+      // Avoid noisy 401/403 calls on public/login pages.
+      // Feature flags are forced to package mode below anyway.
+      if (!token) {
+        setFlags({
+          enable_package_procurement: true,
+          legacy_project_item_fallback: false,
+          supplier_normalization_enforced: false,
+          enable_package_based_optimization: false,
+          require_package_id_for_new_options: false,
+        });
+        return;
+      }
+
       const response = await api.get('/config/feature-flags');
       let fetchedFlags = response.data as FeatureFlags;
 
