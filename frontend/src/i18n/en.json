@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "loading": "Loading...",
     "save": "Save",
@@ -545,6 +545,8 @@
   "procurementPlan": {
     "title": "Procurement Plan",
     "subtitle": "Track and manage delivery status of procurement items",
+    "noItemsFound": "No procurement plan items found matching filters",
+    "noItemsMatchCriteria": "No items match the selected criteria",
     "exportToExcel": "Export to Excel",
     "search": "Search",
     "searchPlaceholder": "Search by item code, name, project, or supplier...",
@@ -627,6 +629,7 @@
     "completed": "Completed",
     "notInvoiced": "Not Invoiced",
     "notPaid": "Not Paid",
+    "noItemsFound": "No procurement plan items found matching filters",
     "titleWithDelivery": "Procurement Plan & Delivery Tracking",
     "supplier": "Supplier",
     "quantity": "Quantity",
@@ -850,6 +853,7 @@
   },
   "optimization": {
     "title": "Advanced Optimization",
+    "subtitle": "Run advanced solver optimization across procurement packages and budget constraints",
     "optimizationResults": "Optimization Results",
     "budgetAnalysis": "Budget Analysis",
     "selected": "Selected",
@@ -2095,4 +2099,21 @@
       "aest": "AEST",
       "utc": "UTC"
     }
+,
+  "auditLogsPage": {
+    "title": "Audit Logs",
+    "userId": "User ID",
+    "action": "Action",
+    "entityType": "Entity Type",
+    "entityId": "Entity ID",
+    "time": "Time",
+    "entity": "Entity",
+    "details": "Details",
+    "ip": "IP Address",
+    "noLogs": "No audit logs found",
+    "placeholder": {
+      "action": "e.g. LOGIN, PROJECT_CREATE",
+      "entityType": "e.g. project, project_item"
+    }
+  }
 }

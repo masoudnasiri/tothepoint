@@ -33,7 +33,8 @@ function AppContent() {
   const { i18n } = useTranslation();
   const isPersian = i18n.language?.startsWith('fa');
 
-  const theme = useMemo(() => createRivarTheme(isPersian), [isPersian]);
+  // Pass RTL direction into the MUI theme so all components (TablePagination, etc.) flip correctly
+  const theme = useMemo(() => createRivarTheme(isPersian, isPersian ? 'rtl' : 'ltr'), [isPersian]);
 
   return (
     <ThemeProvider theme={theme}>

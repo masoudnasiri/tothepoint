@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "loading": "در حال بارگذاری...",
     "save": "ذخیره",
@@ -564,6 +564,7 @@
 
   "optimization": {
     "title": "بهینه‌سازی پیشرفته",
+    "subtitle": "اجرای بهینه‌سازی پیشرفته بر روی بسته‌های تدارکات و محدودیت‌های بودجه",
     "optimizationResults": "نتایج بهینه‌سازی",
     "budgetAnalysis": "تحلیل بودجه",
     "selected": "انتخاب شده",
@@ -1526,6 +1527,8 @@
   },
   "procurementPlan": {
     "title": "برنامه تدارکات",
+    "noItemsFound": "هیچ موردی در برنامه تدارکات یافت نشد",
+    "noItemsMatchCriteria": "هیچ موردی با فیلترهای انتخاب شده مطابقت ندارد",
     "search": "جستجو",
     "searchPlaceholder": "جستجو بر اساس کد اقلام، نام، پروژه، تامین‌کننده و غیره...",
     "deliveryStatus": "وضعیت تحویل",
@@ -1738,6 +1741,7 @@
     "completed": "تکمیل شده",
     "notInvoiced": "فاکتور نشده",
     "notPaid": "پرداخت نشده",
+    "noItemsFound": "???? ?????? ???? ?? ?????? ??? ????? ???? ???",
     "titleWithDelivery": "برنامه تدارکات و پیگیری تحویل",
     "supplier": "تامین‌کننده",
     "quantity": "تعداد",
@@ -2075,4 +2079,21 @@
       "aest": "AEST",
       "utc": "UTC"
     }
+,
+  "auditLogsPage": {
+    "title": "رویدادنگاری",
+    "userId": "شناسه کاربر",
+    "action": "عملیات",
+    "entityType": "نوع موجودیت",
+    "entityId": "شناسه موجودیت",
+    "time": "زمان",
+    "entity": "موجودیت",
+    "details": "جزئیات",
+    "ip": "آی‌پی",
+    "noLogs": "رویدادی یافت نشد",
+    "placeholder": {
+      "action": "مثلاً: LOGIN، PROJECT_CREATE",
+      "entityType": "مثلاً: project، project_item"
+    }
+  }
 }

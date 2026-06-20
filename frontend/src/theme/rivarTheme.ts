@@ -52,10 +52,11 @@ const fontUI = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
 const fontPersian = '"Yekan Bakh FaNum", Tahoma, Arial, sans-serif';
 
 // ─── Theme factory ─────────────────────────────────────────────────────────
-export const createRivarTheme = (isPersian: boolean = false): Theme => {
+export const createRivarTheme = (isPersian: boolean = false, direction: 'ltr' | 'rtl' = 'ltr'): Theme => {
   const font = isPersian ? fontPersian : fontUI;
 
   return createTheme({
+    direction,
     palette: {
       mode: 'light',
       primary: {
