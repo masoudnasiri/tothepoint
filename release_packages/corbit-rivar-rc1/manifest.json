@@ -6,7 +6,7 @@
   "phase10_release_commit": "e811238",
   "phase11a_branding_commit": "94a8a86",
   "phase11b_package_refresh_commit": "see-phase11b-git-commit",
-  "phase11c_ui_redesign_commit": "see-phase11c-git-commit",
+  "phase11c_ui_redesign_commit": "56784cd",
   "created_on": "2026-06-20",
   "last_updated": "2026-06-20",
   "scope": [
