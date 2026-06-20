@@ -652,6 +652,18 @@ async def get_budget_analysis(
     project_ids: Optional[str] = Query(None, description="Comma-separated project IDs"),
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
+    scenario: str = Query(
+        "minimum_feasible",
+        description="Optimization budget scenario: minimum_feasible|average_candidate|conservative|selected_result",
+    ),
+    include_incomplete: bool = Query(
+        False,
+        description="Include incomplete package combinations in candidate scenarios.",
+    ),
+    run_id: Optional[str] = Query(
+        None,
+        description="Optimization run ID for selected_result scenario.",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -664,6 +676,9 @@ async def get_budget_analysis(
     - Gaps and recommendations
     """
     from app.budget_analysis_service import BudgetAnalysisService
+    from app.services.optimization_budget_service import (
+        build_optimization_budget_analysis,
+    )
     
     # Parse project IDs
     project_id_list = None
@@ -706,6 +721,13 @@ async def get_budget_analysis(
             start_date=start_date_obj,
             end_date=end_date_obj
         )
+        optimization_semantics = await build_optimization_budget_analysis(
+            db,
+            scenario=scenario,
+            project_ids=project_id_list,
+            include_incomplete=include_incomplete,
+            run_id=run_id,
+        )
         
         # Convert to response format
         return {
@@ -724,7 +746,9 @@ async def get_budget_analysis(
                 for currency, amount in result.gap_by_currency.items()
             },
             "recommendations": result.recommendations,
-            "critical_months": result.critical_months
+            "critical_months": result.critical_months,
+            # Phase 12E-0 scenario-based optimization metadata
+            "optimization_semantics": optimization_semantics.model_dump(mode="json"),
         }
     except Exception as e:
         logger.error(f"Budget analysis failed: {str(e)}")

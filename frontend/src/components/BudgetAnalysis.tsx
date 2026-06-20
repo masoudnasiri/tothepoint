@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box,
   Card,
@@ -18,6 +18,10 @@ import {
   AccordionSummary,
   AccordionDetails,
   Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -31,7 +35,6 @@ import {
 import {
   BarChart,
   Bar,
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -45,7 +48,7 @@ import {
 import { decisionsAPI } from '../services/api.ts';
 import { useTranslation } from 'react-i18next';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
-import { format as gregorianFormat } from 'date-fns';
+import { formatCurrencyAmount } from '../utils/currencyFormat.ts';
 
 interface BudgetAnalysisProps {
   projectIds?: number[];
@@ -85,6 +88,13 @@ interface BudgetAnalysisData {
   gap_by_currency: Record<string, number>;
   recommendations: (string | RecommendationItem)[]; // Support both old string format and new structured format
   critical_months: string[];
+  optimization_semantics?: {
+    scenario?: string;
+    narrative_report?: string;
+    double_count_prevented?: boolean;
+    budget_status?: string;
+    can_continue_with_warning?: boolean;
+  };
 }
 
 export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
@@ -98,6 +108,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<BudgetAnalysisData | null>(null);
+  const [scenario, setScenario] = useState<string>('minimum_feasible');
 
   // Format period labels for charts and displays (convert YYYY-MM to Jalali if needed)
   const formatPeriodLabel = useMemo(() => (period: string) => {
@@ -116,11 +127,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
     }
   }, [isFa]);
 
-  useEffect(() => {
-    fetchBudgetAnalysis();
-  }, [projectIds, startDate, endDate]);
-
-  const fetchBudgetAnalysis = async () => {
+  const fetchBudgetAnalysis = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -135,6 +142,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       if (endDate) {
         params.end_date = endDate;
       }
+      params.scenario = scenario;
 
       const response = await decisionsAPI.getBudgetAnalysis(params);
       setAnalysisData(response.data);
@@ -165,14 +173,14 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectIds, startDate, endDate, scenario, onAnalysisComplete]);
+
+  useEffect(() => {
+    fetchBudgetAnalysis();
+  }, [fetchBudgetAnalysis]);
 
   const formatCurrency = (value: number, currency: string) => {
-    if (currency === 'IRR') {
-      return `${value.toLocaleString('en-US', { maximumFractionDigits: 0 })} ﷼`;
-    } else {
-      return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    }
+    return formatCurrencyAmount(value, currency, i18n.language || 'en-US');
   };
 
   const getStatusIcon = (status: string) => {
@@ -185,19 +193,6 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
         return <ErrorIcon sx={{ color: '#f44336' }} />;
       default:
         return <InfoIcon />;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'OK':
-        return '#4caf50';
-      case 'WARNING':
-        return '#ff9800';
-      case 'CRITICAL':
-        return '#f44336';
-      default:
-        return '#2196f3';
     }
   };
 
@@ -263,6 +258,39 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
 
   return (
     <Box>
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="budget-scenario-label">Scenario</InputLabel>
+                <Select
+                  labelId="budget-scenario-label"
+                  value={scenario}
+                  label="Scenario"
+                  onChange={(event) => setScenario(event.target.value)}
+                >
+                  <MenuItem value="minimum_feasible">Minimum feasible budget</MenuItem>
+                  <MenuItem value="average_candidate">Average candidate budget</MenuItem>
+                  <MenuItem value="conservative">Conservative / worst-case budget</MenuItem>
+                  <MenuItem value="selected_result">Selected optimization result budget</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={8}>
+              <Typography variant="body2" color="text.secondary">
+                Each item is counted once per scenario. Alternative supplier/package combinations are not summed together.
+              </Typography>
+              {analysisData.optimization_semantics?.narrative_report && (
+                <Typography variant="body2" sx={{ mt: 1 }}>
+                  {analysisData.optimization_semantics.narrative_report}
+                </Typography>
+              )}
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
       {/* Status Overview */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
@@ -537,7 +565,6 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
               if (typeof recommendation === 'string') {
                 const isWarning = recommendation.includes('🔴') || recommendation.includes('⚠️');
                 const isSuccess = recommendation.includes('✅');
-                const isInfo = recommendation.includes('📊') || recommendation.includes('📋');
                 
                 return (
                   <ListItem key={index}>

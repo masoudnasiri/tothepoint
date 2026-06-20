@@ -533,8 +533,8 @@ class PackageSubItemResponse(PackageSubItemBase):
 
 class OptimizationSubmissionRequest(BaseModel):
     project_item_id: Optional[int] = Field(None, description="Single project item target")
-    project_item_ids: Optional[List[int]] = Field(None, description="Multiple project item targets")
     send_all_finalized: bool = Field(False, description="Submit all finalized items in procurement scope")
+    project_item_ids: Optional[List[int]] = Field(None, description="Multiple project item targets")
     include_incomplete_with_confirmation: bool = Field(
         False,
         description="Allow incomplete coverage submissions after explicit confirmation",
@@ -608,6 +608,23 @@ class OptimizationRunRequest(BaseModel):
     time_limit_seconds: int = Field(300, ge=10, le=3600)
     split_into_bunches: bool = Field(False, description="Split results into first bunch and rest")
     first_bunch_size: Optional[int] = Field(None, ge=1, description="Number of items in first bunch (by priority)")
+    budget_mode: Literal["constrained", "allow_shortage"] = Field(
+        "allow_shortage",
+        description=(
+            "Budget handling mode for optimization execution: "
+            "'constrained' enforces available budget, "
+            "'allow_shortage' optimizes all eligible items and reports shortage."
+        ),
+    )
+    budget_scenario: Literal[
+        "minimum_feasible",
+        "average_candidate",
+        "conservative",
+        "selected_result",
+    ] = Field(
+        "minimum_feasible",
+        description="Scenario used when pre-checking optimization budget exposure.",
+    )
 
 
 # Individual decision in an optimization proposal
@@ -641,6 +658,39 @@ class ProcurementBunch(BaseModel):
     priority_range: Optional[str] = None  # "1-5", "6-10", etc.
 
 
+class OptimizationFinancialPeriod(BaseModel):
+    period: str
+    required_irr: Decimal
+    available_irr: Decimal
+    gap_irr: Decimal
+    status: str
+
+
+class OptimizationFinancialAnalysis(BaseModel):
+    scenario: str
+    base_currency: str = "IRR"
+    budget_mode: str = "analysis_only"
+    items_analyzed: int = 0
+    items_with_no_valid_candidate: int = 0
+    candidate_count: int = 0
+    combination_count: int = 0
+    double_count_prevented: bool = True
+    budget_required_irr: Decimal
+    budget_available_irr: Decimal
+    surplus_or_shortage_irr: Decimal
+    budget_status: str
+    is_blocking: bool = False
+    can_continue_with_warning: bool = True
+    allowed_actions: List[str] = Field(default_factory=list)
+    budget_required_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    budget_available_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    periods: List[OptimizationFinancialPeriod] = Field(default_factory=list)
+    top_shortage_contributors: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
+    narrative_report: Optional[str] = None
+
+
 # A single optimization proposal (strategy) with bunches
 class OptimizationProposal(BaseModel):
     proposal_name: str  # e.g., "Balanced Strategy", "Lowest Cost"
@@ -652,6 +702,10 @@ class OptimizationProposal(BaseModel):
     decisions: List[OptimizationDecision]  # All decisions
     bunches: Optional[List[ProcurementBunch]] = None  # Split into bunches
     summary_notes: Optional[str] = None
+    excluded_items_count: Optional[int] = None
+    excluded_items: Optional[List[Dict[str, Any]]] = None
+    budget_summary: Optional[Dict[str, Any]] = None
+    financial_analysis: Optional[OptimizationFinancialAnalysis] = None
 
 
 # Response containing multiple proposals
@@ -664,6 +718,8 @@ class OptimizationRunResponse(BaseModel):
     items_optimized: int
     proposals: List[OptimizationProposal]
     message: Optional[str] = None
+    budget_mode: Optional[str] = None
+    budget_precheck: Optional[OptimizationFinancialAnalysis] = None
 
 
 # Optimization Run Schemas

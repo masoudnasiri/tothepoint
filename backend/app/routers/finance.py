@@ -2,12 +2,13 @@
 Finance and optimization endpoints
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from io import BytesIO
+from pydantic import BaseModel, Field
 from app.database import get_db
 from app.auth import get_current_user, require_finance
 from app.crud import (
@@ -28,6 +29,11 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/finance", tags=["finance"])
+
+
+class ProposalFinancialAnalysisRequest(BaseModel):
+    decisions: List[Dict[str, Any]] = Field(default_factory=list)
+    budget_mode: str = "analysis_only"
 
 
 @router.get("/dashboard", response_model=DashboardStats)
@@ -151,12 +157,175 @@ async def run_enhanced_optimization(
     - **SMOOTH_CASHFLOW**: Balance cash flow across periods
     - **BALANCED**: Balance all factors
     """
-    optimizer = EnhancedProcurementOptimizer(db, solver_type=solver_type)
-    return await optimizer.run_optimization(
+    from app.services.optimization_budget_service import (
+        analyze_proposal_decisions_financial,
+        build_optimization_budget_analysis,
+        select_decisions_within_budget,
+    )
+
+    precheck = await build_optimization_budget_analysis(
+        db,
+        scenario=request.budget_scenario,
+        budget_mode="analysis_only",
+    )
+
+    optimizer = EnhancedProcurementOptimizer(
+        db,
+        solver_type=solver_type,
+        budget_mode=request.budget_mode,
+    )
+    response = await optimizer.run_optimization(
         request, 
         generate_multiple_proposals=generate_multiple_proposals,
         strategies=strategies
     )
+    response.budget_mode = request.budget_mode
+    response.budget_precheck = precheck
+
+    for proposal in response.proposals:
+        original_payload = [
+            {
+                "project_id": decision.project_id,
+                "project_item_id": decision.project_item_id,
+                "item_code": decision.item_code,
+                "item_name": decision.item_name,
+                "procurement_option_id": decision.procurement_option_id,
+                "purchase_date": decision.purchase_date.isoformat()
+                if hasattr(decision.purchase_date, "isoformat")
+                else str(decision.purchase_date),
+                "quantity": decision.quantity,
+            }
+            for decision in proposal.decisions
+        ]
+        decisions_payload = original_payload
+
+        deferred_items: List[Dict[str, Any]] = []
+        if request.budget_mode == "constrained":
+            decisions_payload, deferred_items = await select_decisions_within_budget(
+                db,
+                decisions=original_payload,
+                available_budget_irr=precheck.budget_available_irr,
+            )
+            keep_keys = {
+                (
+                    int(item.get("project_id") or 0),
+                    str(item.get("item_code") or ""),
+                    int(item.get("procurement_option_id") or 0),
+                )
+                for item in decisions_payload
+            }
+            proposal.decisions = [
+                d
+                for d in proposal.decisions
+                if (
+                    int(d.project_id or 0),
+                    str(d.item_code or ""),
+                    int(d.procurement_option_id or 0),
+                )
+                in keep_keys
+            ]
+            proposal.items_count = len(proposal.decisions)
+            proposal.total_cost = sum((d.final_cost for d in proposal.decisions), 0)
+
+        proposal_analysis = await analyze_proposal_decisions_financial(
+            db,
+            decisions=decisions_payload,
+            budget_mode=request.budget_mode,
+        )
+        proposal.financial_analysis = proposal_analysis
+
+        if request.budget_mode == "constrained":
+            excluded_count = max(precheck.items_analyzed - proposal.items_count, 0)
+            proposal.excluded_items_count = excluded_count
+            proposal.excluded_items = deferred_items
+            used_budget = proposal_analysis.budget_required_irr
+            available_budget = proposal_analysis.budget_available_irr
+            proposal.budget_summary = {
+                "used_budget_irr": used_budget,
+                "remaining_budget_irr": max(available_budget - used_budget, 0),
+                "excluded_items_count": excluded_count,
+                "unmet_demand_items": excluded_count,
+            }
+
+    return response
+
+
+@router.get("/optimization-budget-analysis")
+async def get_optimization_budget_analysis(
+    scenario: str = Query(
+        "minimum_feasible",
+        description="minimum_feasible|average_candidate|conservative|selected_result",
+    ),
+    budget_mode: str = Query(
+        "analysis_only",
+        description="analysis_only|constrained|allow_shortage",
+    ),
+    project_ids: Optional[str] = Query(
+        None,
+        description="Comma-separated project IDs",
+    ),
+    include_incomplete: bool = Query(
+        False,
+        description="Include incomplete package combinations as eligible candidates.",
+    ),
+    run_id: Optional[str] = Query(None, description="Optimization run ID for selected_result"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.optimization_budget_service import build_optimization_budget_analysis
+
+    project_id_list: Optional[List[int]] = None
+    if project_ids:
+        try:
+            project_id_list = [int(pid.strip()) for pid in project_ids.split(",") if pid.strip()]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid project_ids format",
+            )
+
+    analysis = await build_optimization_budget_analysis(
+        db,
+        scenario=scenario,
+        budget_mode=budget_mode,
+        project_ids=project_id_list,
+        include_incomplete=include_incomplete,
+        run_id=run_id,
+    )
+    return analysis.model_dump(mode="json")
+
+
+@router.get("/optimization-results/{run_id}/financial-analysis")
+async def get_optimization_run_financial_analysis(
+    run_id: str,
+    budget_mode: str = Query("analysis_only", description="analysis_only|constrained|allow_shortage"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.optimization_budget_service import analyze_optimization_run_financial
+
+    analysis = await analyze_optimization_run_financial(
+        db,
+        run_id=run_id,
+        budget_mode=budget_mode,
+    )
+    return analysis.model_dump(mode="json")
+
+
+@router.post("/proposal-financial-analysis")
+async def post_proposal_financial_analysis(
+    request: ProposalFinancialAnalysisRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.optimization_budget_service import analyze_proposal_decisions_financial
+
+    analysis = await analyze_proposal_decisions_financial(
+        db,
+        decisions=request.decisions,
+        budget_mode=request.budget_mode,
+    )
+    return analysis.model_dump(mode="json")
 
 
 @router.get("/solver-info")

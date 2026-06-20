@@ -46,6 +46,7 @@ import { useTranslation } from 'react-i18next';
 import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
+import { formatCurrencyAmount } from '../utils/currencyFormat.ts';
 
 export const OptimizationPage: React.FC = () => {
   const { user } = useAuth();
@@ -81,6 +82,7 @@ export const OptimizationPage: React.FC = () => {
   const [optimizationConfig, setOptimizationConfig] = useState({
     max_time_slots: 24,  // Increased from 12 to 24 to allow more items
     time_limit_seconds: 300,
+    budget_mode: 'allow_shortage',
   });
   const [lastRun, setLastRun] = useState<OptimizationRunResponse | null>(null);
 
@@ -272,10 +274,7 @@ export const OptimizationPage: React.FC = () => {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(value);
+    return formatCurrencyAmount(value, 'IRR', i18n.language || 'en-US');
   };
 
   const formatDate = (dateString: string) => {

@@ -252,6 +252,17 @@ export const financeAPI = {
   runOptimization: (request: any) => api.post('/finance/optimize', request),
   runEnhancedOptimization: (request: any, queryParams?: string) => 
     api.post(`/finance/optimize-enhanced?${queryParams || ''}`, request),
+  getOptimizationBudgetAnalysis: (params?: {
+    scenario?: string;
+    budget_mode?: string;
+    project_ids?: string;
+    include_incomplete?: boolean;
+    run_id?: string;
+  }) => api.get('/finance/optimization-budget-analysis', { params }),
+  getOptimizationRunFinancialAnalysis: (runId: string, params?: { budget_mode?: string }) =>
+    api.get(`/finance/optimization-results/${runId}/financial-analysis`, { params }),
+  analyzeProposalFinancial: (payload: { decisions: any[]; budget_mode?: string }) =>
+    api.post('/finance/proposal-financial-analysis', payload),
   getSolverInfo: () => api.get('/finance/solver-info'),
   getOptimizationAnalysis: (runId: string) => api.get(`/finance/optimization-analysis/${runId}`),
   listOptimizationRuns: (params?: { skip?: number; limit?: number }) =>

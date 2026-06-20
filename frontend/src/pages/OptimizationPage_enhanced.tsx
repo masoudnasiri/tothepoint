@@ -33,6 +33,7 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Divider,
   Tooltip,
   IconButton,
 } from '@mui/material';
@@ -62,6 +63,7 @@ import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
+import { formatCurrencyAmount } from '../utils/currencyFormat.ts';
 
 interface SolverInfo {
   type: string;
@@ -105,6 +107,34 @@ interface OptimizationProposal {
   items_count: number;
   decisions: OptimizationDecision[];
   summary_notes?: string;
+  excluded_items_count?: number;
+  excluded_items?: Array<{ reason: string; summary?: string }>;
+  budget_summary?: {
+    used_budget_irr?: number;
+    remaining_budget_irr?: number;
+    excluded_items_count?: number;
+    unmet_demand_items?: number;
+  };
+  financial_analysis?: {
+    scenario: string;
+    budget_mode: string;
+    budget_required_irr: number;
+    budget_available_irr: number;
+    surplus_or_shortage_irr: number;
+    budget_status: string;
+    budget_required_by_currency: Record<string, number>;
+    budget_available_by_currency: Record<string, number>;
+    periods: Array<{
+      period: string;
+      required_irr: number;
+      available_irr: number;
+      gap_irr: number;
+      status: string;
+    }>;
+    recommendations: string[];
+    warnings: string[];
+    narrative_report?: string;
+  };
 }
 
 interface OptimizationResponse {
@@ -172,6 +202,8 @@ export const OptimizationPageEnhanced: React.FC = () => {
   const [addedDecisions, setAddedDecisions] = useState<OptimizationDecision[]>([]);
   const [procurementOptions, setProcurementOptions] = useState<any[]>([]);
   const [currentItemOptions, setCurrentItemOptions] = useState<any[]>([]);
+  const [budgetDecisionDialogOpen, setBudgetDecisionDialogOpen] = useState(false);
+  const [budgetPrecheck, setBudgetPrecheck] = useState<any | null>(null);
   
   const [optimizationConfig, setOptimizationConfig] = useState({
     max_time_slots: 60,  // Increased from 12 to 60 to accommodate all delivery dates (up to 60 days)
@@ -261,7 +293,10 @@ export const OptimizationPageEnhanced: React.FC = () => {
   };
 
 
-  const handleRunOptimization = async () => {
+  const executeOptimizationWithBudgetMode = async (
+    budgetMode: 'constrained' | 'allow_shortage',
+    precheckData?: any
+  ) => {
     setOptimizing(true);
     setError('');
     setSuccess('');
@@ -288,6 +323,8 @@ export const OptimizationPageEnhanced: React.FC = () => {
         {
           max_time_slots: optimizationConfig.max_time_slots,
           time_limit_seconds: optimizationConfig.time_limit_seconds,
+          budget_mode: budgetMode,
+          budget_scenario: 'minimum_feasible',
         },
         params.toString()
       );
@@ -304,9 +341,15 @@ export const OptimizationPageEnhanced: React.FC = () => {
       
       if (response.data.status === 'OPTIMAL' || response.data.status === 'FEASIBLE') {
         console.log('[ENHANCED OPTIMIZATION] SUCCESS! Setting success message');
+        const shortage = precheckData?.surplus_or_shortage_irr ?? 0;
+        const shortageNote =
+          shortage < 0
+            ? ` | shortage detected before run: ${formatCurrencyAmount(Math.abs(shortage), 'IRR', i18n.language || 'en-US')}`
+            : '';
         setSuccess(
           `Optimization completed! Generated ${response.data.proposals.length} proposal(s). ` +
-          `Best cost: $${response.data.total_cost.toLocaleString()}`
+          `Best cost: ${formatCurrencyAmount(response.data.total_cost, 'IRR', i18n.language || 'en-US')}` +
+          shortageNote
         );
       } else {
         console.log('[ENHANCED OPTIMIZATION] FAILED! Setting error message');
@@ -318,6 +361,28 @@ export const OptimizationPageEnhanced: React.FC = () => {
       setError(formatApiError(err, 'Optimization failed'));
     } finally {
       setOptimizing(false);
+    }
+  };
+
+  const handleRunOptimization = async () => {
+    setError('');
+    setSuccess('');
+    setRunDialogOpen(false);
+    try {
+      const precheckResponse = await financeAPI.getOptimizationBudgetAnalysis({
+        scenario: 'minimum_feasible',
+        budget_mode: 'analysis_only',
+      });
+      const precheck = precheckResponse.data;
+      setBudgetPrecheck(precheck);
+      if ((precheck?.surplus_or_shortage_irr ?? 0) < 0) {
+        setBudgetDecisionDialogOpen(true);
+        return;
+      }
+
+      await executeOptimizationWithBudgetMode('constrained', precheck);
+    } catch (err: any) {
+      setError(formatApiError(err, 'Failed to run optimization budget pre-check'));
     }
   };
 
@@ -556,13 +621,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
   };
 
   const formatCurrency = (value: number) => {
-    if (isNaN(value) || value === null || value === undefined) {
-      return '$0.00';
-    }
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-    }).format(value);
+    return formatCurrencyAmount(value, 'IRR', i18n.language || 'en-US');
   };
 
   const formatDate = (dateString: string) => {
@@ -897,6 +956,131 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   </Grid>
                 </Grid>
 
+                {selectedProposal.financial_analysis && (
+                  <Accordion sx={{ mb: 2 }}>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" width="100%">
+                        <Typography variant="subtitle1" fontWeight="bold">
+                          View financial analysis
+                        </Typography>
+                        <Chip
+                          label={selectedProposal.financial_analysis.budget_status}
+                          color={
+                            selectedProposal.financial_analysis.budget_status === 'OK'
+                              ? 'success'
+                              : selectedProposal.financial_analysis.budget_status === 'WARNING'
+                              ? 'warning'
+                              : 'error'
+                          }
+                          size="small"
+                        />
+                      </Box>
+                    </AccordionSummary>
+                    <AccordionDetails>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} md={6}>
+                          <Paper sx={{ p: 2, height: '100%' }}>
+                            <Typography variant="body2" color="text.secondary">
+                              Required budget (IRR)
+                            </Typography>
+                            <Typography variant="h6">
+                              {formatCurrencyAmount(
+                                selectedProposal.financial_analysis.budget_required_irr,
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                              Available budget (IRR)
+                            </Typography>
+                            <Typography variant="h6">
+                              {formatCurrencyAmount(
+                                selectedProposal.financial_analysis.budget_available_irr,
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                              Surplus / shortage (IRR)
+                            </Typography>
+                            <Typography
+                              variant="h6"
+                              color={
+                                selectedProposal.financial_analysis.surplus_or_shortage_irr >= 0
+                                  ? 'success.main'
+                                  : 'error.main'
+                              }
+                            >
+                              {formatCurrencyAmount(
+                                Math.abs(selectedProposal.financial_analysis.surplus_or_shortage_irr),
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}
+                            </Typography>
+                          </Paper>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <Paper sx={{ p: 2, height: '100%' }}>
+                            <Typography variant="body2" color="text.secondary" gutterBottom>
+                              Required budget by currency
+                            </Typography>
+                            {Object.entries(selectedProposal.financial_analysis.budget_required_by_currency || {}).map(
+                              ([currency, amount]) => (
+                                <Typography key={currency} variant="body2">
+                                  {currency}: {formatCurrencyAmount(amount, currency, i18n.language || 'en-US')}
+                                </Typography>
+                              )
+                            )}
+                            <Divider sx={{ my: 1 }} />
+                            <Typography variant="body2" color="text.secondary" gutterBottom>
+                              Available budget by currency
+                            </Typography>
+                            {Object.entries(selectedProposal.financial_analysis.budget_available_by_currency || {}).map(
+                              ([currency, amount]) => (
+                                <Typography key={currency} variant="body2">
+                                  {currency}: {formatCurrencyAmount(amount, currency, i18n.language || 'en-US')}
+                                </Typography>
+                              )
+                            )}
+                          </Paper>
+                        </Grid>
+                        {selectedProposal.financial_analysis.narrative_report && (
+                          <Grid item xs={12}>
+                            <Alert
+                              severity={
+                                selectedProposal.financial_analysis.budget_status === 'OK'
+                                  ? 'success'
+                                  : 'warning'
+                              }
+                            >
+                              {selectedProposal.financial_analysis.narrative_report}
+                            </Alert>
+                          </Grid>
+                        )}
+                        {selectedProposal.budget_summary && (
+                          <Grid item xs={12}>
+                            <Alert severity="info">
+                              Used budget:{' '}
+                              {formatCurrencyAmount(
+                                selectedProposal.budget_summary.used_budget_irr || 0,
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}{' '}
+                              | Remaining budget:{' '}
+                              {formatCurrencyAmount(
+                                selectedProposal.budget_summary.remaining_budget_irr || 0,
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}{' '}
+                              | Excluded items: {selectedProposal.budget_summary.excluded_items_count || 0}
+                            </Alert>
+                          </Grid>
+                        )}
+                      </Grid>
+                    </AccordionDetails>
+                  </Accordion>
+                )}
+
                 {/* Decisions Table */}
                 <TableContainer component={Paper}>
                   <Table size="small">
@@ -1074,6 +1258,104 @@ export const OptimizationPageEnhanced: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Budget Shortage Decision Dialog */}
+      <Dialog
+        open={budgetDecisionDialogOpen}
+        onClose={() => setBudgetDecisionDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Budget shortage detected</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
+            Budget shortage should be handled as a warning decision point. Choose how to proceed.
+          </Alert>
+          {budgetPrecheck && (
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="body2" color="text.secondary">
+                  Scenario
+                </Typography>
+                <Typography variant="body1">{budgetPrecheck.scenario || 'minimum_feasible'}</Typography>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Typography variant="body2" color="text.secondary">
+                  Budget status
+                </Typography>
+                <Typography variant="body1">{budgetPrecheck.budget_status}</Typography>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Typography variant="body2" color="text.secondary">
+                  Required budget
+                </Typography>
+                <Typography variant="body1">
+                  {formatCurrencyAmount(budgetPrecheck.budget_required_irr || 0, 'IRR', i18n.language || 'en-US')}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Typography variant="body2" color="text.secondary">
+                  Available budget
+                </Typography>
+                <Typography variant="body1">
+                  {formatCurrencyAmount(budgetPrecheck.budget_available_irr || 0, 'IRR', i18n.language || 'en-US')}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Typography variant="body2" color="text.secondary">
+                  Shortage
+                </Typography>
+                <Typography variant="body1" color="error.main">
+                  {formatCurrencyAmount(
+                    Math.abs(budgetPrecheck.surplus_or_shortage_irr || 0),
+                    'IRR',
+                    i18n.language || 'en-US'
+                  )}
+                </Typography>
+              </Grid>
+              {budgetPrecheck.narrative_report && (
+                <Grid item xs={12}>
+                  <Alert severity="info">{budgetPrecheck.narrative_report}</Alert>
+                </Grid>
+              )}
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ justifyContent: 'space-between', p: 2 }}>
+          <Button
+            color="inherit"
+            onClick={() => {
+              setBudgetDecisionDialogOpen(false);
+              setSuccess('Optimization cancelled. You can update budget and try again.');
+            }}
+          >
+            Cancel and update budget
+          </Button>
+          <Box display="flex" gap={1}>
+            <Button
+              variant="outlined"
+              onClick={async () => {
+                setBudgetDecisionDialogOpen(false);
+                await executeOptimizationWithBudgetMode('constrained', budgetPrecheck);
+              }}
+              disabled={optimizing}
+            >
+              Optimize within current budget
+            </Button>
+            <Button
+              variant="contained"
+              color="warning"
+              onClick={async () => {
+                setBudgetDecisionDialogOpen(false);
+                await executeOptimizationWithBudgetMode('allow_shortage', budgetPrecheck);
+              }}
+              disabled={optimizing}
+            >
+              Optimize all items and show financial shortage analysis
+            </Button>
+          </Box>
+        </DialogActions>
+      </Dialog>
 
       {/* Run Optimization Dialog */}
       <Dialog open={runDialogOpen} onClose={() => setRunDialogOpen(false)} maxWidth="md" fullWidth>

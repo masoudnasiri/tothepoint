@@ -53,9 +53,15 @@ class EnhancedProcurementOptimizer:
     - Performance benchmarking
     """
     
-    def __init__(self, db: AsyncSession, solver_type: SolverType = SolverType.CP_SAT):
+    def __init__(
+        self,
+        db: AsyncSession,
+        solver_type: SolverType = SolverType.CP_SAT,
+        budget_mode: str = "allow_shortage",
+    ):
         self.db = db
         self.solver_type = solver_type
+        self.budget_mode = (budget_mode or "allow_shortage").strip().lower()
         self.model = None
         self.variables = {}
         self.run_id = str(uuid.uuid4())
@@ -432,8 +438,7 @@ class EnhancedProcurementOptimizer:
                     # Use continuous variable [0, 1] for LP relaxation
                     variables[var_name] = solver.NumVar(0, 1, var_name)
         
-        # Add demand fulfillment constraints (each item can be procured at most once)
-        # Allow partial optimization when budget is insufficient
+        # Add demand fulfillment constraints
         item_groups = {}
         for var_name, var in variables.items():
             parts = var_name.split('_')
@@ -443,21 +448,28 @@ class EnhancedProcurementOptimizer:
             item_groups[key].append(var)
         
         for vars_list in item_groups.values():
-            constraint = solver.Constraint(1, 1)  # Exactly once (demand fulfillment)
+            if self.budget_mode == "constrained":
+                constraint = solver.Constraint(0, 1)  # Allow skipping items in constrained mode
+            else:
+                constraint = solver.Constraint(1, 1)  # Force one candidate per item
             for var in vars_list:
                 constraint.SetCoefficient(var, 1)
         
         # Add budget constraints (MULTI-CURRENCY SUPPORT)
-        # Group by time slot AND currency
-        time_currency_groups = {}  # {(time_slot, currency): [(var, cost), ...]}
+        if self.budget_mode == "allow_shortage":
+            # Explicitly allow shortage mode: no budget hard constraints.
+            time_currency_groups = {}
+        else:
+            time_currency_groups = {}  # {(time_slot, currency): [(var, cost), ...]}
+            # Group by time slot AND currency
         
-        time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
-        for time_slot, var_data in time_groups.items():
-            for var, cost, currency in var_data:
-                key = (time_slot, currency)
-                if key not in time_currency_groups:
-                    time_currency_groups[key] = []
-                time_currency_groups[key].append((var, cost))
+            time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
+            for time_slot, var_data in time_groups.items():
+                for var, cost, currency in var_data:
+                    key = (time_slot, currency)
+                    if key not in time_currency_groups:
+                        time_currency_groups[key] = []
+                    time_currency_groups[key].append((var, cost))
         
         # Apply budget constraints per currency
         for (time_slot, currency), var_cost_pairs in time_currency_groups.items():
@@ -468,9 +480,9 @@ class EnhancedProcurementOptimizer:
             else:
                 # No budget data for this time slot - use large default
                 budget_limit = 100000000000000.0  # $100T default
-            
+
             constraint = solver.Constraint(0, budget_limit)
-            
+
             for var, cost in var_cost_pairs:
                 constraint.SetCoefficient(var, cost)
         
@@ -557,7 +569,7 @@ class EnhancedProcurementOptimizer:
                     # Binary variable
                     variables[var_name] = solver.IntVar(0, 1, var_name)
         
-        # Add demand fulfillment constraints (allow partial optimization)
+        # Add demand fulfillment constraints
         item_groups = {}
         for var_name, var in variables.items():
             parts = var_name.split('_')
@@ -567,21 +579,27 @@ class EnhancedProcurementOptimizer:
             item_groups[key].append(var)
         
         for vars_list in item_groups.values():
-            constraint = solver.Constraint(1, 1)  # Exactly once (demand fulfillment)
+            if self.budget_mode == "constrained":
+                constraint = solver.Constraint(0, 1)  # Allow skipping items in constrained mode
+            else:
+                constraint = solver.Constraint(1, 1)  # Force one candidate per item
             for var in vars_list:
                 constraint.SetCoefficient(var, 1)
         
         # Add budget constraints (MULTI-CURRENCY SUPPORT)
-        # Group by time slot AND currency
-        time_currency_groups = {}  # {(time_slot, currency): [(var, cost), ...]}
+        if self.budget_mode == "allow_shortage":
+            time_currency_groups = {}
+        else:
+            time_currency_groups = {}  # {(time_slot, currency): [(var, cost), ...]}
+            # Group by time slot AND currency
         
-        time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
-        for time_slot, var_data in time_groups.items():
-            for var, cost, currency in var_data:
-                key = (time_slot, currency)
-                if key not in time_currency_groups:
-                    time_currency_groups[key] = []
-                time_currency_groups[key].append((var, cost))
+            time_groups = self._group_by_purchase_time(variables, request.max_time_slots)
+            for time_slot, var_data in time_groups.items():
+                for var, cost, currency in var_data:
+                    key = (time_slot, currency)
+                    if key not in time_currency_groups:
+                        time_currency_groups[key] = []
+                    time_currency_groups[key].append((var, cost))
         
         # Apply budget constraints per currency
         for (time_slot, currency), var_cost_pairs in time_currency_groups.items():
@@ -1009,8 +1027,9 @@ class EnhancedProcurementOptimizer:
             logger.error("No feasible variables found - optimization will fail")
             return
         
-        # DEMAND FULFILLMENT: each project item must be purchased exactly once (== 1)
-        # This ensures all project items are procured, not just the most cost-effective ones
+        # Demand fulfillment mode:
+        # - constrained: at most one candidate per item (can skip items under tight budget)
+        # - allow_shortage: exactly one candidate per item
         for key, vars_list in item_groups.items():
             if len(vars_list) > 0:  # Only add constraints for items with options
                 project_id, project_item_id = key
@@ -1020,14 +1039,29 @@ class EnhancedProcurementOptimizer:
                                    if item.project_id == project_id and item.id == project_item_id), None)
                 
                 if project_item:
-                    # Each project item must be purchased exactly once
-                    model.Add(sum(vars_list) == 1)
-                    logger.info(f"  Added demand constraint for project_item_id {project_item_id}: {len(vars_list)} options must sum to 1 (quantity: {project_item.quantity})")
+                    if self.budget_mode == "constrained":
+                        model.Add(sum(vars_list) <= 1)
+                        logger.info(
+                            f"  Added constrained demand rule for project_item_id {project_item_id}: "
+                            f"{len(vars_list)} options can sum up to 1"
+                        )
+                    else:
+                        model.Add(sum(vars_list) == 1)
+                        logger.info(
+                            f"  Added allow_shortage demand rule for project_item_id {project_item_id}: "
+                            f"{len(vars_list)} options must sum to 1"
+                        )
                 else:
                     logger.warning(f"  Could not find project item for key {key}")
     
     def _add_cpsat_budget_constraints(self, model: cp_model.CpModel, variables: Dict, max_time_slots: int):
-        """Add soft budget constraints for CP-SAT with slack variables"""
+        """Add budget constraints for CP-SAT based on budget_mode."""
+        if self.budget_mode == "allow_shortage":
+            # Explicitly allow shortage mode: skip budget constraints and penalties.
+            self.cpsat_budget_slack_vars = []
+            logger.info("Skipping CP-SAT budget constraints (allow_shortage mode).")
+            return
+
         time_groups = {}
         
         for var_name, var in variables.items():
@@ -1115,19 +1149,9 @@ class EnhancedProcurementOptimizer:
                 )
                 
                 if cash_flow_vars:
-                    # Create slack variable to allow exceeding budget
-                    max_slack = max(budget_limit // 2, 500)  # At least $500K
-                    slack_var = model.NewIntVar(
-                        0, max_slack, 
-                        f'cpsat_budget_slack_{time_slot}_{currency}'
-                    )
-                    
-                    # Soft constraint: spending <= budget + slack (per currency)
                     total_spending = sum(v * c for v, c in zip(cash_flow_vars, cash_flow_coeffs))
-                    model.Add(total_spending <= budget_limit + slack_var)
-                    
-                    # Store slack for penalty
-                    self.cpsat_budget_slack_vars.append(slack_var)
+                    # Constrained mode uses hard budget limits.
+                    model.Add(total_spending <= budget_limit)
     
     def _set_cpsat_objective(self, model: cp_model.CpModel, variables: Dict, strategy: OptimizationStrategy):
         """Set objective function for CP-SAT based on strategy
@@ -1301,7 +1325,9 @@ class EnhancedProcurementOptimizer:
         """Set objective for MIP solver (same as Glop)"""
         self._set_glop_objective(objective, variables, strategy)
     
-    def _group_by_purchase_time(self, variables: Dict, max_time_slots: int) -> Dict[int, List[Tuple[Any, float]]]:
+    def _group_by_purchase_time(
+        self, variables: Dict, max_time_slots: int
+    ) -> Dict[int, List[Tuple[Any, float, str]]]:
         """Group variables by purchase time with their costs"""
         time_groups = {}
         
@@ -1322,11 +1348,11 @@ class EnhancedProcurementOptimizer:
                         if i.project_id == project_id and i.item_code == item_code), None)
             
             if item:
-                cost, _ = self._calculate_effective_cost(option, item)
+                cost, currency = self._calculate_effective_cost(option, item)
                 cost = float(cost * item.quantity)
                 if purchase_time not in time_groups:
                     time_groups[purchase_time] = []
-                time_groups[purchase_time].append((var, cost))
+                time_groups[purchase_time].append((var, cost, currency))
         
         return time_groups
     
@@ -1556,6 +1582,7 @@ class EnhancedProcurementOptimizer:
                 request_parameters={
                     'max_time_slots': request.max_time_slots,
                     'time_limit_seconds': request.time_limit_seconds,
+                    'budget_mode': self.budget_mode,
                     'solver_type': self.solver_type.value,
                     'proposals_count': len(proposals),
                     'strategies': [p.strategy_type for p in proposals]

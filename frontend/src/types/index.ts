@@ -357,6 +357,41 @@ export interface OptimizationResult {
 export interface OptimizationRunRequest {
   max_time_slots?: number;
   time_limit_seconds?: number;
+  budget_mode?: 'constrained' | 'allow_shortage';
+  budget_scenario?: 'minimum_feasible' | 'average_candidate' | 'conservative' | 'selected_result';
+}
+
+export interface OptimizationFinancialPeriod {
+  period: string;
+  required_irr: number;
+  available_irr: number;
+  gap_irr: number;
+  status: string;
+}
+
+export interface OptimizationFinancialAnalysis {
+  scenario: string;
+  base_currency: string;
+  budget_mode: string;
+  items_analyzed: number;
+  items_with_no_valid_candidate: number;
+  candidate_count: number;
+  combination_count: number;
+  double_count_prevented: boolean;
+  budget_required_irr: number;
+  budget_available_irr: number;
+  surplus_or_shortage_irr: number;
+  budget_status: string;
+  is_blocking: boolean;
+  can_continue_with_warning: boolean;
+  allowed_actions: string[];
+  budget_required_by_currency: Record<string, number>;
+  budget_available_by_currency: Record<string, number>;
+  periods: OptimizationFinancialPeriod[];
+  top_shortage_contributors: Array<Record<string, any>>;
+  warnings: string[];
+  recommendations: string[];
+  narrative_report?: string;
 }
 
 export interface OptimizationRunResponse {
@@ -366,6 +401,8 @@ export interface OptimizationRunResponse {
   items_optimized: number;
   execution_time_seconds: number;
   message?: string;
+  budget_mode?: string;
+  budget_precheck?: OptimizationFinancialAnalysis;
 }
 
 export interface DecisionFactorWeight {

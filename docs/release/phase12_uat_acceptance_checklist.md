@@ -64,6 +64,17 @@
 - [ ] Package create/edit/delete actions become available again after rollback
 - [ ] Bulk rollback audit events are present (success/skip/summary)
 
+## چک‌لیست اختصاصی فاز 12E-0
+
+- [ ] Pre-run optimization budget analysis is scenario-based (`minimum`, `average`, `conservative`, `selected result`)
+- [ ] Scenario semantics confirm each item is counted once (alternative candidates/combos are not cumulatively summed)
+- [ ] Budget shortage is shown as warning decision point (not hard blocker)
+- [ ] Warning dialog shows 3 actions (constrained / allow-shortage / cancel)
+- [ ] `constrained` mode returns budget-fitting subset and reports deferred/excluded items
+- [ ] `allow_shortage` mode runs and returns shortage analysis
+- [ ] Proposal/result-level financial analysis is accessible and coherent
+- [ ] Currency display uses correct symbols/labels for IRR/USD/EUR/AED/CNY/TRY
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker
