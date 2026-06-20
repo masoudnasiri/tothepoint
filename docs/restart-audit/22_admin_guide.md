@@ -60,6 +60,10 @@ Admin best practice:
 - verify backup file is created and non-empty,
 - keep off-host backup copy for disaster recovery.
 
+Service-name safe backup command:
+
+`DB_SERVICE=$(docker compose config --services | grep -E "^(postgres|db)$" | head -1) && docker compose exec -T "$DB_SERVICE" pg_dump -U postgres procurement_dss > /path/to/backup.sql && test -s /path/to/backup.sql`
+
 ## Safe Update Procedure (Admin View)
 
 1. Freeze active release window.

@@ -84,8 +84,15 @@
 ## 12) Testing and Quality Artifacts
 
 - Backend pytest coverage for phase-specific behavior
-- Phase 5 and Phase 6A regression tests
+- Phase 5, Phase 6A, and Phase 8 RC smoke tests
 - Frontend production build path (`npm run build`)
+
+## 13) Release Candidate and Demo Readiness
+
+- Deterministic demo dataset generator with cleanup mode (`DEMO_RC8_` tagging)
+- Business-facing demo script (`docs/release/demo_script_phase8.md`)
+- Product smoke test checklist (`docs/release/product_smoke_test_checklist.md`)
+- Release candidate checklist gate (`docs/release/release_candidate_checklist.md`)
 
 ## Known Constraints (As of Current Snapshot)
 

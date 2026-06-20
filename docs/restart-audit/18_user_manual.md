@@ -71,7 +71,8 @@ For locked decisions:
 - Invoice entry uses existing invoice/payment simple flow.
 - Supplier payments can be recorded from supplier payment screens.
 - Customer payment-in and supplier payment-out affect cashflow reporting.
-- Package/supplier traceability fields are now available in operational responses (Phase 6A hardening).
+- Package/supplier traceability fields are available in operational responses (Phase 6A hardening).
+- Procurement-plan payment status can reflect both invoice/payment tables and decision-level payment fields.
 
 ## Status Meanings
 
@@ -109,3 +110,4 @@ For locked decisions:
 - `docs/restart-audit/06_api_frontend_flow_map.md`
 - `docs/restart-audit/14_existing_operational_modules_regression_audit.md`
 - `docs/restart-audit/17_phase6a_operational_compatibility_hardening.md`
+- `docs/release/demo_script_phase8.md`

@@ -81,6 +81,7 @@ Rivar supports both planning (forecast) and execution (actual) views:
 - Core operational modules already exist and are active.
 - Recent hardening phases focused on package-aware compatibility and integration consistency.
 - Legacy + package-aware paths currently coexist, so strict deprecation requires controlled rollout.
+- Release-candidate support now includes deterministic demo dataset tooling and smoke-test checklists.
 
 ## Strategic Direction (Near-Term)
 

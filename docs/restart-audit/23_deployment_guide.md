@@ -96,7 +96,7 @@ If critical regression appears:
 
 ## Known Operational Risks (Current Codebase)
 
-- Script inconsistencies in some packaging/update paths (`db` vs `postgres` naming in historical scripts).
+- Historical docs/scripts may still include legacy `db`-only command examples; use service-detection pattern in active runbooks.
 - Backup step may be non-fatal in some scripts; enforce fail-fast in your runbook.
 - Mixed legacy/package paths require post-update compatibility checks.
 

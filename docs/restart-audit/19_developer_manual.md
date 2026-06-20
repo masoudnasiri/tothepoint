@@ -86,10 +86,12 @@ Primary backend tests live in `backend/tests/`:
 - `test_phase5_package_optimization_boundary.py`
 - `test_phase5_decision_lock_coverage.py`
 - `test_phase6a_operational_compat.py`
+- `test_phase8_release_candidate_smoke.py`
 
 Run:
 
 - `docker compose run --rm backend python -m pytest tests -q`
+- `docker compose run --rm backend python -m pytest tests/test_phase8_release_candidate_smoke.py -q`
 
 If local Docker is unhealthy, validate syntax as minimum guard:
 
@@ -98,8 +100,17 @@ If local Docker is unhealthy, validate syntax as minimum guard:
 ## Documentation and Change Discipline
 
 - Update relevant docs in `docs/restart-audit/` for every non-trivial phase.
+- Keep release/demo docs in sync (`docs/release/`) when user-facing demo flow changes.
 - Keep changes small and phase-focused.
 - Avoid introducing new modules when compatibility patching existing ones is sufficient.
+
+## Demo Dataset (Phase 8 RC)
+
+- Script: `backend/scripts/create_demo_dataset.py`
+- Create/recreate:
+  - `python scripts/create_demo_dataset.py --mode create`
+- Cleanup:
+  - `python scripts/create_demo_dataset.py --mode cleanup`
 
 ## Common Pitfalls
 
