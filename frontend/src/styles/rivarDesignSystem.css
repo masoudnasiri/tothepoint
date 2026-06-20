@@ -1,0 +1,247 @@
+/* ============================================================
+   Rivar Design System — CSS Variables & Utilities
+   Do NOT import external fonts here (on-premise deployment).
+   Font stacks use safe system fallbacks.
+   ============================================================ */
+
+:root {
+  /* Ink (text) */
+  --rv-ink:          #14181F;
+  --rv-ink-700:      #3A4150;
+  --rv-ink-500:      #5B6472;
+  --rv-ink-300:      #8A92A1;
+
+  /* Surface */
+  --rv-paper:        #FFFFFF;
+  --rv-surface:      #F6F7F9;
+  --rv-surface-100:  #EEF0F3;
+
+  /* Lines / borders */
+  --rv-line:         #E4E7EC;
+  --rv-line-strong:  #CBD0D9;
+
+  /* Accent */
+  --rv-accent:            #3651D4;
+  --rv-accent-600:        #2C44B8;
+  --rv-accent-tint:       #EEF1FD;
+  --rv-accent-tint-strong:#DDE3FA;
+
+  /* Semantic — good (success) */
+  --rv-good:         #1B7A4D;
+  --rv-good-tint:    #E7F4EC;
+  --rv-good-line:    #BFE2CD;
+
+  /* Semantic — warn */
+  --rv-warn:         #B4740E;
+  --rv-warn-tint:    #FBF1E0;
+  --rv-warn-line:    #F1D9A6;
+
+  /* Semantic — risk (error) */
+  --rv-risk:         #C23A3A;
+  --rv-risk-tint:    #FBEAEA;
+  --rv-risk-line:    #F2C3C3;
+
+  /* Radii */
+  --rv-radius-sm:    6px;
+  --rv-radius-md:    10px;
+  --rv-radius-lg:    14px;
+
+  /* Shadows */
+  --rv-shadow-card:  0 1px 2px rgba(20,24,31,0.04), 0 1px 1px rgba(20,24,31,0.03);
+  --rv-shadow-panel: 0 1px 4px rgba(20,24,31,0.06), 0 1px 2px rgba(20,24,31,0.04);
+
+  /* Sidebar */
+  --rv-sidebar-w:    216px;
+
+  /* Font stacks */
+  --rv-font-ui:   Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --rv-font-fa:   "Yekan Bakh FaNum", Tahoma, Arial, sans-serif;
+}
+
+/* ── Page & background ────────────────────────────────────────────────────── */
+.rv-page-bg {
+  background: var(--rv-surface);
+  min-height: 100vh;
+}
+
+/* ── Panel (white card with border) ──────────────────────────────────────── */
+.rv-panel {
+  background: var(--rv-paper);
+  border: 1px solid var(--rv-line);
+  border-radius: var(--rv-radius-lg);
+  box-shadow: var(--rv-shadow-card);
+  padding: 20px 24px;
+}
+
+.rv-panel-sm {
+  padding: 14px 16px;
+}
+
+/* ── Metric card ──────────────────────────────────────────────────────────── */
+.rv-metric-card {
+  background: var(--rv-paper);
+  border: 1px solid var(--rv-line);
+  border-radius: var(--rv-radius-lg);
+  box-shadow: var(--rv-shadow-card);
+  padding: 18px 20px;
+}
+
+.rv-metric-value {
+  font-family: ui-monospace, "IBM Plex Mono", "Cascadia Code", monospace;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--rv-ink);
+}
+
+.rv-metric-label {
+  font-size: 0.78125rem;
+  font-weight: 500;
+  color: var(--rv-ink-500);
+}
+
+/* ── Status pills ─────────────────────────────────────────────────────────── */
+.rv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.rv-pill-good  { background: var(--rv-good-tint);  color: var(--rv-good);  border: 1px solid var(--rv-good-line); }
+.rv-pill-warn  { background: var(--rv-warn-tint);  color: var(--rv-warn);  border: 1px solid var(--rv-warn-line); }
+.rv-pill-risk  { background: var(--rv-risk-tint);  color: var(--rv-risk);  border: 1px solid var(--rv-risk-line); }
+.rv-pill-accent{ background: var(--rv-accent-tint); color: var(--rv-accent-600); border: 1px solid var(--rv-accent-tint-strong); }
+.rv-pill-neutral{ background: var(--rv-surface-100); color: var(--rv-ink-500); border: 1px solid var(--rv-line); }
+
+/* ── Sidebar nav ──────────────────────────────────────────────────────────── */
+.rv-nav-label {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--rv-ink-300);
+  padding: 0 10px;
+  margin: 0 0 6px;
+  font-family: ui-monospace, monospace;
+}
+
+/* ── Page header ──────────────────────────────────────────────────────────── */
+.rv-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.rv-page-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--rv-ink);
+  letter-spacing: -0.01em;
+}
+
+.rv-page-subtitle {
+  font-size: 0.8125rem;
+  color: var(--rv-ink-500);
+  margin-top: 2px;
+}
+
+/* ── Section header ───────────────────────────────────────────────────────── */
+.rv-section-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--rv-ink);
+  margin-bottom: 12px;
+}
+
+/* ── Filter bar ───────────────────────────────────────────────────────────── */
+.rv-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+/* ── Metric strip grid ────────────────────────────────────────────────────── */
+.rv-metric-row {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.rv-metric-row-4 { grid-template-columns: repeat(4, 1fr); }
+.rv-metric-row-5 { grid-template-columns: repeat(5, 1fr); }
+.rv-metric-row-3 { grid-template-columns: repeat(3, 1fr); }
+
+@media (max-width: 960px) {
+  .rv-metric-row-4, .rv-metric-row-5 { grid-template-columns: repeat(2, 1fr); }
+  .rv-metric-row-3 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .rv-metric-row-4, .rv-metric-row-5, .rv-metric-row-3 { grid-template-columns: 1fr; }
+}
+
+/* ── Coverage ring ────────────────────────────────────────────────────────── */
+.rv-coverage-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+.rv-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--rv-ink-300);
+}
+
+.rv-empty-state-icon {
+  font-size: 48px;
+  opacity: 0.35;
+  margin-bottom: 16px;
+}
+
+/* ── Table utilities ──────────────────────────────────────────────────────── */
+.rv-table-container {
+  border: 1px solid var(--rv-line);
+  border-radius: var(--rv-radius-md);
+  overflow: hidden;
+}
+
+/* ── RTL utilities ────────────────────────────────────────────────────────── */
+[dir="rtl"] .rv-page-header {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] .rv-filter-bar {
+  flex-direction: row-reverse;
+}
+
+/* ── Responsive utilities ─────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .rv-panel { padding: 14px 16px; }
+  .rv-page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .rv-metric-value { font-size: 1.25rem; }
+}
+
+/* ── Persian / RTL override ───────────────────────────────────────────────── */
+.persian-theme {
+  font-family: "Yekan Bakh FaNum", Tahoma, Arial, sans-serif !important;
+  direction: rtl;
+}
+
+.persian-theme .rv-nav-label {
+  font-family: "Yekan Bakh FaNum", Tahoma, Arial, sans-serif;
+  letter-spacing: 0;
+}

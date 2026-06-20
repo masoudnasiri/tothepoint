@@ -1,21 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import {
-  AppBar,
   Box,
-  CssBaseline,
   Drawer,
-  IconButton,
   List,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
-  Toolbar,
   Typography,
   Avatar,
+  IconButton,
+  Divider,
   Menu,
   MenuItem,
-  Divider,
+  Collapse,
+  Tooltip,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -26,7 +25,6 @@ import {
   AccountBalance,
   Analytics,
   People,
-  AccountCircle,
   Logout,
   Tune,
   CheckCircle,
@@ -42,9 +40,10 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
-import { BRAND_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
+import { BRAND_NAME, PRODUCER_NAME, PRODUCT_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
+import { rivarTokens } from '../theme/rivarTheme.ts';
 
-const drawerWidth = 240;
+const DRAWER_WIDTH = rivarTokens.sidebarWidth;
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -60,14 +59,14 @@ interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   { textKey: 'navigation.dashboard', icon: <Dashboard />, path: '/dashboard', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'] },
-  { 
-    textKey: 'navigation.insights', 
-    icon: <Insights />, 
+  {
+    textKey: 'navigation.insights',
+    icon: <Insights />,
     roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'],
     children: [
       { textKey: 'navigation.projectAnalytics', icon: <Analytics />, path: '/analytics', roles: ['admin', 'pmo', 'pm', 'finance'] },
       { textKey: 'navigation.reports', icon: <Assessment />, path: '/reports', roles: ['admin', 'pmo', 'procurement', 'finance'] },
-    ]
+    ],
   },
   { textKey: 'navigation.projects', icon: <Business />, path: '/projects', roles: ['admin', 'pmo', 'pm', 'finance'] },
   { textKey: 'navigation.procurement', icon: <ShoppingCart />, path: '/procurement', roles: ['admin', 'procurement', 'finance'] },
@@ -77,104 +76,102 @@ const navigationItems: NavigationItem[] = [
   { textKey: 'navigation.decisions', icon: <CheckCircle />, path: '/decisions', roles: ['admin', 'finance'] },
   { textKey: 'navigation.users', icon: <People />, path: '/users', roles: ['admin'] },
   { textKey: 'navigation.auditLogs', icon: <Info />, path: '/audit-logs', roles: ['admin'] },
-  { 
-    textKey: 'navigation.baseInformation', 
-    icon: <Info />, 
+  {
+    textKey: 'navigation.baseInformation',
+    icon: <Info />,
     roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'],
     children: [
       { textKey: 'navigation.weights', icon: <Tune />, path: '/weights', roles: ['admin'] },
       { textKey: 'navigation.itemsMaster', icon: <Inventory />, path: '/items-master', roles: ['admin', 'pmo', 'pm', 'finance'] },
       { textKey: 'navigation.suppliers', icon: <Business />, path: '/suppliers', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'] },
-    ]
+    ],
   },
 ];
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
-  const [appVersion, setAppVersion] = useState<string>('loading...');
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(['navigation.insights']));
+  const [appVersion, setAppVersion] = useState<string>('...');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { t, i18n } = useTranslation();
-  
-  // Check if current language is RTL
   const isRTL = i18n.language === 'fa';
 
   useEffect(() => {
     let mounted = true;
-    getRuntimeVersion().then((version) => {
-      if (mounted) {
-        setAppVersion(version);
-      }
-    });
-
-    return () => {
-      mounted = false;
-    };
+    getRuntimeVersion().then((v) => { if (mounted) setAppVersion(v); });
+    return () => { mounted = false; };
   }, []);
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
+  // Auto-expand parent groups that contain the active child
+  useEffect(() => {
+    const newExpanded = new Set(expandedItems);
+    const checkExpand = (items: NavigationItem[]) => {
+      for (const item of items) {
+        if (item.children) {
+          const hasActive = item.children.some(c => c.path && location.pathname === c.path);
+          if (hasActive) newExpanded.add(item.textKey);
+          checkExpand(item.children);
+        }
+      }
+    };
+    checkExpand(navigationItems);
+    setExpandedItems(newExpanded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  const isItemActive = (item: NavigationItem): boolean => {
+    if (item.path && location.pathname === item.path) return true;
+    if (item.children) return item.children.some(c => isItemActive(c));
+    return false;
   };
 
-  const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleProfileMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-    handleProfileMenuClose();
-  };
+  const filteredNavItems = navigationItems.filter(
+    item => user?.role && item.roles.includes(user.role)
+  );
 
   const handleNavigation = (path: string) => {
     navigate(path);
     setMobileOpen(false);
   };
 
-  const handleSubmenuToggle = (textKey: string) => {
-    const newExpandedItems = new Set(expandedItems);
-    if (newExpandedItems.has(textKey)) {
-      newExpandedItems.delete(textKey);
-    } else {
-      newExpandedItems.add(textKey);
-    }
-    setExpandedItems(newExpandedItems);
+  const handleSubmenuToggle = (key: string) => {
+    const next = new Set(expandedItems);
+    next.has(key) ? next.delete(key) : next.add(key);
+    setExpandedItems(next);
   };
 
-  const isItemActive = (item: NavigationItem): boolean => {
-    if (item.path && location.pathname === item.path) {
-      return true;
-    }
-    if (item.children) {
-      return item.children.some(child => isItemActive(child));
-    }
-    return false;
+  const getPageTitle = () => {
+    const find = (items: NavigationItem[]): string | null => {
+      for (const item of items) {
+        if (item.path && location.pathname === item.path) return item.textKey;
+        if (item.children) {
+          const r = find(item.children);
+          if (r) return r;
+        }
+      }
+      return null;
+    };
+    return t(find(navigationItems) || 'navigation.dashboard');
   };
 
-  const filteredNavigationItems = navigationItems.filter(item =>
-    user?.role && item.roles.includes(user.role)
-  );
+  const userInitials = user?.username
+    ? user.username.slice(0, 2).toUpperCase()
+    : '??';
 
-  const renderNavigationItem = (item: NavigationItem, level: number = 0) => {
+  const renderNavItem = (item: NavigationItem, level: number = 0) => {
     const isExpanded = expandedItems.has(item.textKey);
     const isActive = isItemActive(item);
-    const hasChildren = item.children && item.children.length > 0;
-    const filteredChildren = item.children?.filter(child =>
-      user?.role && child.roles.includes(user.role)
-    ) || [];
+    const hasChildren = !!(item.children && item.children.length > 0);
+    const filteredChildren = item.children?.filter(c => user?.role && c.roles.includes(user.role)) || [];
 
     return (
       <React.Fragment key={item.textKey}>
-        <ListItem disablePadding>
+        <ListItem disablePadding sx={{ mb: 0 }}>
           <ListItemButton
-            selected={isActive}
+            selected={isActive && !hasChildren}
             onClick={() => {
               if (hasChildren) {
                 handleSubmenuToggle(item.textKey);
@@ -184,233 +181,322 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             }}
             sx={{
               flexDirection: isRTL ? 'row-reverse' : 'row',
-              textAlign: isRTL ? 'right' : 'left',
-              pl: level * 2,
+              pl: isRTL ? 1.25 : 1.25 + level * 2,
+              pr: 1.25,
+              borderRadius: '8px',
+              minHeight: 36,
             }}
           >
-            <ListItemIcon sx={{ 
-              minWidth: isRTL ? 'auto' : 56,
-              mr: isRTL ? 0 : 2,
-              ml: isRTL ? 2 : 0,
-            }}>
+            <ListItemIcon
+              sx={{
+                minWidth: 32,
+                mr: isRTL ? 0 : 1,
+                ml: isRTL ? 1 : 0,
+                justifyContent: 'center',
+                '& svg': {
+                  fontSize: 16,
+                  color: isActive ? rivarTokens.accent600 : rivarTokens.ink300,
+                },
+              }}
+            >
               {item.icon}
             </ListItemIcon>
-            <ListItemText 
-              primary={t(item.textKey)} 
-              sx={{ 
+            <ListItemText
+              primary={t(item.textKey)}
+              sx={{
                 textAlign: isRTL ? 'right' : 'left',
                 '& .MuiListItemText-primary': {
-                  textAlign: isRTL ? 'right' : 'left',
-                }
+                  fontSize: '0.84375rem',
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive ? rivarTokens.accent600 : rivarTokens.ink700,
+                },
               }}
             />
             {hasChildren && (
-              <ListItemIcon sx={{ minWidth: 'auto' }}>
-                {isExpanded ? <ExpandLess /> : <ExpandMore />}
-              </ListItemIcon>
+              <Box sx={{ ml: isRTL ? 0 : 'auto', mr: isRTL ? 'auto' : 0, color: rivarTokens.ink300 }}>
+                {isExpanded ? <ExpandLess sx={{ fontSize: 15 }} /> : <ExpandMore sx={{ fontSize: 15 }} />}
+              </Box>
             )}
           </ListItemButton>
         </ListItem>
-        {hasChildren && isExpanded && (
-          <List component="div" disablePadding>
-            {filteredChildren.map(child => renderNavigationItem(child, level + 1))}
-          </List>
+
+        {hasChildren && (
+          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+            <List disablePadding sx={{ pl: isRTL ? 0 : 1, pr: isRTL ? 1 : 0 }}>
+              {filteredChildren.map(child => renderNavItem(child, level + 1))}
+            </List>
+          </Collapse>
         )}
       </React.Fragment>
     );
   };
 
-  const drawer = (
-    <div>
-      <Toolbar sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2 }}>
-        <Box
-          component="img"
-          src="/rivar.png"
-          alt="Rivar logo"
+  const sidebarContent = (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Brand */}
+      <Box
+        sx={{
+          px: 2,
+          pt: 2.5,
+          pb: 2.5,
+          borderBottom: `1px solid ${rivarTokens.line}`,
+        }}
+      >
+        <Box display="flex" alignItems="center" gap={1.25}>
+          <Box
+            component="img"
+            src="/rivar.png"
+            alt="Rivar logo"
+            sx={{ width: 28, height: 28, objectFit: 'contain', borderRadius: '6px' }}
+          />
+          <Box>
+            <Typography
+              sx={{
+                fontWeight: 700,
+                fontSize: '0.9375rem',
+                color: rivarTokens.ink,
+                lineHeight: 1.2,
+              }}
+            >
+              {PRODUCT_NAME}
+            </Typography>
+            <Typography
+              sx={{
+                fontFamily: 'ui-monospace, monospace',
+                fontSize: '0.65rem',
+                color: rivarTokens.ink300,
+                lineHeight: 1.3,
+              }}
+            >
+              {PRODUCER_NAME}
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Navigation */}
+      <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', px: 1, py: 1.5 }}>
+        <List disablePadding>
+          {filteredNavItems.map(item => renderNavItem(item))}
+        </List>
+      </Box>
+
+      {/* Version footer */}
+      <Box
+        sx={{
+          px: 2,
+          py: 1.5,
+          borderTop: `1px solid ${rivarTokens.line}`,
+        }}
+      >
+        <Typography
           sx={{
-            width: 82,
-            height: 'auto',
-            mb: 0.75,
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: '0.65rem',
+            color: rivarTokens.ink300,
           }}
-        />
-        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', fontWeight: 500 }}>
-          {BRAND_NAME}
+        >
+          {BRAND_NAME} · v{appVersion}
         </Typography>
-      </Toolbar>
-      <Divider />
-      <List>
-        {filteredNavigationItems.map((item) => renderNavigationItem(item))}
-      </List>
-    </div>
+      </Box>
+    </Box>
   );
 
   return (
-    <Box 
+    <Box
       className={isRTL ? 'persian-theme' : ''}
-      sx={{ display: 'flex', direction: isRTL ? 'rtl' : 'ltr' }}
+      sx={{ display: 'flex', direction: isRTL ? 'rtl' : 'ltr', minHeight: '100vh' }}
     >
-      <CssBaseline />
-      
-      {/* Navigation Drawer */}
+      {/* ── Sidebar ── */}
       <Box
         component="nav"
-        sx={{ 
-          width: { sm: drawerWidth }, 
-          flexShrink: { sm: 0 },
-        }}
+        sx={{ width: { sm: DRAWER_WIDTH }, flexShrink: { sm: 0 } }}
       >
+        {/* Mobile drawer */}
         <Drawer
           variant="temporary"
+          anchor={isRTL ? 'right' : 'left'}
           open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{
-            keepMounted: true,
-          }}
-          className={isRTL ? 'persian-theme' : ''}
+          onClose={() => setMobileOpen(false)}
+          ModalProps={{ keepMounted: true }}
           sx={{
             display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { 
-              boxSizing: 'border-box', 
-              width: drawerWidth,
+            '& .MuiDrawer-paper': {
+              width: DRAWER_WIDTH,
               direction: isRTL ? 'rtl' : 'ltr',
             },
           }}
         >
-          {drawer}
+          {sidebarContent}
         </Drawer>
+
+        {/* Desktop permanent drawer */}
         <Drawer
           variant="permanent"
           anchor={isRTL ? 'right' : 'left'}
-          className={isRTL ? 'persian-theme' : ''}
           sx={{
             display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': { 
-              boxSizing: 'border-box', 
-              width: drawerWidth,
+            '& .MuiDrawer-paper': {
+              width: DRAWER_WIDTH,
               direction: isRTL ? 'rtl' : 'ltr',
             },
           }}
           open
         >
-          {drawer}
+          {sidebarContent}
         </Drawer>
       </Box>
 
-      {/* Main Content Area */}
+      {/* ── Main content ── */}
       <Box
         component="main"
         className={isRTL ? 'persian-theme' : ''}
         sx={{
           flexGrow: 1,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
           minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: rivarTokens.surface,
           direction: isRTL ? 'rtl' : 'ltr',
+          overflow: 'hidden',
         }}
       >
-        <AppBar
-          position="fixed"
+        {/* Topbar */}
+        <Box
           sx={{
-            width: { sm: `calc(100% - ${drawerWidth}px)` },
-            ml: { sm: isRTL ? 0 : `${drawerWidth}px` },
-            mr: { sm: isRTL ? `${drawerWidth}px` : 0 },
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            height: 56,
+            px: { xs: 2, sm: 4 },
+            background: rivarTokens.paper,
+            borderBottom: `1px solid ${rivarTokens.line}`,
+            position: 'sticky',
+            top: 0,
+            zIndex: 100,
+            flexShrink: 0,
+            flexDirection: isRTL ? 'row-reverse' : 'row',
           }}
         >
-          <Toolbar sx={{ direction: isRTL ? 'rtl' : 'ltr' }}>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ 
-                mr: isRTL ? 0 : 2, 
-                ml: isRTL ? 2 : 0,
-                display: { sm: 'none' } 
-              }}
-            >
-              <MenuIcon />
-            </IconButton>
-            <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, textAlign: isRTL ? 'right' : 'left' }}>
-              {(() => {
-                const findActiveItem = (items: NavigationItem[]): string | null => {
-                  for (const item of items) {
-                    if (item.path && location.pathname === item.path) {
-                      return item.textKey;
-                    }
-                    if (item.children) {
-                      const childResult = findActiveItem(item.children);
-                      if (childResult) return childResult;
-                    }
-                  }
-                  return null;
-                };
-                return t(findActiveItem(navigationItems) || 'navigation.dashboard');
-              })()}
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexDirection: isRTL ? 'row-reverse' : 'row' }}>
-              <Typography variant="body2" sx={{ 
-                mr: isRTL ? 0 : 2, 
-                ml: isRTL ? 2 : 0,
-                display: { xs: 'none', sm: 'block' } 
-              }}>
-                {user?.username} ({user?.role})
-              </Typography>
-              <LanguageSwitcher />
+          {/* Mobile: hamburger */}
+          <IconButton
+            onClick={() => setMobileOpen(true)}
+            sx={{ display: { sm: 'none' }, mr: isRTL ? 0 : 1, ml: isRTL ? 1 : 0 }}
+          >
+            <MenuIcon sx={{ fontSize: 20 }} />
+          </IconButton>
+
+          {/* Page title */}
+          <Typography
+            variant="h6"
+            sx={{
+              fontWeight: 600,
+              fontSize: '1rem',
+              color: rivarTokens.ink,
+              flex: 1,
+              textAlign: isRTL ? 'right' : 'left',
+              noWrap: true,
+            }}
+          >
+            {getPageTitle()}
+          </Typography>
+
+          {/* Right slot: lang switcher + user */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              flexDirection: isRTL ? 'row-reverse' : 'row',
+            }}
+          >
+            <LanguageSwitcher />
+
+            <Tooltip title={`${user?.username} · ${user?.role}`}>
               <IconButton
-                size="large"
-                aria-label="account of current user"
-                aria-controls="profile-menu"
-                aria-haspopup="true"
-                onClick={handleProfileMenuOpen}
-                color="inherit"
+                onClick={(e) => setAnchorEl(e.currentTarget)}
+                size="small"
+                sx={{ p: 0.5 }}
               >
-                <Avatar sx={{ width: 32, height: 32 }}>
-                  <AccountCircle />
+                <Avatar
+                  sx={{
+                    width: 30,
+                    height: 30,
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    background: rivarTokens.ink,
+                    color: '#fff',
+                  }}
+                >
+                  {userInitials}
                 </Avatar>
               </IconButton>
-              <Menu
-                id="profile-menu"
-                anchorEl={anchorEl}
-                anchorOrigin={{
-                  vertical: 'bottom',
-                  horizontal: isRTL ? 'left' : 'right',
+            </Tooltip>
+
+            <Menu
+              anchorEl={anchorEl}
+              open={Boolean(anchorEl)}
+              onClose={() => setAnchorEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: isRTL ? 'left' : 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: isRTL ? 'left' : 'right' }}
+              PaperProps={{
+                sx: {
+                  mt: 0.5,
+                  minWidth: 180,
+                  border: `1px solid ${rivarTokens.line}`,
+                  boxShadow: rivarTokens.shadowPanel,
+                },
+              }}
+            >
+              <Box sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${rivarTokens.line}` }}>
+                <Typography sx={{ fontWeight: 600, fontSize: '0.875rem', color: rivarTokens.ink }}>
+                  {user?.username}
+                </Typography>
+                <Typography sx={{ fontSize: '0.75rem', color: rivarTokens.ink500, textTransform: 'capitalize' }}>
+                  {user?.role}
+                </Typography>
+              </Box>
+              <MenuItem
+                onClick={() => {
+                  logout();
+                  navigate('/login');
+                  setAnchorEl(null);
                 }}
-                keepMounted
-                transformOrigin={{
-                  vertical: 'top',
-                  horizontal: isRTL ? 'left' : 'right',
+                sx={{
+                  flexDirection: isRTL ? 'row-reverse' : 'row',
+                  gap: 1.5,
+                  fontSize: '0.8125rem',
+                  color: rivarTokens.risk,
+                  py: 1.25,
                 }}
-                open={Boolean(anchorEl)}
-                onClose={handleProfileMenuClose}
               >
-                <MenuItem onClick={handleLogout} sx={{ flexDirection: isRTL ? 'row-reverse' : 'row' }}>
-                  <ListItemIcon sx={{ 
-                    minWidth: isRTL ? 'auto' : 56,
-                    mr: isRTL ? 0 : 2,
-                    ml: isRTL ? 2 : 0,
-                  }}>
-                    <Logout fontSize="small" />
-                  </ListItemIcon>
-                  <ListItemText primary={t('auth.logout')} />
-                </MenuItem>
-              </Menu>
-            </Box>
-          </Toolbar>
-        </AppBar>
-        
-        <Box 
+                <Logout sx={{ fontSize: 16 }} />
+                {t('auth.logout')}
+              </MenuItem>
+            </Menu>
+          </Box>
+        </Box>
+
+        {/* Page content */}
+        <Box
           className={isRTL ? 'persian-theme' : ''}
-          sx={{ p: { xs: 1, sm: 2, md: 3 }, overflow: 'auto', minHeight: 'calc(100vh - 64px)' }}
+          sx={{
+            flex: 1,
+            p: { xs: 2, sm: 3, md: 4 },
+            overflowY: 'auto',
+            direction: isRTL ? 'rtl' : 'ltr',
+          }}
         >
-          <Toolbar />
           {children}
         </Box>
-        <Divider />
-        <Box sx={{ px: 3, py: 1.5, textAlign: 'center' }}>
-          <Typography variant="caption" color="text.secondary">
-            {BRAND_NAME} | Version {appVersion}
-          </Typography>
-        </Box>
-        
       </Box>
     </Box>
   );

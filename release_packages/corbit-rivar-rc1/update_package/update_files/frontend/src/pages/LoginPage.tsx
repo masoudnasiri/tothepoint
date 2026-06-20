@@ -1,110 +1,136 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Container,
-  Paper,
+  Box,
   TextField,
   Button,
   Typography,
-  Box,
   Alert,
   CircularProgress,
+  InputAdornment,
+  IconButton,
 } from '@mui/material';
+import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { BRAND_NAME, getRuntimeVersion, PRODUCT_NAME } from '../utils/appIdentity.ts';
+import { BRAND_NAME, getRuntimeVersion, PRODUCT_NAME, PRODUCER_NAME } from '../utils/appIdentity.ts';
+import { rivarTokens } from '../theme/rivarTheme.ts';
 
 export const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [appVersion, setAppVersion] = useState<string>('loading...');
-  
+  const [appVersion, setAppVersion] = useState<string>('...');
+
   const { login } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     let mounted = true;
-    getRuntimeVersion().then((version) => {
-      if (mounted) {
-        setAppVersion(version);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
+    getRuntimeVersion().then((v) => { if (mounted) setAppVersion(v); });
+    return () => { mounted = false; };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
-
     try {
       await login({ username, password });
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed');
+      setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Container component="main" maxWidth="sm">
+    <Box
+      sx={{
+        minHeight: '100vh',
+        background: rivarTokens.surface,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        p: 3,
+      }}
+    >
       <Box
         sx={{
-          marginTop: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
+          width: '100%',
+          maxWidth: 400,
         }}
       >
-        <Paper
-          elevation={3}
+        {/* Card */}
+        <Box
           sx={{
-            padding: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            width: '100%',
+            background: rivarTokens.paper,
+            border: `1px solid ${rivarTokens.line}`,
+            borderRadius: rivarTokens.radiusLg,
+            boxShadow: rivarTokens.shadowPanel,
+            p: { xs: 3, sm: 4 },
           }}
         >
-          <Box
-            component="img"
-            src="/rivar.png"
-            alt="Rivar logo"
-            sx={{
-              width: 140,
-              height: 'auto',
-              mb: 2,
-            }}
-          />
-          <Typography component="h1" variant="h4" gutterBottom>
-            {PRODUCT_NAME}
+          {/* Logo + brand */}
+          <Box display="flex" flexDirection="column" alignItems="center" mb={3.5}>
+            <Box
+              component="img"
+              src="/rivar.png"
+              alt="Rivar logo"
+              sx={{
+                width: 56,
+                height: 56,
+                objectFit: 'contain',
+                mb: 1.5,
+              }}
+            />
+            <Typography
+              variant="h5"
+              sx={{
+                fontWeight: 700,
+                color: rivarTokens.ink,
+                letterSpacing: '-0.01em',
+                mb: 0.25,
+              }}
+            >
+              {PRODUCT_NAME}
+            </Typography>
+            <Typography
+              sx={{
+                fontFamily: 'ui-monospace, monospace',
+                fontSize: '0.75rem',
+                color: rivarTokens.ink300,
+              }}
+            >
+              by {PRODUCER_NAME} · v{appVersion}
+            </Typography>
+          </Box>
+
+          {/* Heading */}
+          <Typography
+            variant="subtitle1"
+            sx={{ fontWeight: 600, color: rivarTokens.ink, mb: 0.5 }}
+          >
+            Sign in to your account
           </Typography>
-          <Typography component="h2" variant="subtitle1" color="text.secondary" gutterBottom>
-            {BRAND_NAME}
+          <Typography
+            variant="body2"
+            sx={{ color: rivarTokens.ink500, mb: 2.5 }}
+          >
+            Enter your credentials to access {BRAND_NAME}.
           </Typography>
-          <Typography component="h3" variant="body2" color="text.secondary" gutterBottom>
-            Version {appVersion}
-          </Typography>
-          <Typography component="h3" variant="h6" color="text.secondary" gutterBottom>
-            Sign In
-          </Typography>
-          
+
           {error && (
-            <Alert severity="error" sx={{ width: '100%', mb: 2 }}>
+            <Alert severity="error" sx={{ mb: 2 }}>
               {error}
             </Alert>
           )}
 
-          <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1, width: '100%' }}>
+          <Box component="form" onSubmit={handleSubmit}>
             <TextField
-              margin="normal"
-              required
               fullWidth
-              id="username"
               label="Username"
               name="username"
               autoComplete="username"
@@ -112,41 +138,52 @@ export const LoginPage: React.FC = () => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={loading}
+              sx={{ mb: 2 }}
             />
             <TextField
-              margin="normal"
-              required
               fullWidth
-              name="password"
               label="Password"
-              type="password"
-              id="password"
+              name="password"
+              type={showPassword ? 'text' : 'password'}
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
+              sx={{ mb: 3 }}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      onClick={() => setShowPassword(!showPassword)}
+                      edge="end"
+                      size="small"
+                    >
+                      {showPassword ? <VisibilityOff sx={{ fontSize: 18 }} /> : <Visibility sx={{ fontSize: 18 }} />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
             />
             <Button
               type="submit"
               fullWidth
               variant="contained"
-              sx={{ mt: 3, mb: 2 }}
-              disabled={loading}
+              disabled={loading || !username || !password}
+              sx={{ py: 1.25 }}
             >
-              {loading ? <CircularProgress size={24} /> : 'Sign In'}
+              {loading ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : 'Sign In'}
             </Button>
           </Box>
+        </Box>
 
-          <Box sx={{ mt: 3, p: 2, bgcolor: 'primary.lighter', borderRadius: 1, width: '100%', border: '1px solid', borderColor: 'primary.main' }}>
-            <Typography variant="body2" color="primary.dark" gutterBottom>
-              <strong>Welcome to {BRAND_NAME}</strong>
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Please sign in to continue.
-            </Typography>
-          </Box>
-        </Paper>
+        {/* Footer */}
+        <Typography
+          variant="caption"
+          sx={{ display: 'block', textAlign: 'center', mt: 2.5, color: rivarTokens.ink300 }}
+        >
+          {BRAND_NAME} — Enterprise procurement & cash flow management
+        </Typography>
       </Box>
-    </Container>
+    </Box>
   );
 };

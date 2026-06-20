@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
+import { CssBaseline } from '@mui/material';
 import { useTranslation } from 'react-i18next';
 import { AuthProvider } from './contexts/AuthContext.tsx';
 import { FeatureFlagsProvider } from './hooks/useFeatureFlags.tsx';
@@ -25,195 +26,52 @@ import { ReportsPage } from './pages/ReportsPage.tsx';
 import AuditLogsPage from './pages/AuditLogsPage.tsx';
 import LocalizedDateProvider from './components/LocalizedDateProvider.tsx';
 import { PRODUCER_NAME, PRODUCT_NAME } from './utils/appIdentity.ts';
-
-// Create theme with dynamic font support based on language
-const createAppTheme = (isPersian: boolean = false) => createTheme({
-  palette: {
-    primary: {
-      main: '#1976d2',
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-  },
-  typography: {
-    fontFamily: isPersian 
-      ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-      : '"Roboto", "Helvetica", "Arial", sans-serif',
-  },
-  breakpoints: {
-    values: {
-      xs: 0,
-      sm: 600,
-      md: 960,
-      lg: 1280,
-      xl: 1920,
-    },
-  },
-  components: {
-    // Apply font to all MUI components
-    MuiTypography: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-        },
-      },
-    },
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-          '@media (max-width: 600px)': {
-            padding: '6px 12px',
-            fontSize: '0.875rem',
-          },
-        },
-      },
-    },
-    MuiTextField: {
-      styleOverrides: {
-        root: {
-          '& input': {
-            fontFamily: isPersian 
-              ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-              : '"Roboto", "Helvetica", "Arial", sans-serif',
-          },
-          '& textarea': {
-            fontFamily: isPersian 
-              ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-              : '"Roboto", "Helvetica", "Arial", sans-serif',
-          },
-        },
-      },
-    },
-    MuiInputLabel: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-        },
-      },
-    },
-    MuiSelect: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-        },
-      },
-    },
-    MuiMenuItem: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-        },
-      },
-    },
-    MuiDialog: {
-      styleOverrides: {
-        root: {
-          '& .MuiDialogTitle-root': {
-            fontFamily: isPersian 
-              ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-              : '"Roboto", "Helvetica", "Arial", sans-serif',
-          },
-          '& .MuiDialogContent-root': {
-            fontFamily: isPersian 
-              ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-              : '"Roboto", "Helvetica", "Arial", sans-serif',
-          },
-          '& .MuiDialogActions-root': {
-            fontFamily: isPersian 
-              ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-              : '"Roboto", "Helvetica", "Arial", sans-serif',
-          },
-        },
-      },
-    },
-    MuiFormControl: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-        },
-      },
-    },
-    MuiFormControlLabel: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-        },
-      },
-    },
-    MuiTableCell: {
-      styleOverrides: {
-        root: {
-          fontFamily: isPersian 
-            ? '"Yekan Bakh FaNum", "Tahoma", "Arial", sans-serif'
-            : '"Roboto", "Helvetica", "Arial", sans-serif',
-          '@media (max-width: 600px)': {
-            padding: '8px 4px',
-            fontSize: '0.75rem',
-          },
-        },
-      },
-    },
-  },
-});
+import { createRivarTheme } from './theme/rivarTheme.ts';
+import './styles/rivarDesignSystem.css';
 
 function AppContent() {
   const { i18n } = useTranslation();
   const isPersian = i18n.language?.startsWith('fa');
-  
-  const theme = useMemo(() => createAppTheme(isPersian), [isPersian]);
+
+  const theme = useMemo(() => createRivarTheme(isPersian), [isPersian]);
 
   return (
     <ThemeProvider theme={theme}>
+      <CssBaseline />
       <FeatureFlagsProvider>
         <AuthProvider>
           <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/*"
-            element={
-              <ProtectedRoute>
-                <LocalizedDateProvider>
-                  <Layout>
-                    <Routes>
-                    <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                    <Route path="/dashboard" element={<DashboardPage />} />
-                    <Route path="/decisions" element={<FinalizedDecisionsPage />} />
-                    <Route path="/projects" element={<ProjectsPage />} />
-                    <Route path="/items-master" element={<ItemsMasterPage />} />
-                    <Route path="/projects/:projectId/items" element={<ProjectItemsPage />} />
-                    <Route path="/procurement" element={<ProcurementPage />} />
-                    <Route path="/procurement-plan" element={<ProcurementPlanPage />} />
-                    <Route path="/finance" element={<FinancePage />} />
-                    <Route path="/optimization" element={<OptimizationPage />} />
-                    <Route path="/optimization-enhanced" element={<OptimizationPageEnhanced />} />
-                    <Route path="/analytics" element={<AnalyticsDashboardPage />} />
-                    <Route path="/reports" element={<ReportsPage />} />
-                    <Route path="/users" element={<UsersPage />} />
-                    <Route path="/weights" element={<WeightsPage />} />
-                    <Route path="/suppliers" element={<SuppliersPage />} />
-                    <Route path="/audit-logs" element={<AuditLogsPage />} />
-                  </Routes>
-                </Layout>
-                </LocalizedDateProvider>
-              </ProtectedRoute>
-            }
-          />
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <LocalizedDateProvider>
+                    <Layout>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                        <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/decisions" element={<FinalizedDecisionsPage />} />
+                        <Route path="/projects" element={<ProjectsPage />} />
+                        <Route path="/items-master" element={<ItemsMasterPage />} />
+                        <Route path="/projects/:projectId/items" element={<ProjectItemsPage />} />
+                        <Route path="/procurement" element={<ProcurementPage />} />
+                        <Route path="/procurement-plan" element={<ProcurementPlanPage />} />
+                        <Route path="/finance" element={<FinancePage />} />
+                        <Route path="/optimization" element={<OptimizationPage />} />
+                        <Route path="/optimization-enhanced" element={<OptimizationPageEnhanced />} />
+                        <Route path="/analytics" element={<AnalyticsDashboardPage />} />
+                        <Route path="/reports" element={<ReportsPage />} />
+                        <Route path="/users" element={<UsersPage />} />
+                        <Route path="/weights" element={<WeightsPage />} />
+                        <Route path="/suppliers" element={<SuppliersPage />} />
+                        <Route path="/audit-logs" element={<AuditLogsPage />} />
+                      </Routes>
+                    </Layout>
+                  </LocalizedDateProvider>
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </AuthProvider>
       </FeatureFlagsProvider>
@@ -230,4 +88,3 @@ function App() {
 }
 
 export default App;
-

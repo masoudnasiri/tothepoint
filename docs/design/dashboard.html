@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rivar — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root{
+    --ink:#14181F; --ink-700:#3A4150; --ink-500:#5B6472; --ink-300:#8A92A1;
+    --paper:#FFFFFF; --surface:#F6F7F9; --surface-100:#EEF0F3;
+    --line:#E4E7EC; --line-strong:#CBD0D9;
+    --accent:#3651D4; --accent-600:#2C44B8; --accent-tint:#EEF1FD; --accent-tint-strong:#DDE3FA;
+    --good:#1B7A4D; --good-tint:#E7F4EC; --good-line:#BFE2CD;
+    --warn:#B4740E; --warn-tint:#FBF1E0; --warn-line:#F1D9A6;
+    --risk:#C23A3A; --risk-tint:#FBEAEA; --risk-line:#F2C3C3;
+    --radius-sm:6px; --radius-md:10px; --radius-lg:14px;
+    --shadow-card: 0 1px 2px rgba(20,24,31,0.04), 0 1px 1px rgba(20,24,31,0.03);
+    --font-ui:'Inter',-apple-system,sans-serif;
+    --font-head:'Inter Tight','Inter',sans-serif;
+    --font-mono:'IBM Plex Mono', ui-monospace, monospace;
+    --sidebar-w:216px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:var(--font-ui); color:var(--ink); background:var(--surface); -webkit-font-smoothing:antialiased;}
+  a{color:inherit; text-decoration:none;}
+
+  /* ===== Sidebar ===== */
+  .sidebar{
+    position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w);
+    background:var(--paper); border-right:1px solid var(--line);
+    display:flex; flex-direction:column; padding:20px 12px;
+  }
+  .brand{display:flex; align-items:center; gap:10px; padding:6px 8px 22px;}
+  .brand-mark{
+    width:28px; height:28px; border-radius:8px; background:var(--ink);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .brand-mark svg{width:15px; height:15px;}
+  .brand-text{font-family:var(--font-head); font-weight:600; font-size:15px;}
+  .brand-sub{font-size:10.5px; color:var(--ink-300); font-family:var(--font-mono);}
+
+  .nav-group{margin-bottom:18px;}
+  .nav-label{
+    font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.06em;
+    color:var(--ink-300); padding:0 10px; margin:0 0 6px;
+  }
+  .nav-item{
+    display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
+    font-size:13.5px; font-weight:500; color:var(--ink-700); margin-bottom:1px; cursor:pointer;
+  }
+  .nav-item:hover{background:var(--surface);}
+  .nav-item.active{background:var(--accent-tint); color:var(--accent-600);}
+  .nav-item svg{width:17px; height:17px; flex-shrink:0; opacity:0.85;}
+  .nav-item.active svg{opacity:1;}
+
+  .sidebar-foot{margin-top:auto; padding:10px; border-top:1px solid var(--line);}
+  .user-row{display:flex; align-items:center; gap:9px;}
+  .avatar{
+    width:30px; height:30px; border-radius:50%; background:var(--ink); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;
+  }
+  .user-name{font-size:13px; font-weight:600;}
+  .user-role{font-size:11px; color:var(--ink-300);}
+
+  /* ===== Main ===== */
+  .main{margin-left:var(--sidebar-w); min-height:100vh;}
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 32px; border-bottom:1px solid var(--line); background:var(--paper);
+    position:sticky; top:0; z-index:5;
+  }
+  .topbar h1{font-family:var(--font-head); font-size:20px; font-weight:600; margin:0;}
+  .topbar-actions{display:flex; align-items:center; gap:10px;}
+  .content{padding:28px 32px 64px;}
+
+  /* segmented control */
+  .segmented{
+    display:inline-flex; background:var(--surface-100); border-radius:8px; padding:3px; gap:2px;
+  }
+  .seg-btn{
+    border:none; background:transparent; font-family:var(--font-ui); font-size:13px; font-weight:500;
+    padding:7px 14px; border-radius:6px; color:var(--ink-500); cursor:pointer;
+  }
+  .seg-btn.active{background:var(--paper); color:var(--ink); box-shadow:0 1px 2px rgba(20,24,31,.06);}
+
+  .btn{
+    font-family:var(--font-ui); font-size:13px; font-weight:500; border-radius:var(--radius-sm);
+    padding:8px 14px; border:1px solid var(--line-strong); cursor:pointer; background:var(--paper);
+    color:var(--ink); display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn-primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .btn svg{width:14px; height:14px;}
+
+  select.filter{
+    font-family:var(--font-ui); font-size:13px; padding:8px 12px; border:1px solid var(--line-strong);
+    border-radius:var(--radius-sm); background:var(--paper); color:var(--ink-700);
+  }
+
+  /* ===== Metric row ===== */
+  .metric-row{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px;}
+  .metric{
+    background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-lg);
+    padding:18px 20px; box-shadow:var(--shadow-card);
+  }
+  .metric-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+  .metric-label{font-size:12.5px; color:var(--ink-500); font-weight:500;}
+  .metric-icon{width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center;}
+  .metric-icon svg{width:16px; height:16px;}
+  .metric-value{font-family:var(--font-mono); font-size:24px; font-weight:600; letter-spacing:-0.01em; margin:0 0 4px;}
+  .metric-sub{font-size:12px; color:var(--ink-300);}
+  .metric-sub.up{color:var(--good);}
+  .metric-sub.down{color:var(--risk);}
+
+  /* ===== Panels ===== */
+  .panel{
+    background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-lg);
+    box-shadow:var(--shadow-card); margin-bottom:20px;
+  }
+  .panel-head{
+    display:flex; align-items:center; justify-content:space-between; padding:18px 22px;
+    border-bottom:1px solid var(--line);
+  }
+  .panel-head h3{font-family:var(--font-head); font-size:15px; font-weight:600; margin:0;}
+  .panel-head .sub{font-size:12.5px; color:var(--ink-500); margin-top:2px;}
+  .panel-body{padding:20px 22px;}
+  .legend-row{display:flex; gap:16px; align-items:center;}
+  .legend-item{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-500);}
+  .legend-dot{width:8px; height:8px; border-radius:2px;}
+
+  .two-col{display:grid; grid-template-columns:1.6fr 1fr; gap:20px; align-items:start;}
+
+  /* table */
+  table.cashflow{width:100%; border-collapse:collapse; font-size:13.5px;}
+  table.cashflow th{
+    text-align:right; font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:0.04em; color:var(--ink-300); font-weight:500; padding:8px 10px;
+    border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  table.cashflow th:first-child{text-align:left;}
+  table.cashflow td{padding:10px 10px; border-bottom:1px solid var(--line); text-align:right; font-family:var(--font-mono); font-variant-numeric:tabular-nums;}
+  table.cashflow td:first-child{text-align:left; font-family:var(--font-ui); font-weight:500;}
+  table.cashflow tr:hover td{background:var(--surface);}
+  .pos{color:var(--good);}
+  .neg{color:var(--risk);}
+
+  /* breakdown list */
+  .breakdown-item{display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--line);}
+  .breakdown-item:last-child{border-bottom:none;}
+  .breakdown-dot{width:10px; height:10px; border-radius:3px; flex-shrink:0;}
+  .breakdown-label{flex:1; font-size:13px; color:var(--ink-700);}
+  .breakdown-value{font-family:var(--font-mono); font-size:13px; font-weight:600;}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 18L10 6L14 14L17 8L20 18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div>
+      <div class="brand-text">Rivar</div>
+      <div class="brand-sub">v1.0.2</div>
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <div class="nav-item active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      Dashboard
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <p class="nav-label">Workflow</p>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9H21"/></svg>
+      Projects
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7V12L15 14"/></svg>
+      Procurement
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12H7L10 4L14 20L17 12H21"/></svg>
+      Procurement plan
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9H21M9 21V9"/></svg>
+      Finance
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18L15 12L9 6" transform="rotate(90 12 12)"/><circle cx="12" cy="12" r="9"/></svg>
+      Optimization
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13L9 17L19 7"/></svg>
+      Decisions
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <p class="nav-label">Insight</p>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V13M10 19V7M16 19V11M22 19V5"/></svg>
+      Analytics
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      Reports
+    </div>
+  </div>
+
+  <div class="nav-group">
+    <p class="nav-label">Reference</p>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9H21M9 21V9"/></svg>
+      Items master
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+      Suppliers
+    </div>
+  </div>
+
+  <div class="sidebar-foot">
+    <div class="user-row">
+      <div class="avatar">FM</div>
+      <div>
+        <div class="user-name">finance1</div>
+        <div class="user-role">Finance</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <h1>Dashboard</h1>
+    <div class="topbar-actions">
+      <select class="filter">
+        <option>All projects</option>
+        <option>Highline Substation</option>
+        <option>Port Terminal Expansion</option>
+      </select>
+      <button class="btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15V19A2 2 0 0 1 19 21H5A2 2 0 0 1 3 19V15"/><path d="M7 10L12 15L17 10"/><path d="M12 15V3"/></svg>
+        Export
+      </button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <div class="segmented">
+        <button class="seg-btn active">Forecast</button>
+        <button class="seg-btn">Actual</button>
+        <button class="seg-btn">Comparison</button>
+      </div>
+      <div class="segmented">
+        <button class="seg-btn active">Unified</button>
+        <button class="seg-btn">By currency</button>
+      </div>
+    </div>
+
+    <div class="metric-row">
+      <div class="metric">
+        <div class="metric-top">
+          <span class="metric-label">Total inflow</span>
+          <div class="metric-icon" style="background:var(--good-tint);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--good)" stroke-width="2"><path d="M7 17L17 7M17 7H8M17 7V16"/></svg>
+          </div>
+        </div>
+        <p class="metric-value">€ 2.84M</p>
+        <p class="metric-sub">Revenue, all decisions</p>
+      </div>
+      <div class="metric">
+        <div class="metric-top">
+          <span class="metric-label">Total outflow</span>
+          <div class="metric-icon" style="background:var(--risk-tint);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--risk)" stroke-width="2"><path d="M17 7L7 17M7 17H16M7 17V8"/></svg>
+          </div>
+        </div>
+        <p class="metric-value">€ 1.96M</p>
+        <p class="metric-sub">Supplier payments</p>
+      </div>
+      <div class="metric">
+        <div class="metric-top">
+          <span class="metric-label">Net position</span>
+          <div class="metric-icon" style="background:var(--accent-tint);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10H22"/></svg>
+          </div>
+        </div>
+        <p class="metric-value">€ 880K</p>
+        <p class="metric-sub up">↑ Positive position</p>
+      </div>
+      <div class="metric">
+        <div class="metric-top">
+          <span class="metric-label">Final balance</span>
+          <div class="metric-icon" style="background:var(--surface-100);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--ink-700)" stroke-width="2"><path d="M3 17L9 11L13 15L21 7"/><path d="M15 7H21V13"/></svg>
+          </div>
+        </div>
+        <p class="metric-value">€ 1.21M</p>
+        <p class="metric-sub">Peak: € 1.58M</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h3>Forecasted monthly cash flow</h3>
+          <p class="sub">Budget, inflow, outflow and cumulative balance by month</p>
+        </div>
+        <div class="legend-row">
+          <div class="legend-item"><span class="legend-dot" style="background:#CBD0D9;"></span>Budget</div>
+          <div class="legend-item"><span class="legend-dot" style="background:var(--good);"></span>Inflow</div>
+          <div class="legend-item"><span class="legend-dot" style="background:var(--risk);"></span>Outflow</div>
+          <div class="legend-item"><span class="legend-dot" style="background:var(--accent); border-radius:50%;"></span>Balance</div>
+        </div>
+      </div>
+      <div class="panel-body">
+        <canvas id="cashflowChart" height="92"></canvas>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel" style="margin-bottom:0;">
+        <div class="panel-head">
+          <div>
+            <h3>Monthly detail</h3>
+            <p class="sub">Last 6 months</p>
+          </div>
+          <button class="btn" style="padding:6px 10px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15V19A2 2 0 0 1 19 21H5A2 2 0 0 1 3 19V15"/><path d="M7 10L12 15L17 10"/><path d="M12 15V3"/></svg>
+          </button>
+        </div>
+        <div class="panel-body" style="padding:0 22px 16px;">
+          <table class="cashflow">
+            <thead>
+              <tr><th>Month</th><th>Budget</th><th>Inflow</th><th>Outflow</th><th>Net</th><th>Balance</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>2026-01</td><td>440,000</td><td class="pos">312,400</td><td class="neg">198,200</td><td class="pos">114,200</td><td>114,200</td></tr>
+              <tr><td>2026-02</td><td>440,000</td><td class="pos">389,100</td><td class="neg">241,000</td><td class="pos">148,100</td><td>262,300</td></tr>
+              <tr><td>2026-03</td><td>460,000</td><td class="pos">298,750</td><td class="neg">356,400</td><td class="neg">-57,650</td><td>204,650</td></tr>
+              <tr><td>2026-04</td><td>460,000</td><td class="pos">421,000</td><td class="neg">288,900</td><td class="pos">132,100</td><td>336,750</td></tr>
+              <tr><td>2026-05</td><td>480,000</td><td class="pos">355,600</td><td class="neg">312,100</td><td class="pos">43,500</td><td>380,250</td></tr>
+              <tr><td>2026-06</td><td>480,000</td><td class="pos">402,300</td><td class="neg">267,800</td><td class="pos">134,500</td><td>514,750</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:0;">
+        <div class="panel-head">
+          <h3>Outflow by project</h3>
+        </div>
+        <div class="panel-body">
+          <div class="breakdown-item">
+            <span class="breakdown-dot" style="background:var(--accent);"></span>
+            <span class="breakdown-label">Highline Substation</span>
+            <span class="breakdown-value">€ 812K</span>
+          </div>
+          <div class="breakdown-item">
+            <span class="breakdown-dot" style="background:#7F8DE0;"></span>
+            <span class="breakdown-label">Port Terminal Expansion</span>
+            <span class="breakdown-value">€ 644K</span>
+          </div>
+          <div class="breakdown-item">
+            <span class="breakdown-dot" style="background:#B4BAD8;"></span>
+            <span class="breakdown-label">North Pipeline Phase 2</span>
+            <span class="breakdown-value">€ 318K</span>
+          </div>
+          <div class="breakdown-item">
+            <span class="breakdown-dot" style="background:var(--line-strong);"></span>
+            <span class="breakdown-label">Other (4 projects)</span>
+            <span class="breakdown-value">€ 186K</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const ctx = document.getElementById('cashflowChart');
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06'],
+    datasets: [
+      { type:'bar', label:'Budget', data:[440000,440000,460000,460000,480000,480000], backgroundColor:'#E4E7EC', borderRadius:4, barPercentage:0.55, categoryPercentage:0.7 },
+      { type:'bar', label:'Inflow', data:[312400,389100,298750,421000,355600,402300], backgroundColor:'#1B7A4D', borderRadius:4, barPercentage:0.55, categoryPercentage:0.7 },
+      { type:'bar', label:'Outflow', data:[198200,241000,356400,288900,312100,267800], backgroundColor:'#C23A3A', borderRadius:4, barPercentage:0.55, categoryPercentage:0.7 },
+      { type:'line', label:'Balance', data:[114200,262300,204650,336750,380250,514750], borderColor:'#3651D4', backgroundColor:'#3651D4', pointRadius:3, pointBackgroundColor:'#3651D4', borderWidth:2.5, tension:0.3, yAxisID:'y1' }
+    ]
+  },
+  options: {
+    responsive:true,
+    interaction:{mode:'index', intersect:false},
+    plugins:{ legend:{display:false} },
+    scales:{
+      x:{ grid:{display:false}, ticks:{font:{family:'IBM Plex Mono', size:11}, color:'#8A92A1'} },
+      y:{ grid:{color:'#EEF0F3'}, ticks:{font:{family:'IBM Plex Mono', size:11}, color:'#8A92A1', callback:v=>'€'+(v/1000)+'k'} },
+      y1:{ position:'right', grid:{display:false}, ticks:{font:{family:'IBM Plex Mono', size:11}, color:'#8A92A1', callback:v=>'€'+(v/1000)+'k'} }
+    }
+  }
+});
+</script>
+</body>
+</html>
