@@ -92,13 +92,15 @@
     "docker volumes"
   ],
   "verification_summary": {
-    "docker_health": "pending — requires server deployment",
-    "backend_tests": "pending — expected: 39 passed, 4 skipped (unchanged backend)",
-    "phase8_smoke": "pending — expected: 3 passed (unchanged backend)",
-    "frontend_build": "pending — expected: success (compiled with warnings)",
+    "docker_health": "pass (pdss_demo — all services healthy)",
+    "backend_tests": "39 passed, 4 skipped, 38 warnings",
+    "phase8_smoke": "3 passed, 20 warnings",
+    "frontend_build": "success — 507.93 kB build/static/js/main.09e9df4a.js (compiled with warnings)",
+    "frontend_tests": "2 passed, 2 total",
     "backend_health_identity": "pass (version=1.0.0-rc1, product=Rivar, producer=Corbit)",
     "frontend_identity": "pass (identity unchanged in Phase 11C)",
-    "ui_redesign": "Phase 11C — Rivar design system applied to all pages"
+    "ui_redesign": "Phase 11C — Rivar design system applied to all pages",
+    "pre_deploy_backup": "/root/pdss_backups/pdss_demo_pre_phase11c_20260620_132335.sql (98K)"
   },
   "deployment_verification": {
     "target_path": "/root/pdss_demo",
