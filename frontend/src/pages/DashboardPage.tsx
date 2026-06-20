@@ -64,7 +64,9 @@ interface CashflowDataPoint {
 interface CashflowSummary {
   total_inflow: number;
   total_outflow: number;
+  total_budget?: number;
   net_position: number;
+  net_with_budget?: number;
   peak_balance: number;
   min_balance: number;
   final_balance: number;
@@ -127,6 +129,8 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     const fetch = async () => {
       try {
+        setLoading(true);
+        setError('');
         const projectIdsParam = selectedProjects.length > 0 ? selectedProjects.join(',') : undefined;
         const currView = currencyDisplayMode === 'unified' ? 'unified' : 'original';
         const [fRes, aRes] = await Promise.all([
@@ -155,8 +159,29 @@ export const DashboardPage: React.FC = () => {
         setLoading(false);
       }
     };
+    setPage(0);
     fetch();
   }, [selectedProjects, currencyDisplayMode]);
+
+  const comparisonSeries = useMemo(() => {
+    const forecastMap = new Map((forecastData?.time_series || []).map((row) => [row.month, row]));
+    const actualMap = new Map((actualData?.time_series || []).map((row) => [row.month, row]));
+    const months = Array.from(new Set([...forecastMap.keys(), ...actualMap.keys()])).sort();
+
+    return months.map((month) => {
+      const forecast = forecastMap.get(month);
+      const actual = actualMap.get(month);
+      return {
+        month,
+        forecast_inflow: forecast?.inflow || 0,
+        forecast_outflow: forecast?.outflow || 0,
+        actual_inflow: actual?.inflow || 0,
+        actual_outflow: actual?.outflow || 0,
+        forecast_balance: forecast?.cumulative_balance || 0,
+        actual_balance: actual?.cumulative_balance || 0,
+      };
+    });
+  }, [forecastData, actualData]);
 
   const formatCurrency = (value: number, code = 'IRR') => {
     const symbols: Record<string, string> = { USD: '$', EUR: '€', IRR: '﷼', GBP: '£', JPY: '¥' };
@@ -179,7 +204,7 @@ export const DashboardPage: React.FC = () => {
     } catch { setError('Failed to export cash flow data'); }
   };
 
-  if (loading) {
+  if (loading && !forecastData && !actualData) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress size={32} />
@@ -217,6 +242,16 @@ export const DashboardPage: React.FC = () => {
     forecastData;
 
   const isOriginalMulti = currencyDisplayMode === 'original' && Object.keys(currentByCurrency).length > 0;
+  const tableRows = viewMode === 'comparison'
+    ? comparisonSeries.map((row) => ({
+        month: row.month,
+        budget: 0,
+        inflow: row.actual_inflow,
+        outflow: row.actual_outflow,
+        net_flow: row.actual_inflow - row.actual_outflow,
+        cumulative_balance: row.actual_balance,
+      }))
+    : (currentData?.time_series || []);
 
   return (
     <Box>
@@ -241,6 +276,14 @@ export const DashboardPage: React.FC = () => {
 
       {/* View mode controls */}
       <RivarPanel sx={{ mb: 3 }}>
+        {loading && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+            <CircularProgress size={16} />
+            <Typography variant="caption" sx={{ color: rivarTokens.ink500 }}>
+              {t('common.loading') || 'Loading...'}
+            </Typography>
+          </Box>
+        )}
         <Box
           sx={{
             display: 'flex',
@@ -331,10 +374,10 @@ export const DashboardPage: React.FC = () => {
         ))
       ) : (
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.totalInflow')} value={formatCurrency(summary.total_inflow)} sub={t('dashboard.budgetRevenue')} icon={<TrendingUpIcon />} variant="good" /></Grid>
-          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.totalOutflow')} value={formatCurrency(summary.total_outflow)} sub={t('dashboard.payments')} icon={<TrendingDownIcon />} variant="risk" /></Grid>
-          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.netPosition')} value={formatCurrency(summary.net_position)} sub={summary.net_position >= 0 ? t('dashboard.positive') : 'Negative'} icon={<AccountBalanceIcon />} variant={summary.net_position >= 0 ? 'accent' : 'warn'} /></Grid>
-          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.finalBalance')} value={formatCurrency(summary.final_balance)} sub={`Peak: ${formatCurrency(summary.peak_balance)}`} icon={<TimelineIcon />} variant="default" /></Grid>
+          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.budget')} value={formatCurrency(summary.total_budget || 0)} sub={t('dashboard.budgetAllocation')} icon={<AccountBalanceIcon />} variant="accent" /></Grid>
+          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.totalInflow')} value={formatCurrency(summary.total_inflow)} sub={t('dashboard.revenueInflow')} icon={<TrendingUpIcon />} variant="good" /></Grid>
+          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.totalOutflow')} value={formatCurrency(summary.total_outflow)} sub={t('dashboard.paymentOutflow')} icon={<TrendingDownIcon />} variant="risk" /></Grid>
+          <Grid item xs={12} sm={6} md={3}><RivarMetricCard label={t('dashboard.netPosition')} value={formatCurrency(summary.net_position)} sub={`${t('dashboard.finalBalance')}: ${formatCurrency(summary.final_balance)}`} icon={<TimelineIcon />} variant={summary.net_position >= 0 ? 'good' : 'warn'} /></Grid>
         </Grid>
       )}
 
@@ -360,7 +403,7 @@ export const DashboardPage: React.FC = () => {
             </ResponsiveContainer>
           </RivarPanel>
         ))
-      ) : currentData && currentData.time_series && currentData.time_series.length > 0 ? (
+      ) : ((viewMode === 'comparison' && comparisonSeries.length > 0) || (currentData && currentData.time_series && currentData.time_series.length > 0)) ? (
         <>
           <RivarPanel
             title={viewMode === 'forecast' ? t('dashboard.forecastedMonthlyCashFlow') : viewMode === 'actual' ? t('dashboard.actualMonthlyCashFlow') : t('dashboard.cashFlowComparison')}
@@ -370,14 +413,7 @@ export const DashboardPage: React.FC = () => {
               <ComposedChart
                 data={
                   viewMode === 'comparison'
-                    ? (forecastData?.time_series || []).map((f, idx) => ({
-                        month: f.month,
-                        forecast_inflow: f.inflow,
-                        forecast_outflow: f.outflow,
-                        actual_inflow: actualData?.time_series[idx]?.inflow || 0,
-                        actual_outflow: actualData?.time_series[idx]?.outflow || 0,
-                        budget: f.budget,
-                      }))
+                    ? comparisonSeries
                     : currentData.time_series
                 }
                 margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
@@ -410,11 +446,7 @@ export const DashboardPage: React.FC = () => {
               <LineChart
                 data={
                   viewMode === 'comparison'
-                    ? (forecastData?.time_series || []).map((f, idx) => ({
-                        month: f.month,
-                        forecast_balance: f.cumulative_balance,
-                        actual_balance: actualData?.time_series[idx]?.cumulative_balance || 0,
-                      }))
+                    ? comparisonSeries
                     : currentData.time_series
                 }
                 margin={{ top: 10, right: 20, left: 10, bottom: 5 }}
@@ -493,7 +525,7 @@ export const DashboardPage: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {(currentData.time_series || [])
+                  {tableRows
                     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                     .map((row, idx) => (
                       <TableRow key={idx}>
@@ -511,7 +543,7 @@ export const DashboardPage: React.FC = () => {
             <TablePagination
               rowsPerPageOptions={[6, 12, 24]}
               component="div"
-              count={currentData.time_series?.length || 0}
+              count={tableRows.length}
               rowsPerPage={rowsPerPage}
               page={page}
               onPageChange={(_, p) => setPage(p)}

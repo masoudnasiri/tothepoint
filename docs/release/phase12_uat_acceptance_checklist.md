@@ -12,6 +12,10 @@
 - [ ] Projects visible
 - [ ] Project items visible
 - [ ] Sub-items visible
+- [ ] Budget is shown as budget/capacity (not customer inflow)
+- [ ] Before optimization/decision lock: forecast inflow/outflow remain zero (unless committed schedules exist)
+- [ ] Before finance events: actual inflow/outflow remain zero
+- [ ] Pre-decision project sales and unselected procurement options are excluded from forecast/actual
 
 ## صحت دیتاست
 

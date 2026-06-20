@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.models import (
     User, Project, ProjectAssignment, ProjectPhase, ProjectItem, 
     ProcurementOption, BudgetData, OptimizationResult, DecisionFactorWeight,
-    DeliveryOption, FinalizedDecision, ItemSubItem, ProjectItemSubItem, AuditLog
+    DeliveryOption, FinalizedDecision, CashflowEvent, ItemSubItem, ProjectItemSubItem, AuditLog
 )
 from app.schemas import (
     UserCreate, UserUpdate, ProjectCreate, ProjectUpdate,
@@ -848,9 +848,34 @@ async def get_project_summaries(db: AsyncSession, user_projects: Optional[List[i
         query = query.where(Project.id.in_(user_projects))
     
     projects = await db.execute(query)
+    project_rows = list(projects.scalars())
     summaries = []
+
+    project_ids = [project.id for project in project_rows]
+
+    # Keep project-page revenue aligned with dashboard forecast inflow by using
+    # active FORECAST INFLOW cashflow events as the primary source.
+    forecast_revenue_by_project: Dict[int, Decimal] = {}
+    if project_ids:
+        forecast_revenue_result = await db.execute(
+            select(
+                FinalizedDecision.project_id,
+                func.coalesce(func.sum(func.coalesce(CashflowEvent.amount_value, CashflowEvent.amount)), 0).label("forecast_revenue")
+            )
+            .join(CashflowEvent, CashflowEvent.related_decision_id == FinalizedDecision.id)
+            .where(FinalizedDecision.project_id.in_(project_ids))
+            .where(FinalizedDecision.status == "LOCKED")
+            .where(CashflowEvent.is_cancelled == False)
+            .where(CashflowEvent.event_type == "INFLOW")
+            .where(CashflowEvent.forecast_type == "FORECAST")
+            .group_by(FinalizedDecision.project_id)
+        )
+        forecast_revenue_by_project = {
+            int(row.project_id): Decimal(str(row.forecast_revenue or 0))
+            for row in forecast_revenue_result.fetchall()
+        }
     
-    for project in projects.scalars():
+    for project in project_rows:
         # Count items for this project
         item_count = await db.scalar(
             select(func.count(ProjectItem.id)).where(ProjectItem.project_id == project.id)
@@ -891,14 +916,19 @@ async def get_project_summaries(db: AsyncSession, user_projects: Optional[List[i
             if avg_cost:
                 estimated_cost += Decimal(str(avg_cost)) * item.quantity
             
-            # Get revenue from delivery options (invoice amounts)
+            # Legacy fallback revenue from delivery options (used only when the
+            # project has no generated forecast inflow cashflow events yet).
             if hasattr(item, 'delivery_options_rel') and item.delivery_options_rel:
-                # Use first delivery option's invoice amount
                 first_delivery = item.delivery_options_rel[0]
                 estimated_revenue += first_delivery.invoice_amount_per_unit * item.quantity
             elif avg_cost:
-                # Fallback: Use 20% markup on cost
                 estimated_revenue += Decimal(str(avg_cost)) * item.quantity * Decimal('1.20')
+
+        # Primary source: dashboard-aligned forecast inflow from cashflow events.
+        # Fallback: legacy per-item estimate when no forecast events are available.
+        project_forecast_revenue = forecast_revenue_by_project.get(project.id)
+        if project_forecast_revenue is not None:
+            estimated_revenue = project_forecast_revenue
         
         summaries.append({
             "id": project.id,

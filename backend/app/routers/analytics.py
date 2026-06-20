@@ -15,6 +15,7 @@ import numpy as np
 
 from app.database import get_db
 from app.auth import require_finance, require_admin, get_current_user, require_analytics_access
+from app.currency_conversion_service import CurrencyConversionService
 from app.models import (
     User, Project, ProjectItem, FinalizedDecision, 
     CashflowEvent, OptimizationResult, ProcurementOption
@@ -250,14 +251,27 @@ async def get_cashflow_forecast(
     Returns inflow/outflow projections and net balance
     """
     
-    # Get all cashflow events for this project
+    # Get all semantically valid cashflow events for this project.
+    # Forecast events are included only for LOCKED decisions.
     events_result = await db.execute(
         select(CashflowEvent)
         .join(FinalizedDecision, CashflowEvent.related_decision_id == FinalizedDecision.id)
         .where(FinalizedDecision.project_id == project_id)
         .where(CashflowEvent.is_cancelled == False)
+        .where(
+            or_(
+                CashflowEvent.forecast_type == 'ACTUAL',
+                and_(
+                    CashflowEvent.forecast_type == 'FORECAST',
+                    FinalizedDecision.status == 'LOCKED'
+                )
+            )
+        )
     )
     events = events_result.scalars().all()
+    currency_service = CurrencyConversionService(db)
+    conversion_warnings: List[Dict[str, Any]] = []
+    seen_currencies = set()
     
     # Group by MONTH (not exact date) for proper aggregation
     monthly_cashflow: Dict[str, Dict[str, Decimal]] = {}
@@ -272,7 +286,25 @@ async def get_cashflow_forecast(
                 'outflow_actual': Decimal('0'),
             }
         
-        amount = event.amount
+        amount = event.amount_value if event.amount_value is not None else event.amount
+        amount = Decimal(amount or 0)
+        currency = event.amount_currency or 'IRR'
+        seen_currencies.add(currency)
+
+        if currency_view == 'unified' and currency != 'IRR':
+            try:
+                amount = await currency_service.convert_to_base(amount, currency, event.event_date)
+            except Exception as e:
+                conversion_warnings.append({
+                    "type": "event_conversion_missing_rate",
+                    "event_id": event.id,
+                    "currency": currency,
+                    "date": str(event.event_date),
+                    "message": str(e),
+                })
+                # Do not silently mix unconverted values into unified forecast.
+                continue
+
         if event.event_type == 'INFLOW':
             if event.forecast_type == 'ACTUAL':
                 monthly_cashflow[month_key]['inflow_actual'] += amount
@@ -326,7 +358,7 @@ async def get_cashflow_forecast(
         if item['cumulative_balance'] < 0
     ]
     
-    return {
+    response = {
         'project_id': project_id,
         'forecast_data': forecast_data,
         'gap_intervals': gap_intervals,
@@ -340,6 +372,14 @@ async def get_cashflow_forecast(
             'financing_needed': abs(min((f['cumulative_balance'] for f in forecast_data), default=0)) if min((f['cumulative_balance'] for f in forecast_data), default=0) < 0 else 0,
         }
     }
+    if currency_view == 'original' and len(seen_currencies) > 1:
+        response['currency_warnings'] = [{
+            "type": "mixed_currency_original_view",
+            "message": "Original view contains multiple currencies. Use unified view for IRR-converted totals."
+        }]
+    if conversion_warnings:
+        response['conversion_warnings'] = conversion_warnings
+    return response
 
 
 @router.get("/risk/{project_id}")
@@ -607,15 +647,28 @@ async def get_portfolio_cashflow_forecast(
     """
     Generate cash flow forecast for entire portfolio
     """
-    # Get all cashflow events across all projects
+    # Get semantically valid cashflow events across all projects.
+    # Forecast events are included only for LOCKED decisions.
     events_result = await db.execute(
         select(CashflowEvent)
         .join(FinalizedDecision, CashflowEvent.related_decision_id == FinalizedDecision.id)
         .join(Project, FinalizedDecision.project_id == Project.id)
         .where(Project.is_active == True)
         .where(CashflowEvent.is_cancelled == False)
+        .where(
+            or_(
+                CashflowEvent.forecast_type == 'ACTUAL',
+                and_(
+                    CashflowEvent.forecast_type == 'FORECAST',
+                    FinalizedDecision.status == 'LOCKED'
+                )
+            )
+        )
     )
     events = events_result.scalars().all()
+    currency_service = CurrencyConversionService(db)
+    conversion_warnings: List[Dict[str, Any]] = []
+    seen_currencies = set()
     
     # Group by MONTH (not exact date) for proper aggregation
     monthly_cashflow: Dict[str, Dict[str, Decimal]] = {}
@@ -630,7 +683,24 @@ async def get_portfolio_cashflow_forecast(
                 'outflow_actual': Decimal('0'),
             }
         
-        amount = event.amount
+        amount = event.amount_value if event.amount_value is not None else event.amount
+        amount = Decimal(amount or 0)
+        currency = event.amount_currency or 'IRR'
+        seen_currencies.add(currency)
+
+        if currency_view == 'unified' and currency != 'IRR':
+            try:
+                amount = await currency_service.convert_to_base(amount, currency, event.event_date)
+            except Exception as e:
+                conversion_warnings.append({
+                    "type": "event_conversion_missing_rate",
+                    "event_id": event.id,
+                    "currency": currency,
+                    "date": str(event.event_date),
+                    "message": str(e),
+                })
+                continue
+
         if event.event_type.upper() == 'INFLOW':
             if event.forecast_type == 'FORECAST':
                 monthly_cashflow[month_key]['inflow_forecast'] += amount
@@ -674,7 +744,7 @@ async def get_portfolio_cashflow_forecast(
         if item['cumulative_balance'] < 0
     ]
     
-    return {
+    response = {
         'project_id': 'all',
         'forecast_data': forecast_data,
         'gap_intervals': gap_intervals,
@@ -688,6 +758,14 @@ async def get_portfolio_cashflow_forecast(
             'financing_needed': abs(min((f['cumulative_balance'] for f in forecast_data), default=0)) if min((f['cumulative_balance'] for f in forecast_data), default=0) < 0 else 0,
         }
     }
+    if currency_view == 'original' and len(seen_currencies) > 1:
+        response['currency_warnings'] = [{
+            "type": "mixed_currency_original_view",
+            "message": "Original view contains multiple currencies. Use unified view for IRR-converted totals."
+        }]
+    if conversion_warnings:
+        response['conversion_warnings'] = conversion_warnings
+    return response
 
 
 @router.get("/portfolio/risk")

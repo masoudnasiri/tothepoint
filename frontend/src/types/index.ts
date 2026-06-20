@@ -518,7 +518,9 @@ export interface CashFlowData {
   dates: string[];
   inflow: number[];
   outflow: number[];
+  budget?: number[];
   net_flow: number[];
+  capacity_flow?: number[];
   cumulative_balance: number[];
 }
 

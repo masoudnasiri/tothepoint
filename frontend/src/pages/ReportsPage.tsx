@@ -226,12 +226,10 @@ export const ReportsPage: React.FC = () => {
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return `${new Intl.NumberFormat('en-US', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
-    }).format(value);
+    }).format(value)} ﷼`;
   };
 
   const formatNumber = (value: number, decimals: number = 2) => {
@@ -622,6 +620,7 @@ export const ReportsPage: React.FC = () => {
                       date,
                       inflow: reportsData.financial_summary.cash_flow.inflow[i],
                       outflow: reportsData.financial_summary.cash_flow.outflow[i],
+                      budget: reportsData.financial_summary.cash_flow.budget?.[i] || 0,
                       net_flow: reportsData.financial_summary.cash_flow.net_flow[i],
                       cumulative: reportsData.financial_summary.cash_flow.cumulative_balance[i],
                     }))}
@@ -631,6 +630,7 @@ export const ReportsPage: React.FC = () => {
                     <YAxis />
                     <Tooltip formatter={(value: any) => formatCurrency(value)} labelFormatter={formatDateLabel} />
                     <Legend />
+                    <Bar dataKey="budget" fill="#9c27b0" name={t('dashboard.budget')} />
                     <Bar dataKey="inflow" fill="#4caf50" name={t('reports.cashInflow')} />
                     <Bar dataKey="outflow" fill="#f44336" name={t('reports.cashOutflow')} />
                     <Line

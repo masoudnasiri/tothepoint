@@ -16,7 +16,8 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 from app.database import get_db
 from app.auth import get_current_user, get_user_projects, require_analytics_access
-from app.models import User, FinalizedDecision, CashflowEvent, Project
+from app.models import User, FinalizedDecision, CashflowEvent, Project, BudgetData
+from app.currency_conversion_service import CurrencyConversionService
 
 router = APIRouter(prefix="/reports", tags=["Reports & Analytics"])
 
@@ -43,6 +44,8 @@ async def aggregate_financial_summary(
     supplier_names: Optional[List[str]]
 ) -> Dict[str, Any]:
     """Aggregate financial summary data: cash flow and budget vs actuals."""
+    currency_service = CurrencyConversionService(db)
+    conversion_warnings: List[Dict[str, Any]] = []
     
     # Base query for finalized decisions
     decisions_query = select(FinalizedDecision).options(
@@ -83,47 +86,103 @@ async def aggregate_financial_summary(
     cash_flow_data = {}
     
     # Get cashflow events for both inflows and outflows
-    cashflow_query = select(CashflowEvent).options(
-        selectinload(CashflowEvent.related_decision)
-    ).where(
-        CashflowEvent.forecast_type == 'ACTUAL',
-        CashflowEvent.is_cancelled == False
+    cashflow_query = (
+        select(CashflowEvent)
+        .options(selectinload(CashflowEvent.related_decision))
+        .join(FinalizedDecision, CashflowEvent.related_decision_id == FinalizedDecision.id)
+        .where(
+            CashflowEvent.forecast_type == 'ACTUAL',
+            CashflowEvent.is_cancelled == False,
+            FinalizedDecision.status == 'LOCKED',
+        )
     )
     
     if start_date:
         cashflow_query = cashflow_query.where(CashflowEvent.event_date >= start_date)
     if end_date:
         cashflow_query = cashflow_query.where(CashflowEvent.event_date <= end_date)
+    if project_ids:
+        cashflow_query = cashflow_query.where(FinalizedDecision.project_id.in_(project_ids))
     
     result = await db.execute(cashflow_query)
     all_cashflow_events = result.scalars().all()
     
-    # Filter by project if needed
-    if project_ids:
-        cashflow_events = [e for e in all_cashflow_events if e.related_decision and e.related_decision.project_id in project_ids]
-    else:
-        cashflow_events = all_cashflow_events
+    cashflow_events = all_cashflow_events
     
     for event in cashflow_events:
         event_date = event.event_date
         if event_date not in cash_flow_data:
-            cash_flow_data[event_date] = {'inflow': 0, 'outflow': 0}
+            cash_flow_data[event_date] = {'inflow': 0, 'outflow': 0, 'budget': 0}
+
+        amount = Decimal(event.amount_value if event.amount_value is not None else event.amount or 0)
+        currency = event.amount_currency or 'IRR'
+        try:
+            amount_irr = (
+                await currency_service.convert_to_base(amount, currency, event.event_date)
+                if currency != 'IRR'
+                else amount
+            )
+        except Exception as e:
+            conversion_warnings.append({
+                "type": "event_conversion_missing_rate",
+                "event_id": event.id,
+                "currency": currency,
+                "date": str(event.event_date),
+                "message": str(e),
+            })
+            continue
         
         if event.event_type == 'INFLOW':
-            cash_flow_data[event_date]['inflow'] += float(event.amount_value or 0)
+            cash_flow_data[event_date]['inflow'] += float(amount_irr)
         elif event.event_type == 'OUTFLOW':
-            cash_flow_data[event_date]['outflow'] += float(event.amount_value or 0)
+            cash_flow_data[event_date]['outflow'] += float(amount_irr)
+
+    # Add monthly budgets as capacity (separate from inflow)
+    budget_query = select(BudgetData)
+    if start_date:
+        budget_query = budget_query.where(BudgetData.budget_date >= start_date)
+    if end_date:
+        budget_query = budget_query.where(BudgetData.budget_date <= end_date)
+    budget_result = await db.execute(budget_query.order_by(BudgetData.budget_date))
+    budgets = budget_result.scalars().all()
+
+    for budget in budgets:
+        budget_date = budget.budget_date
+        if budget_date not in cash_flow_data:
+            cash_flow_data[budget_date] = {'inflow': 0, 'outflow': 0, 'budget': 0}
+
+        total_budget_irr = Decimal(budget.available_budget or 0)
+        if budget.multi_currency_budget:
+            for currency_code, amount in budget.multi_currency_budget.items():
+                amount_dec = Decimal(str(amount))
+                if currency_code == 'IRR':
+                    total_budget_irr += amount_dec
+                    continue
+                try:
+                    total_budget_irr += await currency_service.convert_to_base(
+                        amount_dec, currency_code, budget.budget_date
+                    )
+                except Exception as e:
+                    conversion_warnings.append({
+                        "type": "budget_conversion_missing_rate",
+                        "budget_date": str(budget.budget_date),
+                        "currency": currency_code,
+                        "message": str(e),
+                    })
+        cash_flow_data[budget_date]['budget'] += float(total_budget_irr)
     
     # Sort by date and calculate cumulative
     sorted_dates = sorted(cash_flow_data.keys())
     dates_str = [d.isoformat() for d in sorted_dates]
     inflows = [cash_flow_data[d]['inflow'] for d in sorted_dates]
     outflows = [cash_flow_data[d]['outflow'] for d in sorted_dates]
+    budgets_by_date = [cash_flow_data[d].get('budget', 0) for d in sorted_dates]
     net_flows = [inflows[i] - outflows[i] for i in range(len(inflows))]
+    capacity_flows = [inflows[i] + budgets_by_date[i] - outflows[i] for i in range(len(inflows))]
     
     cumulative_balance = []
     balance = 0
-    for net in net_flows:
+    for net in capacity_flows:
         balance += net
         cumulative_balance.append(balance)
     
@@ -140,7 +199,25 @@ async def aggregate_financial_summary(
                 'planned_cost': 0,
                 'actual_cost': 0
             }
-        project_data[project_id]['planned_cost'] += float(decision.final_cost or 0)
+        planned_amount = Decimal(decision.final_cost_amount or decision.final_cost or 0)
+        planned_currency = decision.final_cost_currency or 'IRR'
+        planned_date = decision.purchase_date or date.today()
+        try:
+            planned_irr = (
+                await currency_service.convert_to_base(planned_amount, planned_currency, planned_date)
+                if planned_currency != 'IRR'
+                else planned_amount
+            )
+        except Exception as e:
+            conversion_warnings.append({
+                "type": "planned_cost_conversion_missing_rate",
+                "decision_id": decision.id,
+                "currency": planned_currency,
+                "date": str(planned_date),
+                "message": str(e),
+            })
+            planned_irr = Decimal(0)
+        project_data[project_id]['planned_cost'] += float(planned_irr)
         # Note: actual_cost will be calculated from cashflow events below
     
     # Calculate actual costs from cashflow events
@@ -148,7 +225,23 @@ async def aggregate_financial_summary(
         if event.event_type == 'OUTFLOW' and event.related_decision:
             project_id = event.related_decision.project_id
             if project_id in project_data:
-                project_data[project_id]['actual_cost'] += float(event.amount_value or 0)
+                amount = Decimal(event.amount_value if event.amount_value is not None else event.amount or 0)
+                currency = event.amount_currency or 'IRR'
+                try:
+                    amount_irr = (
+                        await currency_service.convert_to_base(amount, currency, event.event_date)
+                        if currency != 'IRR'
+                        else amount
+                    )
+                    project_data[project_id]['actual_cost'] += float(amount_irr)
+                except Exception as e:
+                    conversion_warnings.append({
+                        "type": "actual_cost_conversion_missing_rate",
+                        "event_id": event.id,
+                        "currency": currency,
+                        "date": str(event.event_date),
+                        "message": str(e),
+                    })
     
     total_planned = 0
     total_actual = 0
@@ -187,10 +280,13 @@ async def aggregate_financial_summary(
             'dates': dates_str,
             'inflow': [round(x, 2) for x in inflows],
             'outflow': [round(x, 2) for x in outflows],
+            'budget': [round(x, 2) for x in budgets_by_date],
             'net_flow': [round(x, 2) for x in net_flows],
+            'capacity_flow': [round(x, 2) for x in capacity_flows],
             'cumulative_balance': [round(x, 2) for x in cumulative_balance]
         },
-        'budget_vs_actual': budget_vs_actual
+        'budget_vs_actual': budget_vs_actual,
+        'conversion_warnings': conversion_warnings,
     }
 
 

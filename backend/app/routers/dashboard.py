@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from datetime import date, datetime
 from decimal import Decimal
 from collections import defaultdict
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from io import BytesIO
 import pandas as pd
 from app.database import get_db
@@ -20,6 +20,32 @@ from app.currency_conversion_service import CurrencyConversionService
 from app.cashflow_sync_service import CashflowSyncService
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+def _locked_decision_ids_subquery():
+    """Reusable subquery for committed (LOCKED) decisions."""
+    return select(FinalizedDecision.id).where(FinalizedDecision.status == "LOCKED")
+
+
+def _cashflow_scope_condition(normalized_forecast_type: Optional[str]):
+    """
+    Enforce lifecycle semantics:
+    - FORECAST: only events tied to LOCKED decisions
+    - ACTUAL: actual operational events (decision-linked in current schema)
+    - None/all: ACTUAL + committed FORECAST
+    """
+    locked_ids = _locked_decision_ids_subquery()
+    if normalized_forecast_type == "FORECAST":
+        return CashflowEvent.related_decision_id.in_(locked_ids)
+    if normalized_forecast_type == "ACTUAL":
+        return CashflowEvent.forecast_type == "ACTUAL"
+    return or_(
+        CashflowEvent.forecast_type == "ACTUAL",
+        and_(
+            CashflowEvent.forecast_type == "FORECAST",
+            CashflowEvent.related_decision_id.in_(locked_ids),
+        ),
+    )
 
 
 @router.get("/cashflow")
@@ -44,6 +70,9 @@ async def get_cashflow_analysis(
     """
     print(f"DEBUG: Cashflow endpoint called with currency_view='{currency_view}'")
     try:
+        normalized_forecast_type = forecast_type.upper() if forecast_type else None
+        conversion_warnings: List[Dict[str, str]] = []
+
         # Build query for cashflow events (exclude cancelled events)
         query = select(CashflowEvent).where(CashflowEvent.is_cancelled == False)
         
@@ -88,8 +117,11 @@ async def get_cashflow_analysis(
         # PMO users can see all data (like admin and finance)
         
         # Filter by forecast type if specified
-        if forecast_type:
-            query = query.where(CashflowEvent.forecast_type == forecast_type)
+        if normalized_forecast_type:
+            query = query.where(CashflowEvent.forecast_type == normalized_forecast_type)
+
+        # Enforce lifecycle-based scope for forecast/actual semantics
+        query = query.where(_cashflow_scope_condition(normalized_forecast_type))
         
         if start_date:
             query = query.where(CashflowEvent.event_date >= date.fromisoformat(start_date))
@@ -122,8 +154,15 @@ async def get_cashflow_analysis(
                     else:
                         amount_in_irr = amount
                 except Exception as e:
-                    # If conversion fails, use original amount (assume it's in IRR)
-                    amount_in_irr = amount
+                    conversion_warnings.append({
+                        "type": "event_conversion_missing_rate",
+                        "event_id": str(event.id),
+                        "currency": currency,
+                        "date": str(event.event_date),
+                        "message": str(e),
+                    })
+                    # Do not silently include unconverted values in unified totals.
+                    continue
                 
                 if event.event_type.upper() == "INFLOW":
                     monthly_data[month_key]["inflow"] += amount_in_irr
@@ -151,7 +190,9 @@ async def get_cashflow_analysis(
         
         # PM and Procurement users should NOT see budget data (restricted)
         budgets = []
-        if current_user.role in ["finance", "admin"]:
+        # Keep forecast budgets visible in dashboard (project budgets are portfolio-level).
+        include_budget_in_series = normalized_forecast_type != "ACTUAL"
+        if current_user.role in ["finance", "admin"] and include_budget_in_series:
             # Get budget data for finance/admin only
             budget_query = select(BudgetData)
             if start_date:
@@ -188,9 +229,14 @@ async def get_cashflow_analysis(
                                 else:
                                     total_budget_irr += Decimal(str(curr_amount))
                             except Exception as e:
-                                # If conversion fails, skip this currency
-                                print(f"DEBUG: Conversion failed for {curr_code}: {str(e)}")
-                                pass
+                                conversion_warnings.append({
+                                    "type": "budget_conversion_missing_rate",
+                                    "budget_date": str(budget.budget_date),
+                                    "currency": curr_code,
+                                    "message": str(e),
+                                })
+                                # Skip this currency instead of silently mixing values.
+                                continue
                     
                     print(f"DEBUG: Total budget for {month_key}: {total_budget_irr}")
                     # Sum budgets for the same month instead of overwriting
@@ -220,6 +266,7 @@ async def get_cashflow_analysis(
                 
                 total_inflow = Decimal(0)
                 total_outflow = Decimal(0)
+                total_budget = Decimal(0)
                 
                 for month in sorted_months:
                     data = currency_monthly_data[month]
@@ -227,11 +274,13 @@ async def get_cashflow_analysis(
                     outflow = data["outflow"]
                     budget = Decimal(data.get("budget", 0))
                     
-                    net_flow = inflow + budget - outflow
-                    cumulative_balance += net_flow
+                    net_flow = inflow - outflow
+                    capacity_flow = inflow + budget - outflow
+                    cumulative_balance += capacity_flow
                     
-                    total_inflow += inflow + budget
+                    total_inflow += inflow
                     total_outflow += outflow
+                    total_budget += budget
                     
                     result_data.append({
                         "month": month,
@@ -239,13 +288,16 @@ async def get_cashflow_analysis(
                         "outflow": float(outflow),
                         "budget": float(budget),
                         "net_flow": float(net_flow),
+                        "capacity_flow": float(capacity_flow),
                         "cumulative_balance": float(cumulative_balance)
                     })
                 
                 summary = {
                     "total_inflow": float(total_inflow),
                     "total_outflow": float(total_outflow),
+                    "total_budget": float(total_budget),
                     "net_position": float(total_inflow - total_outflow),
+                    "net_with_budget": float(total_budget + total_inflow - total_outflow),
                     "peak_balance": max([d["cumulative_balance"] for d in result_data]) if result_data else 0,
                     "min_balance": min([d["cumulative_balance"] for d in result_data]) if result_data else 0,
                     "final_balance": float(cumulative_balance)
@@ -260,7 +312,8 @@ async def get_cashflow_analysis(
             print(f"DEBUG: Returning multi-currency response with {len(response_by_currency)} currencies")
             return {
                 "view_mode": "original",
-                "currencies": response_by_currency
+                "currencies": response_by_currency,
+                "conversion_warnings": conversion_warnings,
             }
         else:
             # Unified response: Single currency (IRR)
@@ -270,6 +323,7 @@ async def get_cashflow_analysis(
             
             total_inflow = Decimal(0)
             total_outflow = Decimal(0)
+            total_budget = Decimal(0)
             
             for month in sorted_months:
                 data = monthly_data[month]
@@ -277,11 +331,13 @@ async def get_cashflow_analysis(
                 outflow = data["outflow"]
                 budget = Decimal(data.get("budget", 0))
                 
-                net_flow = inflow + budget - outflow
-                cumulative_balance += net_flow
+                net_flow = inflow - outflow
+                capacity_flow = inflow + budget - outflow
+                cumulative_balance += capacity_flow
                 
-                total_inflow += inflow + budget
+                total_inflow += inflow
                 total_outflow += outflow
+                total_budget += budget
                 
                 result_data.append({
                     "month": month,
@@ -289,6 +345,7 @@ async def get_cashflow_analysis(
                     "outflow": float(outflow),
                     "budget": float(budget),
                     "net_flow": float(net_flow),
+                    "capacity_flow": float(capacity_flow),
                     "cumulative_balance": float(cumulative_balance)
                 })
             
@@ -296,7 +353,9 @@ async def get_cashflow_analysis(
             summary = {
                 "total_inflow": float(total_inflow),
                 "total_outflow": float(total_outflow),
+                "total_budget": float(total_budget),
                 "net_position": float(total_inflow - total_outflow),
+                "net_with_budget": float(total_budget + total_inflow - total_outflow),
                 "peak_balance": max([d["cumulative_balance"] for d in result_data]) if result_data else 0,
                 "min_balance": min([d["cumulative_balance"] for d in result_data]) if result_data else 0,
                 "final_balance": float(cumulative_balance)
@@ -306,7 +365,8 @@ async def get_cashflow_analysis(
                 "view_mode": "unified",
                 "time_series": result_data,
                 "summary": summary,
-                "period_count": len(result_data)
+                "period_count": len(result_data),
+                "conversion_warnings": conversion_warnings,
             }
         
     except Exception as e:
@@ -328,6 +388,8 @@ async def get_dashboard_summary(
     Finance/Admin users: See all data
     """
     try:
+        scope_condition = _cashflow_scope_condition(None)
+
         # PMO users see all data (like admin/finance) - no restrictions
         # PM users only see INFLOW events from ASSIGNED projects
         if current_user.role == "pm":
@@ -344,6 +406,7 @@ async def get_dashboard_summary(
                     and_(
                         CashflowEvent.event_type == "INFLOW",
                         CashflowEvent.is_cancelled == False,
+                        scope_condition,
                         FinalizedDecision.project_id.in_(assigned_projects)
                     )
                 )
@@ -351,13 +414,14 @@ async def get_dashboard_summary(
                 total_events = events_result.scalar()
                 
                 # Sum only inflows from assigned projects
-                inflow_query = select(func.sum(CashflowEvent.amount)).select_from(CashflowEvent).join(
+                inflow_query = select(func.sum(func.coalesce(CashflowEvent.amount_value, CashflowEvent.amount))).select_from(CashflowEvent).join(
                     FinalizedDecision,
                     CashflowEvent.related_decision_id == FinalizedDecision.id
                 ).where(
                     and_(
                         CashflowEvent.event_type == "INFLOW",
                         CashflowEvent.is_cancelled == False,
+                        scope_condition,
                         FinalizedDecision.project_id.in_(assigned_projects)
                     )
                 )
@@ -381,14 +445,22 @@ async def get_dashboard_summary(
         elif current_user.role == "procurement":
             # Count only outflow events
             events_count_query = select(func.count(CashflowEvent.id)).where(
-                and_(CashflowEvent.event_type == "OUTFLOW", CashflowEvent.is_cancelled == False)
+                and_(
+                    CashflowEvent.event_type == "OUTFLOW",
+                    CashflowEvent.is_cancelled == False,
+                    scope_condition,
+                )
             )
             events_result = await db.execute(events_count_query)
             total_events = events_result.scalar()
             
             # Sum only outflows
-            outflow_query = select(func.sum(CashflowEvent.amount)).where(
-                and_(CashflowEvent.event_type == "OUTFLOW", CashflowEvent.is_cancelled == False)
+            outflow_query = select(func.sum(func.coalesce(CashflowEvent.amount_value, CashflowEvent.amount))).where(
+                and_(
+                    CashflowEvent.event_type == "OUTFLOW",
+                    CashflowEvent.is_cancelled == False,
+                    scope_condition,
+                )
             )
             outflow_result = await db.execute(outflow_query)
             total_outflow = outflow_result.scalar() or Decimal(0)
@@ -404,20 +476,30 @@ async def get_dashboard_summary(
         
         # Finance/Admin users see everything
         # Count total cashflow events (exclude cancelled)
-        events_count_query = select(func.count(CashflowEvent.id)).where(CashflowEvent.is_cancelled == False)
+        events_count_query = select(func.count(CashflowEvent.id)).where(
+            and_(CashflowEvent.is_cancelled == False, scope_condition)
+        )
         events_result = await db.execute(events_count_query)
         total_events = events_result.scalar()
         
         # Sum total inflows (exclude cancelled)
-        inflow_query = select(func.sum(CashflowEvent.amount)).where(
-            and_(CashflowEvent.event_type == "INFLOW", CashflowEvent.is_cancelled == False)
+        inflow_query = select(func.sum(func.coalesce(CashflowEvent.amount_value, CashflowEvent.amount))).where(
+            and_(
+                CashflowEvent.event_type == "INFLOW",
+                CashflowEvent.is_cancelled == False,
+                scope_condition,
+            )
         )
         inflow_result = await db.execute(inflow_query)
         total_inflow = inflow_result.scalar() or Decimal(0)
         
         # Sum total outflows (exclude cancelled)
-        outflow_query = select(func.sum(CashflowEvent.amount)).where(
-            and_(CashflowEvent.event_type == "OUTFLOW", CashflowEvent.is_cancelled == False)
+        outflow_query = select(func.sum(func.coalesce(CashflowEvent.amount_value, CashflowEvent.amount))).where(
+            and_(
+                CashflowEvent.event_type == "OUTFLOW",
+                CashflowEvent.is_cancelled == False,
+                scope_condition,
+            )
         )
         outflow_result = await db.execute(outflow_query)
         total_outflow = outflow_result.scalar() or Decimal(0)
@@ -432,7 +514,8 @@ async def get_dashboard_summary(
             "total_budget": float(total_budget),
             "total_inflow": float(total_inflow),
             "total_outflow": float(total_outflow),
-            "net_position": float(total_budget + total_inflow - total_outflow)
+            "net_position": float(total_inflow - total_outflow),
+            "net_with_budget": float(total_budget + total_inflow - total_outflow),
         }
         
     except Exception as e:
@@ -453,7 +536,12 @@ async def export_cashflow_to_excel(
     try:
         # Query cashflow events
         # ✅ FIX: Exclude cancelled events from export
-        query = select(CashflowEvent).where(CashflowEvent.is_cancelled == False)
+        query = select(CashflowEvent).where(
+            and_(
+                CashflowEvent.is_cancelled == False,
+                _cashflow_scope_condition(None),
+            )
+        )
         
         if start_date:
             query = query.where(CashflowEvent.event_date >= date.fromisoformat(start_date))
