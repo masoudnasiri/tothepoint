@@ -1,0 +1,67 @@
+{
+  "phase": "12",
+  "title": "Post-Redesign Business UAT Dataset and Readiness",
+  "status": "closed",
+  "prefix": "UAT1405_",
+  "environment": {
+    "target_path": "/root/pdss_demo",
+    "compose_project": "pdss_demo",
+    "is_production": false
+  },
+  "identity": {
+    "product": "Rivar",
+    "producer": "Corbit",
+    "version": "1.0.0-rc1"
+  },
+  "safety": {
+    "backup_file": "/root/pdss_backups/pdss_demo_pre_phase12_20260620_151515.sql",
+    "users_preserved": true,
+    "roles_auth_preserved": true,
+    "docker_volumes_wiped": false,
+    "docker_compose_down_v_used": false
+  },
+  "dataset_counts": {
+    "master_item_count": 100,
+    "sub_item_count": 497,
+    "project_count": 10,
+    "project_item_count": 500,
+    "finalized_count": 350,
+    "sent_to_procurement_count": 350,
+    "non_finalized_count": 150,
+    "supplier_domestic_count": 20,
+    "supplier_foreign_count": 20,
+    "approved_supplier_count": 40,
+    "currencies_available": ["IRR", "USD", "EUR", "AED", "CNY", "TRY"],
+    "budget_months_count": 9,
+    "procurement_item_count": 245,
+    "procurement_package_count": 327,
+    "procurement_option_count": 327
+  },
+  "coverage_summary": {
+    "fully_covered": 164,
+    "partially_covered": 81,
+    "uncovered": 0
+  },
+  "delivery_summary": {
+    "early": 61,
+    "aligned": 123,
+    "late": 61
+  },
+  "optimization": {
+    "ran_optimization": false,
+    "finalized_decision_rows_present": 0
+  },
+  "jalali_conversion": {
+    "method": "jalaali algorithm implementation in dataset generator",
+    "range": "Tir 1405 to Esfand 1405"
+  },
+  "quality_gates": {
+    "docker_compose_ps": "pass",
+    "health_endpoint": "pass",
+    "admin_login_check": "pass (admin/admin123)",
+    "backend_tests": "pass (39 passed, 4 skipped)",
+    "phase8_smoke_tests": "pass (3 passed)",
+    "frontend_build": "pass with existing lint warnings",
+    "dataset_validate_mode": "pass"
+  }
+}
