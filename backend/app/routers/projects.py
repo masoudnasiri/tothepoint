@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.auth import get_current_user, require_admin, require_pmo, get_user_projects
 from app.crud import (
@@ -217,7 +218,10 @@ async def list_packages_by_project(
             detail="Access denied to this project"
         )
     
-    query = select(ProcurementPackage).join(ProjectItem).where(
+    query = select(ProcurementPackage).options(
+        selectinload(ProcurementPackage.supplier),
+        selectinload(ProcurementPackage.subitems),
+    ).join(ProjectItem).where(
         ProjectItem.project_id == project_id
     )
     
