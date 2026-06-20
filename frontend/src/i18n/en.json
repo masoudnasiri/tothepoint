@@ -2117,7 +2117,12 @@
       "pst": "PST",
       "jst": "JST",
       "aest": "AEST",
-      "utc": "UTC"
+      "utc": "UTC",
+      "supplier": "Supplier",
+      "isPrimary": "Primary",
+      "allSuppliers": "All Suppliers",
+      "searchContacts": "Search contacts...",
+      "contactFilter": "Filter by supplier"
     }
 ,
   "auditLogsPage": {

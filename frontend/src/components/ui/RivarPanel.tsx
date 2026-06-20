@@ -25,7 +25,7 @@ export const RivarPanel: React.FC<RivarPanelProps> = ({
       border: `1px solid ${rivarTokens.line}`,
       borderRadius: rivarTokens.radiusLg,
       boxShadow: rivarTokens.shadowCard,
-      overflow: 'hidden',
+      // do NOT set overflow:hidden — it would clip tables and action columns
       ...sx,
     }}
   >

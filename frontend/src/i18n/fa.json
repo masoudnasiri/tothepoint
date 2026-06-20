@@ -2097,7 +2097,12 @@
       "pst": "PST",
       "jst": "JST",
       "aest": "AEST",
-      "utc": "UTC"
+      "utc": "UTC",
+      "supplier": "تامین‌کننده",
+      "isPrimary": "اصلی",
+      "allSuppliers": "همه تامین‌کنندگان",
+      "searchContacts": "جستجوی مخاطبین...",
+      "contactFilter": "فیلتر بر اساس تامین‌کننده"
     }
 ,
   "auditLogsPage": {
