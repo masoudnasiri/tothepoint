@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Container,
   Paper,
@@ -11,15 +11,29 @@ import {
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { BRAND_NAME, getRuntimeVersion, PRODUCT_NAME } from '../utils/appIdentity.ts';
 
 export const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [appVersion, setAppVersion] = useState<string>('loading...');
   
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let mounted = true;
+    getRuntimeVersion().then((version) => {
+      if (mounted) {
+        setAppVersion(version);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,18 +72,24 @@ export const LoginPage: React.FC = () => {
         >
           <Box
             component="img"
-            src="/InoTech_b-F.png"
-            alt="InoTech Logo"
+            src="/rivar.png"
+            alt="Rivar logo"
             sx={{
-              width: 180,
+              width: 140,
               height: 'auto',
-              mb: 3,
+              mb: 2,
             }}
           />
           <Typography component="h1" variant="h4" gutterBottom>
-            Procurement DSS
+            {PRODUCT_NAME}
           </Typography>
-          <Typography component="h2" variant="h6" color="text.secondary" gutterBottom>
+          <Typography component="h2" variant="subtitle1" color="text.secondary" gutterBottom>
+            {BRAND_NAME}
+          </Typography>
+          <Typography component="h3" variant="body2" color="text.secondary" gutterBottom>
+            Version {appVersion}
+          </Typography>
+          <Typography component="h3" variant="h6" color="text.secondary" gutterBottom>
             Sign In
           </Typography>
           
@@ -119,7 +139,7 @@ export const LoginPage: React.FC = () => {
 
           <Box sx={{ mt: 3, p: 2, bgcolor: 'primary.lighter', borderRadius: 1, width: '100%', border: '1px solid', borderColor: 'primary.main' }}>
             <Typography variant="body2" color="primary.dark" gutterBottom>
-              <strong>Welcome to InoTech Procurement DSS (SupplyWise)</strong>
+              <strong>Welcome to {BRAND_NAME}</strong>
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Please sign in to continue.

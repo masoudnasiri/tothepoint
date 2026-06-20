@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { useTranslation } from 'react-i18next';
@@ -24,6 +24,7 @@ import { AnalyticsDashboardPage } from './pages/AnalyticsDashboardPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 import AuditLogsPage from './pages/AuditLogsPage.tsx';
 import LocalizedDateProvider from './components/LocalizedDateProvider.tsx';
+import { PRODUCER_NAME, PRODUCT_NAME } from './utils/appIdentity.ts';
 
 // Create theme with dynamic font support based on language
 const createAppTheme = (isPersian: boolean = false) => createTheme({
@@ -221,6 +222,10 @@ function AppContent() {
 }
 
 function App() {
+  useEffect(() => {
+    document.title = `${PRODUCT_NAME} | ${PRODUCER_NAME}`;
+  }, []);
+
   return <AppContent />;
 }
 

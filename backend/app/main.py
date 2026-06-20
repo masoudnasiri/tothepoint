@@ -10,6 +10,7 @@ import logging
 
 from app.config import settings
 from app.database import init_db
+from app.app_metadata import APP_VERSION, PRODUCER_NAME, PRODUCT_NAME
 from app.routers import auth, users, projects, items, items_master, procurement, procurement_plan, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies, invoice_payment_simple, supplier_payments, brs_api, suppliers, audit, config, packages  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
 
 # Configure logging
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan events"""
     # Startup
-    logger.info("Starting up Procurement DSS API...")
+    logger.info(f"Starting up {PRODUCT_NAME} API...")
     await init_db()
     logger.info("Database initialized successfully")
     
@@ -36,14 +37,14 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
-    logger.info("Shutting down Procurement DSS API...")
+    logger.info(f"Shutting down {PRODUCT_NAME} API...")
 
 
 # Create FastAPI application
 app = FastAPI(
-    title="Procurement DSS API",
-    description="Project Procurement & Financial Optimization Decision Support System",
-    version="1.0.0",
+    title=f"{PRODUCT_NAME} API",
+    description=f"{PRODUCT_NAME} by {PRODUCER_NAME} - Project Procurement & Financial Optimization Decision Support System",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 
@@ -93,7 +94,12 @@ async def global_exception_handler(request, exc):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "version": "1.0.0"}
+    return {
+        "status": "healthy",
+        "version": APP_VERSION,
+        "product": PRODUCT_NAME,
+        "producer": PRODUCER_NAME,
+    }
 
 
 # Include routers
@@ -130,8 +136,9 @@ app.include_router(packages.router)
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "Procurement DSS API",
-        "version": "1.0.0",
+        "message": f"{PRODUCT_NAME} API",
+        "producer": PRODUCER_NAME,
+        "version": APP_VERSION,
         "docs": "/docs",
         "health": "/health"
     }

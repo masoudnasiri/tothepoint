@@ -48,7 +48,7 @@
     "suppliers": "Suppliers",
     "auditlog": "Audit Logs",
     "auditLogs": "Audit Logs",
-    "procurementDSS": "Procurement DSS"
+    "procurementDSS": "Rivar"
   },
   "auth": {
     "login": "Login",
@@ -57,7 +57,7 @@
     "password": "Password",
     "role": "Role",
     "signIn": "Sign In",
-    "welcome": "Welcome to Procurement DSS",
+    "welcome": "Welcome to Rivar by Corbit",
     "incorrectCredentials": "Incorrect username or password",
     "sessionExpired": "Your session has expired. Please log in again."
   },

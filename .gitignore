@@ -73,6 +73,7 @@ Desktop.ini
 *.db
 *.sqlite
 *.sqlite3
+database_backups/
 postgres_data/
 *.dump
 database_backups/*.sql

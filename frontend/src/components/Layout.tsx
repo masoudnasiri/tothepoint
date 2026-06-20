@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AppBar,
   Box,
@@ -42,6 +42,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
+import { BRAND_NAME, getRuntimeVersion, PRODUCT_NAME } from '../utils/appIdentity.ts';
 
 const drawerWidth = 240;
 
@@ -92,6 +93,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
+  const [appVersion, setAppVersion] = useState<string>('loading...');
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -99,6 +101,19 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   
   // Check if current language is RTL
   const isRTL = i18n.language === 'fa';
+
+  useEffect(() => {
+    let mounted = true;
+    getRuntimeVersion().then((version) => {
+      if (mounted) {
+        setAppVersion(version);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -210,16 +225,22 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       <Toolbar sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 2 }}>
         <Box
           component="img"
-          src="/InoTech_b-F.png"
-          alt="InoTech Logo"
+          src="/rivar.png"
+          alt="Rivar logo"
           sx={{
-            width: 140,
+            width: 120,
             height: 'auto',
             mb: 1,
           }}
         />
         <Typography variant="h6" noWrap component="div" sx={{ textAlign: 'center' }}>
-          {t('navigation.procurementDSS')}
+          {PRODUCT_NAME}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+          {BRAND_NAME}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+          Version {appVersion}
         </Typography>
       </Toolbar>
       <Divider />
@@ -384,10 +405,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         
         <Box 
           className={isRTL ? 'persian-theme' : ''}
-          sx={{ p: { xs: 1, sm: 2, md: 3 }, overflow: 'auto' }}
+          sx={{ p: { xs: 1, sm: 2, md: 3 }, overflow: 'auto', minHeight: 'calc(100vh - 64px)' }}
         >
           <Toolbar />
           {children}
+        </Box>
+        <Divider />
+        <Box sx={{ px: 3, py: 1.5, textAlign: 'center' }}>
+          <Typography variant="caption" color="text.secondary">
+            {BRAND_NAME} | Version {appVersion}
+          </Typography>
         </Box>
         
       </Box>
