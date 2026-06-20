@@ -57,6 +57,9 @@
     "password": "Password",
     "role": "Role",
     "signIn": "Sign In",
+    "signInHeading": "Sign in to your account",
+    "signInPrompt": "Enter your credentials to continue.",
+    "loginFailed": "Login failed. Please check your credentials.",
     "welcome": "Welcome to Rivar by Corbit",
     "incorrectCredentials": "Incorrect username or password",
     "sessionExpired": "Your session has expired. Please log in again."
@@ -806,7 +809,8 @@
     "costRisk": "Cost Risk"
   },
   "users": {
-    "title": "User Management",
+    "title": "Users",
+    "created": "Created",
     "createUser": "Create User",
     "editUser": "Edit User",
     "deleteUser": "Delete User",

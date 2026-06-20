@@ -17,7 +17,17 @@ export const LocalizedDateProvider: React.FC<Props> = ({ children }) => {
 
   if (isFa) {
     return (
-      <LocalizationProvider dateAdapter={AdapterDateFnsJalali} adapterLocale={undefined}>
+      <LocalizationProvider
+        dateAdapter={AdapterDateFnsJalali}
+        adapterLocale={undefined}
+        localeText={{
+          // Override OK/Cancel button text for Persian
+          okButtonLabel: 'تأیید',
+          cancelButtonLabel: 'انصراف',
+          clearButtonLabel: 'پاک کردن',
+          todayButtonLabel: 'امروز',
+        }}
+      >
         {children}
       </LocalizationProvider>
     );

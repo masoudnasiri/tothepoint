@@ -250,8 +250,8 @@ export const DashboardPage: React.FC = () => {
             alignItems: 'center',
           }}
         >
-          <Box>
-            <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 1, color: rivarTokens.ink500, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.6875rem' }}>
+          <Box sx={{ direction: 'ltr' }}>
+            <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 1, color: rivarTokens.ink500, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.6875rem', direction: 'inherit' }}>
               {t('dashboard.viewMode')}
             </Typography>
             <ToggleButtonGroup
@@ -266,8 +266,8 @@ export const DashboardPage: React.FC = () => {
               <ToggleButton value="comparison"><CompareIcon sx={{ fontSize: 15, mr: 0.75 }} />{t('dashboard.comparison')}</ToggleButton>
             </ToggleButtonGroup>
           </Box>
-          <Box>
-            <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 1, color: rivarTokens.ink500, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.6875rem' }}>
+          <Box sx={{ direction: 'ltr' }}>
+            <Typography variant="caption" sx={{ display: 'block', fontWeight: 600, mb: 1, color: rivarTokens.ink500, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.6875rem', direction: 'inherit' }}>
               {t('dashboard.currencyDisplay')}
             </Typography>
             <ToggleButtonGroup

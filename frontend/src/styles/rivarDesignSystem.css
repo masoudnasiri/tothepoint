@@ -245,3 +245,24 @@
   font-family: "Yekan Bakh FaNum", Tahoma, Arial, sans-serif;
   letter-spacing: 0;
 }
+
+/* ── Date picker RTL fixes ────────────────────────────────────────────────── */
+/* In RTL mode, keep calendar icon on the left (end position = left in RTL) */
+/* MUI X DatePicker uses endAdornment - in RTL 'end' is the left side */
+[dir="rtl"] .MuiPickersOutlinedInput-root .MuiInputAdornment-positionEnd {
+  margin-left: 0;
+  margin-right: 4px;
+}
+
+/* Ensure date picker text field placeholder/value is RTL-aligned */
+[dir="rtl"] .MuiDatePicker-root input,
+[dir="rtl"] .MuiPickersOutlinedInput-input {
+  text-align: right;
+  direction: rtl;
+}
+
+/* Fix ToggleButtonGroup order preservation in RTL - keep LTR visual order */
+.rv-ltr-group {
+  direction: ltr;
+  display: inline-flex;
+}

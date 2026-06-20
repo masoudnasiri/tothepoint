@@ -12,8 +12,9 @@ import {
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { BRAND_NAME, getRuntimeVersion, PRODUCT_NAME, PRODUCER_NAME } from '../utils/appIdentity.ts';
+import { BRAND_NAME, getRuntimeVersion, PRODUCER_NAME } from '../utils/appIdentity.ts';
 import { rivarTokens } from '../theme/rivarTheme.ts';
+import { useTranslation } from 'react-i18next';
 
 export const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -25,6 +26,9 @@ export const LoginPage: React.FC = () => {
 
   const { login } = useAuth();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
+
+  const isRTL = i18n.language?.startsWith('fa');
 
   useEffect(() => {
     let mounted = true;
@@ -40,7 +44,7 @@ export const LoginPage: React.FC = () => {
       await login({ username, password });
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
+      setError(err.response?.data?.detail || t('auth.loginFailed'));
     } finally {
       setLoading(false);
     }
@@ -55,14 +59,10 @@ export const LoginPage: React.FC = () => {
         alignItems: 'center',
         justifyContent: 'center',
         p: 3,
+        direction: isRTL ? 'rtl' : 'ltr',
       }}
     >
-      <Box
-        sx={{
-          width: '100%',
-          maxWidth: 400,
-        }}
-      >
+      <Box sx={{ width: '100%', maxWidth: 400 }}>
         {/* Card */}
         <Box
           sx={{
@@ -73,53 +73,37 @@ export const LoginPage: React.FC = () => {
             p: { xs: 3, sm: 4 },
           }}
         >
-          {/* Logo + brand */}
+          {/* Logo only — name is in the logo image */}
           <Box display="flex" flexDirection="column" alignItems="center" mb={3.5}>
             <Box
               component="img"
               src="/rivar.png"
               alt="Rivar logo"
-              sx={{
-                width: 56,
-                height: 56,
-                objectFit: 'contain',
-                mb: 1.5,
-              }}
+              sx={{ width: 72, height: 72, objectFit: 'contain' }}
             />
-            <Typography
-              variant="h5"
-              sx={{
-                fontWeight: 700,
-                color: rivarTokens.ink,
-                letterSpacing: '-0.01em',
-                mb: 0.25,
-              }}
-            >
-              {PRODUCT_NAME}
-            </Typography>
-            <Typography
-              sx={{
-                fontFamily: 'ui-monospace, monospace',
-                fontSize: '0.75rem',
-                color: rivarTokens.ink300,
-              }}
-            >
-              by {PRODUCER_NAME} · v{appVersion}
-            </Typography>
           </Box>
 
           {/* Heading */}
           <Typography
             variant="subtitle1"
-            sx={{ fontWeight: 600, color: rivarTokens.ink, mb: 0.5 }}
+            sx={{
+              fontWeight: 600,
+              color: rivarTokens.ink,
+              mb: 0.5,
+              textAlign: isRTL ? 'right' : 'left',
+            }}
           >
-            Sign in to your account
+            {t('auth.signInHeading')}
           </Typography>
           <Typography
             variant="body2"
-            sx={{ color: rivarTokens.ink500, mb: 2.5 }}
+            sx={{
+              color: rivarTokens.ink500,
+              mb: 2.5,
+              textAlign: isRTL ? 'right' : 'left',
+            }}
           >
-            Enter your credentials to access {BRAND_NAME}.
+            {t('auth.signInPrompt')}
           </Typography>
 
           {error && (
@@ -131,7 +115,7 @@ export const LoginPage: React.FC = () => {
           <Box component="form" onSubmit={handleSubmit}>
             <TextField
               fullWidth
-              label="Username"
+              label={t('auth.username')}
               name="username"
               autoComplete="username"
               autoFocus
@@ -142,7 +126,7 @@ export const LoginPage: React.FC = () => {
             />
             <TextField
               fullWidth
-              label="Password"
+              label={t('auth.password')}
               name="password"
               type={showPassword ? 'text' : 'password'}
               autoComplete="current-password"
@@ -157,8 +141,11 @@ export const LoginPage: React.FC = () => {
                       onClick={() => setShowPassword(!showPassword)}
                       edge="end"
                       size="small"
+                      aria-label="toggle password visibility"
                     >
-                      {showPassword ? <VisibilityOff sx={{ fontSize: 18 }} /> : <Visibility sx={{ fontSize: 18 }} />}
+                      {showPassword
+                        ? <VisibilityOff sx={{ fontSize: 18 }} />
+                        : <Visibility sx={{ fontSize: 18 }} />}
                     </IconButton>
                   </InputAdornment>
                 ),
@@ -171,18 +158,29 @@ export const LoginPage: React.FC = () => {
               disabled={loading || !username || !password}
               sx={{ py: 1.25 }}
             >
-              {loading ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : 'Sign In'}
+              {loading
+                ? <CircularProgress size={18} sx={{ color: '#fff' }} />
+                : t('auth.signIn')}
             </Button>
           </Box>
         </Box>
 
-        {/* Footer */}
-        <Typography
-          variant="caption"
-          sx={{ display: 'block', textAlign: 'center', mt: 2.5, color: rivarTokens.ink300 }}
-        >
-          {BRAND_NAME} — Enterprise procurement & cash flow management
-        </Typography>
+        {/* Footer — version + brand */}
+        <Box sx={{ mt: 2.5, textAlign: 'center' }}>
+          <Typography variant="caption" sx={{ color: rivarTokens.ink300, display: 'block' }}>
+            {BRAND_NAME}
+          </Typography>
+          <Typography
+            variant="caption"
+            sx={{
+              fontFamily: 'ui-monospace, monospace',
+              color: rivarTokens.ink300,
+              fontSize: '0.6875rem',
+            }}
+          >
+            v{appVersion} · by {PRODUCER_NAME}
+          </Typography>
+        </Box>
       </Box>
     </Box>
   );

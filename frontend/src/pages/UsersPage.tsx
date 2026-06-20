@@ -202,8 +202,8 @@ export const UsersPage: React.FC = () => {
         title={t('navigation.users')}
         actions={
           <>
-            <Button variant="outlined" size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />} onClick={fetchUsers}>Refresh</Button>
-            <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={() => { setFormData({ username: '', password: '', role: 'pm', is_active: true }); setCreateDialogOpen(true); }}>Add User</Button>
+            <Button variant="outlined" size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />} onClick={fetchUsers}>{t('common.refresh')}</Button>
+            <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={() => { setFormData({ username: '', password: '', role: 'pm', is_active: true }); setCreateDialogOpen(true); }}>{t('users.addUser')}</Button>
           </>
         }
       />
@@ -218,11 +218,11 @@ export const UsersPage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Username</TableCell>
-              <TableCell>Role</TableCell>
-              <TableCell align="center">Active</TableCell>
-              <TableCell>Created</TableCell>
-              <TableCell align="center">Actions</TableCell>
+              <TableCell>{t('users.username')}</TableCell>
+              <TableCell>{t('users.role')}</TableCell>
+              <TableCell align="center">{t('users.active')}</TableCell>
+              <TableCell>{t('users.created')}</TableCell>
+              <TableCell align="center">{t('common.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
