@@ -1,0 +1,52 @@
+{
+  "package_name": "corbit-rivar-rc1",
+  "package_version": "rc1",
+  "source_branch": "restart/baseline-before-github-push",
+  "source_baseline_commit": "ea30aa2",
+  "phase10_release_commit": "TBD",
+  "created_on": "2026-06-20",
+  "scope": [
+    "controlled release rollout",
+    "deployment readiness",
+    "pilot sign-off package"
+  ],
+  "contains": {
+    "release_docs": [
+      "README_RELEASE.md",
+      "RELEASE_NOTES.md",
+      "KNOWN_LIMITATIONS.md",
+      "POST_DEPLOY_SMOKE_CHECKLIST.md",
+      "CHECKSUMS.sha256"
+    ],
+    "update_package_snapshot": [
+      "update_package/update-deployed-platform.sh",
+      "update_package/QUICK_UPDATE_COMPLETE.sh",
+      "update_package/README.txt",
+      "update_package/update_files/backend/app/crud.py",
+      "update_package/update_files/backend/app/schemas.py",
+      "update_package/update_files/frontend/src/pages/LoginPage.tsx"
+    ],
+    "deployment_scripts": [
+      "deployment_scripts/linux/update-deployed-platform.sh",
+      "deployment_scripts/windows/update-deployed-platform.bat",
+      "deployment_scripts/windows/backup_database.bat",
+      "deployment_scripts/windows/restore_database.bat"
+    ]
+  },
+  "excluded": [
+    ".env",
+    "secrets",
+    "database backups",
+    "node_modules",
+    "python virtualenv",
+    "uploaded files",
+    "docker volumes"
+  ],
+  "verification_summary": {
+    "docker_health": "pass",
+    "backend_tests": "39 passed, 4 skipped, 38 warnings",
+    "phase8_smoke": "3 passed, 20 warnings",
+    "frontend_build": "success (compiled with warnings)",
+    "demo_cleanup_check": "pass (DEMO_RC8_ rows removed)"
+  }
+}

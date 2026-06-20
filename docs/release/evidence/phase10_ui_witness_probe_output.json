@@ -1,0 +1,117 @@
+{
+  "environment": {
+    "frontend_url": "http://193.162.129.58:13010",
+    "backend_url": "http://193.162.129.58:18010",
+    "type": "isolated_demo_stack"
+  },
+  "steps": [
+    {
+      "step": 1,
+      "name": "Login as admin/procurement role",
+      "status": "PASS",
+      "evidence": "admin and finance tokens issued",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 2,
+      "name": "Open Projects",
+      "status": "PASS",
+      "evidence": "project found id=19",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 3,
+      "name": "Open demo project items",
+      "status": "PASS",
+      "evidence": "server item id=109",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 4,
+      "name": "View item sub-item breakdown",
+      "status": "PASS",
+      "evidence": "8 sub-items loaded",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 5,
+      "name": "Open Procurement page data",
+      "status": "PASS",
+      "evidence": "existing packages=4",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 6,
+      "name": "Package Wizard create partial package",
+      "status": "PASS",
+      "evidence": "package_id=26",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 7,
+      "name": "Package Wizard edit partial package",
+      "status": "PASS",
+      "evidence": "description updated for 26",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 8,
+      "name": "Package Wizard create complete package",
+      "status": "PASS",
+      "evidence": "package_id=27",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 9,
+      "name": "Verify coverage summary visible",
+      "status": "PASS",
+      "evidence": "coverage endpoint returned 200",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 10,
+      "name": "Attempt lock with incomplete coverage",
+      "status": "PASS",
+      "evidence": "expected reject: {'detail': 'Cannot lock decisions: package coverage is incomplete for required sub-items (project_item_id=109; subitem 33: 2/4, subitem 34: 2/4, subitem 35: 2/4, subitem 36: 0/4, subitem 37: 0/4, ...).'}",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 11,
+      "name": "Attempt lock with complete coverage",
+      "status": "PASS",
+      "evidence": "success: {'message': 'Successfully finalized 1 decision(s)', 'finalized_count': 1, 'finalized_by': 'finance1'}",
+      "issue": null,
+      "severity": null
+    },
+    {
+      "step": 12,
+      "name": "Verify package/supplier context in execution views",
+      "status": "PASS",
+      "evidence": "rows with package+supplier context=1",
+      "issue": null,
+      "severity": null
+    }
+  ],
+  "defects": [],
+  "created_packages": {
+    "partial_package_id": 26,
+    "full_package_id": 27
+  },
+  "summary": {
+    "total_steps": 12,
+    "passed": 12,
+    "failed": 0,
+    "blockers": 0,
+    "majors": 0
+  }
+}
