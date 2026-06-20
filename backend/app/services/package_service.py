@@ -251,21 +251,30 @@ async def calculate_coverage_summary(
     main_item_required = project_item.quantity or 0
     main_item_covered = sum(p[3] or 0 for p in packages)
     
+    subitem_ids = [subitem.id for subitem in subitems]
+    covered_by_subitem_id: Dict[int, int] = {}
+    if subitem_ids:
+        covered_result = await db.execute(
+            select(
+                PackageSubItem.project_item_subitem_id,
+                func.coalesce(func.sum(PackageSubItem.quantity_covered), 0)
+            )
+            .join(ProcurementPackage, ProcurementPackage.id == PackageSubItem.package_id)
+            .where(PackageSubItem.project_item_subitem_id.in_(subitem_ids))
+            .where(ProcurementPackage.is_active == True)
+            .group_by(PackageSubItem.project_item_subitem_id)
+        )
+        covered_by_subitem_id = {
+            int(row[0]): int(row[1] or 0) for row in covered_result.all()
+        }
+
     subitem_coverage = {}
     for subitem in subitems:
-        result = await db.execute(
-            text("""
-                SELECT COALESCE(SUM(quantity_covered), 0)
-                FROM package_subitems
-                WHERE project_item_subitem_id = :subitem_id
-            """),
-            {"subitem_id": subitem.id}
-        )
-        covered = result.scalar() or 0
+        covered = covered_by_subitem_id.get(subitem.id, 0)
         subitem_coverage[subitem.id] = {
             "required": subitem.quantity,
-            "covered": int(covered),
-            "remaining": max(0, subitem.quantity - int(covered))
+            "covered": covered,
+            "remaining": max(0, subitem.quantity - covered)
         }
     
     is_fully_covered = (
@@ -560,4 +569,30 @@ async def _validate_project_item_subitem_coverage_for_packages(
                 f"(project_item_id={project_item_id}; {preview})."
             ),
         )
+
+
+async def get_project_item_sent_state(db: AsyncSession, project_item_id: int) -> bool:
+    """
+    Returns True when project item is currently sent to optimization.
+    """
+    from app.services.package_combination_service import is_project_item_sent_to_optimization
+
+    return await is_project_item_sent_to_optimization(db, project_item_id)
+
+
+async def get_package_finalization_status(
+    db: AsyncSession, package_ids: List[int]
+) -> Dict[int, bool]:
+    """
+    Compute package finalized state from active linked procurement options.
+
+    Rule:
+    - package is finalized iff it has at least one active option and all active options are finalized.
+    """
+    if not package_ids:
+        return {}
+
+    from app.services.package_combination_service import get_package_finalization_map
+
+    return await get_package_finalization_map(db, package_ids)
 

@@ -5,16 +5,31 @@ Procurement options management endpoints
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.database import get_db
 from app.auth import get_current_user, require_procurement
 from app.crud import (
     create_procurement_option, get_procurement_option, get_procurement_options,
     update_procurement_option, delete_procurement_option, get_unique_item_codes, log_audit
 )
-from app.models import User
+from app.models import User, ProcurementOption as ProcurementOptionModel, ProcurementPackage
 from app.schemas import ProcurementOption, ProcurementOptionCreate, ProcurementOptionUpdate, ProcurementOptionWithSupplier, SupplierSummary
+from app.services.package_service import get_project_item_sent_state
 
 router = APIRouter(prefix="/procurement", tags=["procurement"])
+
+
+async def _resolve_option_project_item_id(db: AsyncSession, option_payload: ProcurementOptionCreate) -> Optional[int]:
+    if option_payload.project_item_id is not None:
+        return option_payload.project_item_id
+    if option_payload.package_id is not None:
+        result = await db.execute(
+            select(ProcurementPackage.project_item_id).where(
+                ProcurementPackage.id == option_payload.package_id
+            )
+        )
+        return result.scalar_one_or_none()
+    return None
 
 
 @router.get("/item-codes", response_model=List[str])
@@ -183,6 +198,16 @@ async def create_new_procurement_option(
     logger = logging.getLogger(__name__)
     
     try:
+        project_item_id = await _resolve_option_project_item_id(db, option)
+        if project_item_id is not None and await get_project_item_sent_state(db, project_item_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Item has been sent to optimization. "
+                    "Rollback is required before changing procurement options."
+                ),
+            )
+
         # Phase 3: Log feature flag usage
         await log_feature_flag_event(
             db, "ENABLE_PACKAGE_PROCUREMENT", settings.enable_package_procurement,
@@ -265,56 +290,37 @@ async def list_procurement_options_by_project_item(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Fetches procurement options filtered by the specific project_item_id."""
-    from sqlalchemy import select
+    """Fetch procurement options for a project item with package/legacy compatibility."""
+    from sqlalchemy import select, and_, or_
+    from sqlalchemy.orm import selectinload
     from app.models import ProcurementOption, DeliveryOption, Supplier
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    
+
     try:
-        logger.info(f"🔍 DEBUG: Starting project-specific options fetch for project_item_id: {project_item_id}")
-        
-        # First, get all delivery option IDs for this project item
-        logger.info(f"🔍 DEBUG: Querying delivery options for project_item_id: {project_item_id}")
-        delivery_options_result = await db.execute(
+        delivery_option_ids_subquery = (
             select(DeliveryOption.id)
             .where(DeliveryOption.project_item_id == project_item_id)
         )
-        delivery_option_ids = [row[0] for row in delivery_options_result.all()]
-        logger.info(f"🔍 DEBUG: Found {len(delivery_option_ids)} delivery options: {delivery_option_ids}")
-        
-        if not delivery_option_ids:
-            logger.info(f"🔍 DEBUG: No delivery options found for project_item_id: {project_item_id}, returning empty list")
-            return []
-        
-        # Now get all procurement options that reference these delivery options
-        # Include supplier eager loading to avoid greenlet_spawn error
-        logger.info(f"🔍 DEBUG: Querying procurement options for delivery_option_ids: {delivery_option_ids}")
-        from sqlalchemy.orm import selectinload
-        
+
+        # Prefer direct project_item_id filtering, with a legacy fallback through delivery_option_id.
         result = await db.execute(
             select(ProcurementOption)
-            .where(ProcurementOption.delivery_option_id.in_(delivery_option_ids))
             .where(ProcurementOption.is_active == True)
+            .where(
+                or_(
+                    ProcurementOption.project_item_id == project_item_id,
+                    and_(
+                        ProcurementOption.project_item_id.is_(None),
+                        ProcurementOption.delivery_option_id.in_(delivery_option_ids_subquery)
+                    )
+                )
+            )
             .options(selectinload(ProcurementOption.supplier))
             .order_by(ProcurementOption.created_at.desc())
         )
         options = result.scalars().all()
-        logger.info(f"🔍 DEBUG: Found {len(options)} procurement options")
-        
-        # Log details about each option
-        for i, option in enumerate(options):
-            logger.info(f"🔍 DEBUG: Option {i+1}: id={option.id}, item_code={option.item_code}, supplier_id={option.supplier_id}, delivery_option_id={option.delivery_option_id}")
-        
-        logger.info(f"🔍 DEBUG: Successfully returning {len(options)} options")
         return options if options is not None else []
         
     except Exception as e:
-        logger.error(f"❌ ERROR: Failed to fetch options for project_item_id {project_item_id}: {str(e)}")
-        logger.error(f"❌ ERROR: Exception type: {type(e).__name__}")
-        import traceback
-        logger.error(f"❌ ERROR: Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch procurement options: {str(e)}"
@@ -329,12 +335,37 @@ async def update_procurement_option_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Update procurement option (procurement specialist only)"""
-    option = await update_procurement_option(db, option_id, option_update)
-    if not option:
+    existing = await db.execute(
+        select(ProcurementOptionModel).where(ProcurementOptionModel.id == option_id)
+    )
+    existing_option = existing.scalar_one_or_none()
+    if not existing_option:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement option not found"
         )
+
+    project_item_id = existing_option.project_item_id
+    if project_item_id is None and existing_option.package_id is not None:
+        package_result = await db.execute(
+            select(ProcurementPackage.project_item_id).where(
+                ProcurementPackage.id == existing_option.package_id
+            )
+        )
+        project_item_id = package_result.scalar_one_or_none()
+
+    if project_item_id is not None and await get_project_item_sent_state(db, project_item_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Item has been sent to optimization. "
+                "Rollback is required before changing procurement options."
+            ),
+        )
+
+    option = await update_procurement_option(db, option_id, option_update)
+    if not option:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Procurement option not found")
     try:
         await log_audit(
             db,
@@ -356,6 +387,34 @@ async def delete_procurement_option_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete procurement option (procurement specialist only)"""
+    existing = await db.execute(
+        select(ProcurementOptionModel).where(ProcurementOptionModel.id == option_id)
+    )
+    existing_option = existing.scalar_one_or_none()
+    if not existing_option:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Procurement option not found"
+        )
+
+    project_item_id = existing_option.project_item_id
+    if project_item_id is None and existing_option.package_id is not None:
+        package_result = await db.execute(
+            select(ProcurementPackage.project_item_id).where(
+                ProcurementPackage.id == existing_option.package_id
+            )
+        )
+        project_item_id = package_result.scalar_one_or_none()
+
+    if project_item_id is not None and await get_project_item_sent_state(db, project_item_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Item has been sent to optimization. "
+                "Rollback is required before changing procurement options."
+            ),
+        )
+
     success = await delete_procurement_option(db, option_id)
     if not success:
         raise HTTPException(

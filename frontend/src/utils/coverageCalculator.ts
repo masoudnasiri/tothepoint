@@ -27,6 +27,7 @@ export interface CoverageSummary {
     required: number;
     covered: number;
     remaining: number;
+    surplus: number;
     coverage_percentage: number;
   };
   subitems: Array<{
@@ -36,10 +37,12 @@ export interface CoverageSummary {
     required: number;
     covered: number;
     remaining: number;
+    surplus: number;
     coverage_percentage: number;
   }>;
   overall_coverage_percentage: number;
   is_fully_covered: boolean;
+  is_over_covered: boolean;
 }
 
 /**
@@ -56,8 +59,9 @@ export function calculateCoverageSummary(
     0
   );
   const mainItemRemaining = Math.max(0, mainItemRequiredQuantity - mainItemCovered);
+  const mainItemSurplus = Math.max(0, mainItemCovered - mainItemRequiredQuantity);
   const mainItemCoveragePct = mainItemRequiredQuantity > 0
-    ? Math.min(100, (mainItemCovered / mainItemRequiredQuantity) * 100)
+    ? (mainItemCovered / mainItemRequiredQuantity) * 100
     : 100;
 
   // Calculate subitem coverage
@@ -69,8 +73,9 @@ export function calculateCoverageSummary(
       return sum + (subitemCoverage?.covered_quantity || 0);
     }, 0);
     const remaining = Math.max(0, req.required_quantity - covered);
+    const surplus = Math.max(0, covered - req.required_quantity);
     const coveragePct = req.required_quantity > 0
-      ? Math.min(100, (covered / req.required_quantity) * 100)
+      ? (covered / req.required_quantity) * 100
       : 100;
 
     return {
@@ -80,6 +85,7 @@ export function calculateCoverageSummary(
       required: req.required_quantity,
       covered,
       remaining,
+      surplus,
       coverage_percentage: coveragePct,
     };
   });
@@ -94,23 +100,26 @@ export function calculateCoverageSummary(
     0
   );
   const overallCoveragePct = totalRequired > 0
-    ? Math.min(100, (totalCovered / totalRequired) * 100)
+    ? (totalCovered / totalRequired) * 100
     : 100;
 
   const isFullyCovered = mainItemRemaining === 0 && subitemCoverages.every(
     (si) => si.remaining === 0
   );
+  const isOverCovered = mainItemSurplus > 0 || subitemCoverages.some((si) => si.surplus > 0);
 
   return {
     main_item: {
       required: mainItemRequiredQuantity,
       covered: mainItemCovered,
       remaining: mainItemRemaining,
+      surplus: mainItemSurplus,
       coverage_percentage: mainItemCoveragePct,
     },
     subitems: subitemCoverages,
     overall_coverage_percentage: overallCoveragePct,
     is_fully_covered: isFullyCovered,
+    is_over_covered: isOverCovered,
   };
 }
 

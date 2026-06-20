@@ -3,7 +3,7 @@ Project items management endpoints
 """
 
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, require_pm, require_pmo, require_pm_or_pmo, require_role, get_user_projects
@@ -13,6 +13,12 @@ from app.crud import (
 )
 from app.models import User, FinalizedDecision, ProjectItemSubItem, ItemSubItem
 from app.schemas import ProjectItem, ProjectItemCreate, ProjectItemUpdate, ProjectItemFinalize
+from app.services.package_combination_service import (
+    SUBMISSION_STATE_ROLLED_BACK,
+    SUBMISSION_STATE_SENT,
+    compute_item_coverage_state,
+    get_project_item_optimization_state,
+)
 
 router = APIRouter(prefix="/items", tags=["project-items"])
 
@@ -194,12 +200,19 @@ async def create_new_project_item(
 async def list_finalized_items(
     skip: int = 0,
     limit: int = 100,
+    optimization_state: str = Query("all", pattern="^(all|not_sent|sent|rolled_back)$"),
+    coverage_state: str = Query(
+        "all",
+        pattern="^(all|no_package|partial|full|over_covered|missing_components)$",
+    ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all finalized project items (visible in procurement) - excludes items with LOCKED or PROPOSED decisions"""
-    from sqlalchemy import select, and_, not_, exists
-    from app.models import ProjectItem as ProjectItemModel, FinalizedDecision
+    """Get finalized project items with optimization/coverage state metadata for procurement."""
+    from sqlalchemy import select, func
+    from app.models import ProjectItem as ProjectItemModel, FinalizedDecision, ProcurementPackage
+    from app.services.package_service import calculate_coverage_summary
+    from app.services.package_service import get_package_finalization_status
     
     # Only procurement and admin users can see finalized items
     if current_user.role not in ["procurement", "admin", "pmo", "pm"]:
@@ -208,22 +221,11 @@ async def list_finalized_items(
             detail="Access denied - procurement role required"
         )
     
-    # Get finalized items that DON'T have LOCKED or PROPOSED decisions
-    # This ensures procurement only sees items that are ready for new options
+    # Get finalized items; optimization gating is handled via optimization_state metadata.
     result = await db.execute(
         select(ProjectItemModel)
         .where(
-            and_(
-                ProjectItemModel.is_finalized == True,
-                # Exclude items with LOCKED or PROPOSED decisions
-                ~exists(
-                    select(FinalizedDecision.id)
-                    .where(
-                        FinalizedDecision.project_item_id == ProjectItemModel.id,
-                        FinalizedDecision.status.in_(['LOCKED', 'PROPOSED'])
-                    )
-                )
-            )
+            ProjectItemModel.is_finalized == True  # noqa: E712
         )
         .offset(skip)
         .limit(limit)
@@ -248,6 +250,57 @@ async def list_finalized_items(
                 "part_number": sub.part_number,
                 "quantity": rel.quantity,
             })
+
+        coverage_summary = await calculate_coverage_summary(db, item.id)
+        coverage_state_value = compute_item_coverage_state(coverage_summary).lower()
+
+        submission_state = await get_project_item_optimization_state(db, item.id)
+        if submission_state == SUBMISSION_STATE_SENT:
+            optimization_state_value = "sent_to_optimization"
+        elif submission_state == SUBMISSION_STATE_ROLLED_BACK:
+            optimization_state_value = "rolled_back_from_optimization"
+        else:
+            optimization_state_value = "not_sent_to_optimization"
+
+        if optimization_state == "sent" and optimization_state_value != "sent_to_optimization":
+            continue
+        if optimization_state == "not_sent" and optimization_state_value != "not_sent_to_optimization":
+            continue
+        if optimization_state == "rolled_back" and optimization_state_value != "rolled_back_from_optimization":
+            continue
+
+        if coverage_state != "all" and coverage_state_value != coverage_state:
+            continue
+
+        blocking_decision_check = await db.execute(
+            select(func.count(FinalizedDecision.id)).where(
+                FinalizedDecision.project_item_id == item.id,
+                FinalizedDecision.status.in_(["LOCKED", "PROPOSED"]),
+            )
+        )
+        has_blocking_decisions = (blocking_decision_check.scalar() or 0) > 0
+
+        package_result = await db.execute(
+            select(ProcurementPackage.id).where(
+                ProcurementPackage.project_item_id == item.id,
+                ProcurementPackage.is_active == True,  # noqa: E712
+            )
+        )
+        package_ids = [int(row[0]) for row in package_result.all()]
+        finalization_map = await get_package_finalization_status(db, package_ids)
+        finalized_package_count = sum(1 for value in finalization_map.values() if value)
+        active_package_count = len(package_ids)
+
+        coverage_pct = float(
+            (coverage_summary.get("aggregate_percentage") or 0)
+            if isinstance(coverage_summary.get("aggregate_percentage"), (int, float))
+            else 0
+        )
+        if coverage_pct == 0:
+            required_main = int((coverage_summary.get("main_item") or {}).get("required", 0))
+            covered_main = int((coverage_summary.get("main_item") or {}).get("covered", 0))
+            if required_main > 0:
+                coverage_pct = round((covered_main / required_main) * 100, 2)
 
         serialized_items.append({
             "id": item.id,
@@ -274,6 +327,16 @@ async def list_finalized_items(
             "created_at": item.created_at.isoformat() if item.created_at else None,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             "sub_items": sub_list,
+            "coverage_state": coverage_state_value,
+            "coverage_percentage": coverage_pct,
+            "optimization_state": optimization_state_value,
+            "is_sent_to_optimization": optimization_state_value == "sent_to_optimization",
+            "active_package_count": active_package_count,
+            "finalized_package_count": finalized_package_count,
+            "can_rollback_optimization_submission": (
+                optimization_state_value == "sent_to_optimization"
+                and not has_blocking_decisions
+            ),
         })
     
     return serialized_items

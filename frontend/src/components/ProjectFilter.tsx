@@ -49,7 +49,18 @@ export const ProjectFilter: React.FC<ProjectFilterProps> = ({
 
   const handleChange = (event: SelectChangeEvent<number[]>) => {
     const value = event.target.value;
-    onChange(typeof value === 'string' ? [] : value as number[]);
+    if (typeof value === 'string') {
+      const parsed = value
+        .split(',')
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v));
+      onChange(parsed);
+      return;
+    }
+    const parsed = (value as Array<number | string>)
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v));
+    onChange(parsed);
   };
 
   return (

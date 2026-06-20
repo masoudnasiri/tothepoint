@@ -38,6 +38,19 @@
 - [ ] Decisions can be reviewed by user
 - [ ] Reports/dashboard/audit reflect user actions
 
+## چک‌لیست اختصاصی فاز 12C
+
+- [ ] Package Wizard finalization flag persists and package status shows `Finalized`
+- [ ] Draft/non-finalized package cannot be sent to optimization
+- [ ] Full-coverage partial-package combinations are generated and selectable
+- [ ] Incomplete coverage requires explicit confirmation before submission
+- [ ] Bulk send (`Send all finalized packages to optimization`) respects confirmation and skip behavior
+- [ ] Sent item is locked for package create/edit/delete (backend + UI)
+- [ ] Safe rollback re-enables editing only when no blocking decisions exist
+- [ ] Optimization state filter works (`all/not sent/sent/rolled back`)
+- [ ] Coverage state filter works (`all/no package/partial/full/over-covered/missing components`)
+- [ ] Coverage labels distinguish current package vs aggregate vs optimization-eligible semantics
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker

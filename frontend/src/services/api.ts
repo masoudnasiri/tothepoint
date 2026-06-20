@@ -117,7 +117,12 @@ export const itemsAPI = {
   finalize: (id: number, data: any) => api.put(`/items/${id}/finalize`, data),
   unfinalize: (id: number) => api.put(`/items/${id}/unfinalize`, {}),
   finalizeAll: (projectId: number) => api.put(`/items/project/${projectId}/finalize-all`, {}),
-  listFinalized: (params?: { skip?: number; limit?: number }) =>
+  listFinalized: (params?: {
+    skip?: number;
+    limit?: number;
+    optimization_state?: 'all' | 'not_sent' | 'sent' | 'rolled_back';
+    coverage_state?: 'all' | 'no_package' | 'partial' | 'full' | 'over_covered' | 'missing_components';
+  }) =>
     api.get('/items/finalized', { params }),
   listProjectItemSubItems: (projectItemId: number) =>
     api.get(`/items/${projectItemId}/subitems`),
@@ -475,6 +480,16 @@ export const packagesAPI = {
   deleteSubItem: (subItemId: number) => api.delete(`/packages/subitems/${subItemId}`),
   getCoverageSummary: (projectItemId: number) => api.get(`/packages/coverage/${projectItemId}`),
   getProjectCoverageSummary: (projectId: number) => api.get(`/projects/${projectId}/coverage-summary`),
+  submitToOptimization: (payload: {
+    project_item_id?: number;
+    project_item_ids?: number[];
+    send_all_finalized?: boolean;
+    include_incomplete_with_confirmation?: boolean;
+    confirmed_incomplete_item_ids?: number[];
+    max_combinations?: number;
+  }) => api.post('/packages/optimization-submission', payload),
+  rollbackOptimizationSubmission: (projectItemId: number, notes?: string) =>
+    api.post(`/packages/optimization-submission/${projectItemId}/rollback`, { notes }),
 };
 
 // Supplier Payments API

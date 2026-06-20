@@ -197,19 +197,31 @@ export const PackageWizardStep2: React.FC<PackageWizardStep2Props> = ({
           <Box sx={{ mt: 2 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
               <Typography variant="body2">
-                {t('procurement.overallCoverage') || 'Overall Coverage'}
+                {t('procurement.aggregateItemCoverage') || 'Aggregate Item Coverage'}
               </Typography>
               <Chip
                 label={`${Math.round(coverageSummary.overall_coverage_percentage)}%`}
-                color={coverageSummary.is_fully_covered ? 'success' : 'primary'}
+                color={
+                  coverageSummary.overall_coverage_percentage > 100
+                    ? 'warning'
+                    : coverageSummary.is_fully_covered
+                      ? 'success'
+                      : 'primary'
+                }
                 size="small"
               />
             </Box>
             <LinearProgress
               variant="determinate"
-              value={coverageSummary.overall_coverage_percentage}
+              value={Math.min(100, coverageSummary.overall_coverage_percentage)}
               sx={{ mb: 2 }}
-              color={coverageSummary.is_fully_covered ? 'success' : 'primary'}
+              color={
+                coverageSummary.overall_coverage_percentage > 100
+                  ? 'warning'
+                  : coverageSummary.is_fully_covered
+                    ? 'success'
+                    : 'primary'
+              }
             />
             <Grid container spacing={1}>
               <Grid item xs={6}>
@@ -232,7 +244,9 @@ export const PackageWizardStep2: React.FC<PackageWizardStep2Props> = ({
             </Grid>
             {coverageSummary.is_fully_covered && (
               <Alert severity="success" sx={{ mt: 2 }}>
-                {t('procurement.fullyCovered') || 'This package provides full coverage!'}
+                {coverageSummary.is_over_covered
+                  ? (t('procurement.overCovered') || 'Required demand is covered with surplus.')
+                  : (t('procurement.fullyCovered') || 'Required demand is fully covered.')}
               </Alert>
             )}
             {!coverageSummary.is_fully_covered && (
@@ -260,8 +274,20 @@ export const PackageWizardStep2: React.FC<PackageWizardStep2Props> = ({
                         package_id: pkg.id,
                         package_name: pkg.package_name || '',
                         package_type: pkg.package_type as 'FULL' | 'PARTIAL' | 'CUSTOM',
-                        main_item_quantity: 0,
-                        subitem_coverages: [],
+                        main_item_quantity: Number((pkg as any).main_item_quantity || 0),
+                        subitem_coverages: ((pkg as any).subitems || [])
+                          .map((sub: any) => {
+                            const req = subItemRequirements.find(
+                              (r) => r.item_subitem_id === sub.project_item_subitem_id
+                            );
+                            if (!req) return null;
+                            return {
+                              sub_item_id: req.sub_item_id,
+                              covered_quantity: Number(sub.quantity_covered || 0),
+                              required_quantity: req.required_quantity || 0,
+                            };
+                          })
+                          .filter((sub: any) => sub !== null),
                       }));
 
                       const remaining = calculateRemainingDemand(

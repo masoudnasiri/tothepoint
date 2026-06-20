@@ -94,14 +94,17 @@ export const CoverageSummaryModal: React.FC<CoverageSummaryModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const response = await packagesAPI.getProjectCoverageSummary(projectId);
-      // The API returns { project_id, items: [...], total_items, fully_covered_items }
-      const responseData = response.data as any;
-      let data: CoverageData[] = Array.isArray(responseData?.items) ? responseData.items : [];
+      let data: CoverageData[] = [];
 
-      // Filter by project_item_id if provided
       if (projectItemId) {
-        data = data.filter((item) => item.project_item_id === projectItemId);
+        // Item-level analysis: query only this item's package coverage.
+        const itemResponse = await packagesAPI.getCoverageSummary(projectItemId);
+        data = [itemResponse.data as any];
+      } else {
+        // Project-level analysis (full view from header button).
+        const response = await packagesAPI.getProjectCoverageSummary(projectId);
+        const responseData = response.data as any;
+        data = Array.isArray(responseData?.items) ? responseData.items : [];
       }
 
       setCoverageData(data);
@@ -148,12 +151,14 @@ export const CoverageSummaryModal: React.FC<CoverageSummaryModalProps> = ({
   };
 
   const getCoverageColor = (percentage: number) => {
+    if (percentage > 100) return 'warning';
     if (percentage === 100) return 'success';
     if (percentage > 0) return 'warning';
     return 'error';
   };
 
   const getCoverageLabel = (percentage: number) => {
+    if (percentage > 100) return t('procurement.overCovered') || 'Over-covered';
     if (percentage === 100) return t('procurement.fullyCovered') || 'Fully Covered';
     if (percentage > 0) return t('procurement.partiallyCovered') || 'Partially Covered';
     return t('procurement.uncovered') || 'Uncovered';
@@ -222,7 +227,7 @@ export const CoverageSummaryModal: React.FC<CoverageSummaryModalProps> = ({
                     </Typography>
                     <LinearProgress
                       variant="determinate"
-                      value={summary.overall_coverage}
+                      value={Math.min(100, summary.overall_coverage)}
                       sx={{ mt: 1 }}
                       color={getCoverageColor(summary.overall_coverage)}
                     />
@@ -305,7 +310,7 @@ export const CoverageSummaryModal: React.FC<CoverageSummaryModalProps> = ({
                               />
                               <LinearProgress
                                 variant="determinate"
-                                value={coveragePercentage}
+                                value={Math.min(100, coveragePercentage)}
                                 sx={{ mt: 0.5 }}
                                 color={getCoverageColor(coveragePercentage)}
                               />

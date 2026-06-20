@@ -24,6 +24,7 @@ import { formatApiError } from '../utils/errorUtils.ts';
 import {
   Add as AddIcon,
   Refresh as RefreshIcon,
+  Send as SendIcon,
   Search as SearchIcon,
   Visibility as VisibilityIcon,
   Analytics as AnalyticsIcon,
@@ -33,6 +34,7 @@ import {
   LocalShipping as LocalShippingIcon,
   Business as BusinessIcon,
   Assignment as AssignmentIcon,
+  RestartAlt as RestartAltIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { useFeatureFlags } from '../hooks/useFeatureFlags.tsx';
@@ -83,6 +85,13 @@ interface ItemWithDetails {
   finalized_at?: string;
   created_at?: string;
   updated_at?: string;
+  coverage_state?: string;
+  coverage_percentage?: number;
+  optimization_state?: 'not_sent_to_optimization' | 'sent_to_optimization' | 'rolled_back_from_optimization';
+  is_sent_to_optimization?: boolean;
+  active_package_count?: number;
+  finalized_package_count?: number;
+  can_rollback_optimization_submission?: boolean;
 }
 
 interface Supplier {
@@ -128,12 +137,16 @@ export const ProcurementPage: React.FC = () => {
 
   const [coverageModalOpen, setCoverageModalOpen] = useState(false);
   const [selectedProjectIdForCoverage, setSelectedProjectIdForCoverage] = useState<number | null>(null);
+  const [selectedProjectItemIdForCoverage, setSelectedProjectItemIdForCoverage] = useState<number | null>(null);
   const [expandedAccordion, setExpandedAccordion] = useState<string | false>(false);
   const [page, setPage] = useState(0);
   const ITEMS_PER_PAGE = 50;
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedProjects, setSelectedProjects] = useState<number[]>([]);
   const [summaryStats, setSummaryStats] = useState<any>(null);
+  const [optimizationFilter, setOptimizationFilter] = useState<'all' | 'not_sent' | 'sent' | 'rolled_back'>('all');
+  const [coverageFilter, setCoverageFilter] = useState<'all' | 'no_package' | 'partial' | 'full' | 'over_covered' | 'missing_components'>('all');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -146,11 +159,16 @@ export const ProcurementPage: React.FC = () => {
     })();
   }, []);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [optimizationFilter, coverageFilter]);
 
   const fetchData = async () => {
     try {
-      const itemsResponse = await itemsAPI.listFinalized({ skip: 0, limit: 10000 });
+      const itemsResponse = await itemsAPI.listFinalized({
+        skip: 0,
+        limit: 10000,
+        optimization_state: optimizationFilter,
+        coverage_state: coverageFilter,
+      });
       const mapped = itemsResponse.data.map((item: any) => ({
         item_code: item.item_code, item_name: item.item_name, description: item.description || '',
         project_id: item.project_id, project_item_id: item.id, quantity: item.quantity,
@@ -160,6 +178,13 @@ export const ProcurementPage: React.FC = () => {
         expected_cash_in_date: item.expected_cash_in_date, actual_cash_in_date: item.actual_cash_in_date,
         is_finalized: item.is_finalized, finalized_by: item.finalized_by, finalized_at: item.finalized_at,
         created_at: item.created_at, updated_at: item.updated_at,
+        coverage_state: item.coverage_state,
+        coverage_percentage: item.coverage_percentage,
+        optimization_state: item.optimization_state,
+        is_sent_to_optimization: item.is_sent_to_optimization,
+        active_package_count: item.active_package_count,
+        finalized_package_count: item.finalized_package_count,
+        can_rollback_optimization_submission: item.can_rollback_optimization_submission,
       }));
       setItemsWithDetails(mapped);
       calculateSummaryStats(mapped);
@@ -170,28 +195,108 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
-  const calculateSummaryStats = async (items?: ItemWithDetails[]) => {
-    try {
-      const toProcess = items || itemsWithDetails;
-      let totalPackages = 0, activePackages = 0, itemsWithPackages = 0;
-      const uniqueSuppliers = new Set<string>();
-      for (const item of toProcess) {
-        try {
-          const r = await packagesAPI.listByProjectItem(item.project_item_id, true);
-          const pkgs = Array.isArray(r.data) ? r.data : [];
-          totalPackages += pkgs.length;
-          activePackages += pkgs.filter((p: any) => p.is_active).length;
-          pkgs.forEach((p: any) => { if (p.supplier?.company_name) uniqueSuppliers.add(p.supplier.company_name); });
-          if (pkgs.length > 0) itemsWithPackages++;
-        } catch { /* skip */ }
-      }
-      setSummaryStats({ totalItems: toProcess.length, totalPackages, activePackages, itemsWithPackages, uniqueSuppliers: uniqueSuppliers.size, suppliers: Array.from(uniqueSuppliers) });
-    } catch { /* skip */ }
+  const buildIncompleteCoverageMessage = (response: any) => {
+    const incompleteItems = response?.incomplete_items_requiring_confirmation || [];
+    if (!incompleteItems.length) return '';
+    return incompleteItems.map((item: any) => {
+      const missing = (item.missing_components || [])
+        .slice(0, 5)
+        .map((m: any) => {
+          const label = m.name || m.component || 'component';
+          return `- ${label}: missing ${m.missing}`;
+        })
+        .join('\n');
+      return (
+        `${item.item_code || item.project_item_id}: coverage ${Math.round(item.coverage_percentage || 0)}%\n` +
+        (missing || '- Missing required quantities')
+      );
+    }).join('\n\n');
   };
 
-  useEffect(() => {
-    if (itemsWithDetails.length > 0) calculateSummaryStats(itemsWithDetails);
-  }, [itemsWithDetails]);
+  const submitToOptimizationGate = async (payload: any, label: string) => {
+    const first = await packagesAPI.submitToOptimization(payload);
+    let data = first.data;
+    const incompleteItems = data?.incomplete_items_requiring_confirmation || [];
+    if (incompleteItems.length > 0) {
+      const message =
+        `Some items are incomplete and require confirmation before submission:\n\n` +
+        `${buildIncompleteCoverageMessage(data)}\n\n` +
+        `Send incomplete items anyway?`;
+      const confirmed = window.confirm(message);
+      if (confirmed) {
+        const confirmedIds = incompleteItems.map((item: any) => item.project_item_id);
+        const second = await packagesAPI.submitToOptimization({
+          ...payload,
+          include_incomplete_with_confirmation: true,
+          confirmed_incomplete_item_ids: confirmedIds,
+        });
+        data = second.data;
+      }
+    }
+
+    const submitted = data?.submitted_items?.length || 0;
+    const skipped = data?.skipped_items?.length || 0;
+    setNotice(`${label}: submitted ${submitted}, skipped ${skipped}`);
+    if ((data?.warnings || []).length > 0) {
+      setError((data.warnings as string[]).join('\n'));
+    }
+    setPackageRefreshTrigger(p => p + 1);
+    await fetchData();
+  };
+
+  const handleRollbackOptimizationSubmission = async (item: ItemWithDetails) => {
+    const yes = window.confirm(
+      t('procurement.confirmRollbackOptimization') ||
+      'Rollback optimization submission for this item and unlock package editing?'
+    );
+    if (!yes) return;
+    try {
+      await packagesAPI.rollbackOptimizationSubmission(item.project_item_id);
+      setNotice(
+        t('procurement.rollbackSuccess') ||
+        `Rollback completed for ${item.item_code}`
+      );
+      setPackageRefreshTrigger(p => p + 1);
+      await fetchData();
+    } catch (err: any) {
+      setError(formatApiError(err, t('procurement.rollbackFailed') || 'Rollback failed'));
+    }
+  };
+
+  const calculateSummaryStats = async (items?: ItemWithDetails[]) => {
+    const toProcess = items || itemsWithDetails;
+    const uniqueProjectIds = Array.from(new Set(toProcess.map((it) => it.project_id)));
+
+    let allPackages: any[] = [];
+    try {
+      const packageResponses = await Promise.all(
+        uniqueProjectIds.map((projectId) =>
+          packagesAPI.listByProject(projectId, true).catch(() => ({ data: [] }))
+        )
+      );
+      allPackages = packageResponses.flatMap((res: any) => (Array.isArray(res.data) ? res.data : []));
+    } catch {
+      allPackages = [];
+    }
+
+    const uniqueSuppliers = new Set<string>();
+    allPackages.forEach((pkg: any) => {
+      if (pkg?.supplier?.company_name) uniqueSuppliers.add(pkg.supplier.company_name);
+    });
+
+    const itemIdsWithPackage = new Set<number>(
+      allPackages.map((pkg: any) => Number(pkg.project_item_id)).filter((id: number) => Number.isFinite(id))
+    );
+
+    setSummaryStats({
+      totalItems: toProcess.length,
+      totalPackages: allPackages.length,
+      activePackages: allPackages.filter((pkg: any) => pkg.is_active).length,
+      itemsWithPackages: toProcess.filter((it) => itemIdsWithPackage.has(it.project_item_id)).length,
+      uniqueSuppliers: uniqueSuppliers.size,
+      suppliers: Array.from(uniqueSuppliers),
+    });
+  };
 
   const getFilteredItems = useMemo(() => {
     let filtered = itemsWithDetails;
@@ -267,6 +372,7 @@ export const ProcurementPage: React.FC = () => {
         package_name: packageData.package_name || '', supplier_id: packageData.supplier_id || null,
         package_type: packageData.package_type || 'CUSTOM', description: packageData.description || '',
         main_item_quantity: packageData.main_item_quantity || 0, subitem_quantities: subitemQuantities,
+        is_finalized: packageData.is_finalized ?? packageOption?.is_finalized ?? false,
         base_cost: packageOption?.base_cost || packageOption?.cost_amount || 0,
         currency_id: packageOption?.currency_id || null, shipping_cost: packageOption?.shipping_cost || 0,
         delivery_option_id: packageOption?.delivery_option_id || null, lomc_lead_time: packageOption?.lomc_lead_time || 0,
@@ -327,14 +433,38 @@ export const ProcurementPage: React.FC = () => {
                   setError(t('procurement.selectProjectForAnalysis') || 'Please select a project first.');
                   return;
                 }
+                setSelectedProjectItemIdForCoverage(null); // full project analysis from header action
                 setCoverageModalOpen(true);
               }}
             >
               {t('procurement.analyzeCoverage') || 'Analyze Coverage'}
             </Button>
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<SendIcon sx={{ fontSize: 15 }} />}
+              onClick={async () => {
+                try {
+                  await submitToOptimizationGate(
+                    { send_all_finalized: true },
+                    t('procurement.bulkSendFinalized') || 'Bulk send finalized packages'
+                  );
+                } catch (err: any) {
+                  setError(formatApiError(err, t('procurement.sendToOptimizerFailed') || 'Failed to send finalized packages'));
+                }
+              }}
+            >
+              {t('procurement.sendAllFinalizedToOptimization') || 'Send all finalized packages to optimization'}
+            </Button>
           </>
         ) : undefined}
       />
+
+      {notice && (
+        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setNotice('')}>
+          {notice}
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
@@ -400,8 +530,45 @@ export const ProcurementPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
-              {(searchTerm || selectedProjects.length > 0) && (
-                <Button size="small" variant="outlined" onClick={() => { setSearchTerm(''); setSelectedProjects([]); }}>
+              <FormControl size="small" sx={{ minWidth: 190 }}>
+                <InputLabel>{t('procurement.optimizationState') || 'Optimization state'}</InputLabel>
+                <Select
+                  label={t('procurement.optimizationState') || 'Optimization state'}
+                  value={optimizationFilter}
+                  onChange={(e) => setOptimizationFilter(e.target.value as any)}
+                >
+                  <MenuItem value="all">{t('procurement.allOptimizationStates') || 'All'}</MenuItem>
+                  <MenuItem value="not_sent">{t('procurement.notSentToOptimization') || 'Not sent'}</MenuItem>
+                  <MenuItem value="sent">{t('procurement.sentToOptimization') || 'Sent to optimization'}</MenuItem>
+                  <MenuItem value="rolled_back">{t('procurement.rolledBackFromOptimization') || 'Rolled back'}</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 190 }}>
+                <InputLabel>{t('procurement.coverageState') || 'Coverage state'}</InputLabel>
+                <Select
+                  label={t('procurement.coverageState') || 'Coverage state'}
+                  value={coverageFilter}
+                  onChange={(e) => setCoverageFilter(e.target.value as any)}
+                >
+                  <MenuItem value="all">{t('procurement.allCoverageStates') || 'All'}</MenuItem>
+                  <MenuItem value="no_package">{t('procurement.noPackageDefined') || 'No package defined'}</MenuItem>
+                  <MenuItem value="partial">{t('procurement.partiallyCovered') || 'Partially covered'}</MenuItem>
+                  <MenuItem value="full">{t('procurement.fullyCovered') || 'Fully covered'}</MenuItem>
+                  <MenuItem value="over_covered">{t('procurement.overCovered') || 'Over-covered'}</MenuItem>
+                  <MenuItem value="missing_components">{t('procurement.missingComponents') || 'Missing components'}</MenuItem>
+                </Select>
+              </FormControl>
+              {(searchTerm || selectedProjects.length > 0 || optimizationFilter !== 'all' || coverageFilter !== 'all') && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSelectedProjects([]);
+                    setOptimizationFilter('all');
+                    setCoverageFilter('all');
+                  }}
+                >
                   Clear
                 </Button>
               )}
@@ -475,6 +642,24 @@ export const ProcurementPage: React.FC = () => {
                               variant="neutral"
                             />
                           )}
+                          {item.optimization_state === 'sent_to_optimization' && (
+                            <RivarStatusPill
+                              label={t('procurement.sentToOptimization') || 'Sent to optimization'}
+                              variant="accent"
+                            />
+                          )}
+                          {item.optimization_state === 'rolled_back_from_optimization' && (
+                            <RivarStatusPill
+                              label={t('procurement.rolledBackFromOptimization') || 'Rolled back'}
+                              variant="warn"
+                            />
+                          )}
+                          {item.coverage_state && (
+                            <RivarStatusPill
+                              label={`${t('procurement.coverage') || 'Coverage'}: ${item.coverage_state.replace(/_/g, ' ')}`}
+                              variant="neutral"
+                            />
+                          )}
                           <IconButton
                             size="small"
                             onClick={async (e) => { e.stopPropagation(); await openItemDetails(item); }}
@@ -490,6 +675,7 @@ export const ProcurementPage: React.FC = () => {
                         projectItemId={item.project_item_id}
                         itemCode={item.item_code}
                         itemName={item.item_name}
+                        enabled={expandedAccordion === accordionKey}
                         onEdit={(packageId) => openEditPackage(packageId, item)}
                         onDelete={async (packageId) => {
                           if (window.confirm(t('procurement.confirmDeletePackage') || 'Delete this package?')) {
@@ -502,21 +688,57 @@ export const ProcurementPage: React.FC = () => {
                             }
                           }
                         }}
-                        onAnalyze={(_packageId) => {
-                          setSelectedProjectIdForCoverage(item.project_id);
-                          setCoverageModalOpen(true);
-                        }}
-                        onSendToOptimizer={(packageId) => {
-                          console.log('Send package to optimizer:', packageId);
-                        }}
                         refreshTrigger={packageRefreshTrigger}
                       />
                       {canProcure && (
-                        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-start' }}>
+                        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-start', gap: 1 }}>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={<AnalyticsIcon sx={{ fontSize: 15 }} />}
+                            onClick={() => {
+                              setSelectedProjectIdForCoverage(item.project_id);
+                              setSelectedProjectItemIdForCoverage(item.project_item_id);
+                              setCoverageModalOpen(true);
+                            }}
+                          >
+                            {t('procurement.analyzeCoverage') || 'Analyze Coverage'}
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={<SendIcon sx={{ fontSize: 15 }} />}
+                            disabled={item.is_sent_to_optimization || (item.finalized_package_count || 0) === 0}
+                            onClick={async () => {
+                              try {
+                                await submitToOptimizationGate(
+                                  { project_item_id: item.project_item_id },
+                                  t('procurement.sendToOptimizer') || 'Send to optimization'
+                                );
+                              } catch (err: any) {
+                                setError(formatApiError(err, t('procurement.sendToOptimizerFailed') || 'Failed to send to optimizer'));
+                              }
+                            }}
+                          >
+                            {t('procurement.sendToOptimizer') || 'Send to Optimizer'}
+                          </Button>
+                          {item.is_sent_to_optimization && (
+                            <Button
+                              variant="outlined"
+                              size="small"
+                              color="warning"
+                              startIcon={<RestartAltIcon sx={{ fontSize: 15 }} />}
+                              disabled={!item.can_rollback_optimization_submission}
+                              onClick={() => handleRollbackOptimizationSubmission(item)}
+                            >
+                              {t('procurement.rollbackOptimizationSubmission') || 'Rollback submission'}
+                            </Button>
+                          )}
                           <Button
                             variant="contained"
                             size="small"
                             startIcon={<AddIcon sx={{ fontSize: 15 }} />}
+                            disabled={item.is_sent_to_optimization}
                             onClick={() => openPackageWizard(item)}
                           >
                             {t('procurement.createPackage') || 'Create Package'}
@@ -550,8 +772,13 @@ export const ProcurementPage: React.FC = () => {
       {coverageModalOpen && selectedProjectIdForCoverage && (
         <CoverageSummaryModal
           open={coverageModalOpen}
-          onClose={() => { setCoverageModalOpen(false); setSelectedProjectIdForCoverage(null); }}
+          onClose={() => {
+            setCoverageModalOpen(false);
+            setSelectedProjectIdForCoverage(null);
+            setSelectedProjectItemIdForCoverage(null);
+          }}
           projectId={selectedProjectIdForCoverage}
+          projectItemId={selectedProjectItemIdForCoverage || undefined}
           onCreateForRemaining={(remainingDemand) => {
             const itemDetails = itemsWithDetails.find(i => i.project_item_id === remainingDemand.project_item_id);
             if (itemDetails) {
@@ -567,6 +794,7 @@ export const ProcurementPage: React.FC = () => {
               setWizardExistingPackages([]);
               setPackageWizardOpen(true);
               setCoverageModalOpen(false);
+              setSelectedProjectItemIdForCoverage(null);
             }
           }}
         />
@@ -587,9 +815,13 @@ export const ProcurementPage: React.FC = () => {
           initialData={wizardInitialData}
           onPackageCreated={async () => {
             setPackageRefreshTrigger(p => p + 1);
-            fetchData();
             setEditingPackageId(null);
             setWizardInitialData(null);
+            try {
+              await calculateSummaryStats();
+            } catch {
+              // Best-effort: do not block package UX on summary refresh.
+            }
           }}
         />
       )}

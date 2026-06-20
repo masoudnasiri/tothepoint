@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, Numeric, DateTime, Date, ForeignKey, JSON, CheckConstraint, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Text, Boolean, Numeric, DateTime, Date, ForeignKey, JSON, CheckConstraint, UniqueConstraint, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -849,3 +849,33 @@ class AuditLog(Base):
 
     # Relationships
     user = relationship("User")
+
+
+class OptimizationSubmission(Base):
+    """
+    Tracks whether a project item's package set has been sent to optimization.
+    This enables backend-enforced locking of package edits until safe rollback.
+    """
+    __tablename__ = "optimization_submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="SENT", index=True)  # SENT, ROLLED_BACK
+    partial_coverage_acknowledged = Column(Boolean, nullable=False, default=False)
+    submitted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    submitted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rolled_back_at = Column(DateTime(timezone=True), nullable=True)
+    rolled_back_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    notes = Column(Text, nullable=True)
+    summary_payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("project_item_id", name="uq_optimization_submission_project_item"),
+        CheckConstraint("status IN ('SENT', 'ROLLED_BACK')", name="check_optimization_submission_status"),
+    )
+
+    project_item = relationship("ProjectItem")
+    submitted_by = relationship("User", foreign_keys=[submitted_by_id])
+    rolled_back_by = relationship("User", foreign_keys=[rolled_back_by_id])

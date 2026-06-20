@@ -129,3 +129,30 @@
 - Major بدون workaround باز نماند
 - جریان‌های کلیدی کسب‌وکاری توسط کاربر قابل انجام باشد
 
+## سناریوهای الزامی فاز 12C (Procurement Package Finalization Gate)
+
+1. **نهایی‌سازی پکیج**
+   - هنگام فعال‌کردن `Mark as finalized`، وضعیت پکیج در لیست باید `Finalized` نمایش داده شود.
+   - پکیج Draft نباید قابل ارسال به Optimization باشد.
+
+2. **ارسال تک‌آیتم به Optimization**
+   - اگر پوشش کامل باشد، ارسال مستقیم انجام شود.
+   - اگر پوشش ناقص باشد، پیام هشدار کمبود نمایش داده شود و بدون تایید صریح کاربر ارسال نشود.
+
+3. **ارسال گروهی پکیج‌های نهایی**
+   - گزینه `Send all finalized packages to optimization` باید فعال باشد.
+   - آیتم‌های کامل ارسال شوند؛ آیتم‌های ناقص فقط با تایید صریح ارسال شوند؛ آیتم‌های already sent/skip مشخص باشند.
+
+4. **قفل‌گذاری پس از ارسال**
+   - آیتم ارسال‌شده باید `sent to optimization` شود.
+   - دکمه‌های create/edit/delete پکیج برای آن آیتم غیرفعال شوند.
+   - در صورت rollback امن، امکان ویرایش مجدد بازگردد.
+
+5. **فیلترهای جدید صفحه Procurement**
+   - فیلتر وضعیت Optimization: `all / not sent / sent / rolled back`
+   - فیلتر وضعیت پوشش: `all / no package / partial / full / over-covered / missing components`
+
+6. **وضوح معنای Coverage**
+   - تمایز بین `This package coverage` و `Aggregate/Optimization-eligible coverage` مشخص باشد.
+   - مقادیر بیش از 100% به‌صورت surplus/over-coverage نمایش داده شوند، نه صرفا full.
+

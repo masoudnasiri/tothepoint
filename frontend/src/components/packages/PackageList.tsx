@@ -28,8 +28,6 @@ import { formatApiError } from '../../utils/errorUtils.ts';
 import {
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Analytics as AnalyticsIcon,
-  Send as SendIcon,
   Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
@@ -40,10 +38,9 @@ interface PackageListProps {
   projectItemId: number;
   itemCode: string;
   itemName?: string;
+  enabled?: boolean;
   onEdit?: (packageId: number) => void;
   onDelete?: (packageId: number) => void;
-  onAnalyze?: (packageId: number) => void;
-  onSendToOptimizer?: (packageId: number) => void;
   refreshTrigger?: number;
 }
 
@@ -55,14 +52,46 @@ interface PackageWithDetails extends ProcurementPackage {
   supplier_name?: string;
 }
 
+const toCoveragePercent = (
+  pkg: ProcurementPackage,
+  coverageSummary: any
+): number => {
+  const mainRequired = Number(coverageSummary?.main_item?.required || 0);
+  const subitemsMap = coverageSummary?.subitems || {};
+  const totalSubRequired = Object.values(subitemsMap).reduce(
+    (sum: number, sub: any) => sum + Number(sub?.required || 0),
+    0
+  );
+
+  // For FULL package UX/business expectation: if main item demand is fully covered, show 100%.
+  if (pkg.package_type === 'FULL') {
+    if (mainRequired <= 0) return 100;
+    return Number(pkg.main_item_quantity || 0) >= mainRequired ? 100 : Math.min(100, (Number(pkg.main_item_quantity || 0) / mainRequired) * 100);
+  }
+
+  const coveredMain = Math.min(Number(pkg.main_item_quantity || 0), Math.max(0, mainRequired));
+
+  const packageSubitems = pkg.subitems || [];
+  const coveredSub = packageSubitems.reduce((sum, si) => {
+    const req = Number(subitemsMap?.[si.project_item_subitem_id]?.required || 0);
+    const covered = Number(si.quantity_covered || 0);
+    return sum + Math.min(Math.max(0, covered), Math.max(0, req));
+  }, 0);
+
+  // Denominator should be total item demand, not only sub-items present in this package.
+  const totalRequired = mainRequired + totalSubRequired;
+  if (totalRequired <= 0) return 0;
+
+  return Math.min(100, ((coveredMain + coveredSub) / totalRequired) * 100);
+};
+
 export const PackageList: React.FC<PackageListProps> = ({
   projectItemId,
   itemCode,
   itemName,
+  enabled = true,
   onEdit,
   onDelete,
-  onAnalyze,
-  onSendToOptimizer,
   refreshTrigger,
 }) => {
   const { t } = useTranslation();
@@ -71,78 +100,52 @@ export const PackageList: React.FC<PackageListProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     fetchPackages();
-  }, [projectItemId, refreshTrigger]);
+  }, [enabled, projectItemId, refreshTrigger]);
 
   const fetchPackages = async () => {
+    if (!enabled) return;
     setLoading(true);
     setError(null);
     try {
-      const response = await packagesAPI.listByProjectItem(projectItemId, true);
-      const packagesData = response.data as ProcurementPackage[];
+      const packagesResponse = await packagesAPI.listByProjectItem(projectItemId, true);
 
-      // Fetch additional details for each package
-      const packagesWithDetails = await Promise.all(
-        packagesData.map(async (pkg) => {
-          try {
-            // Get package details including subitems
-            const pkgDetails = await packagesAPI.get(pkg.id);
-            // Handle both direct array and nested structure
-            const subitems = Array.isArray(pkgDetails.data?.subitems) 
-              ? pkgDetails.data.subitems 
-              : (pkgDetails.data?.data?.subitems || []);
-            
-            // Debug logging
-            if (subitems.length === 0) {
-              console.log(`Package ${pkg.id} subitems:`, pkgDetails.data?.subitems, 'Full response:', pkgDetails.data);
-            }
-            
-            // Get procurement options for this package
-            const optionsResponse = await procurementAPI.listByProjectItem(projectItemId);
-            const packageOptions = optionsResponse.data.filter(
-              (opt: any) => opt.package_id === pkg.id
-            );
-            
-            // Debug logging for procurement options
-            if (packageOptions.length === 0) {
-              console.log(`Package ${pkg.id} procurement options:`, optionsResponse.data?.filter((opt: any) => opt.package_id === pkg.id));
-            }
+      const packagesData = packagesResponse.data as ProcurementPackage[];
+      if (!packagesData || packagesData.length === 0) {
+        setPackages([]);
+        setLoading(false);
+        return;
+      }
 
-            // Calculate coverage if available
-            const coverageSummary = await packagesAPI.getCoverageSummary(projectItemId).catch(() => null);
-            const itemCoverage = coverageSummary?.data?.items?.find(
-              (item: any) => item.project_item_id === projectItemId
-            );
+      const [optionsResponse, coverageResponse] = await Promise.all([
+        procurementAPI.listByProjectItem(projectItemId),
+        packagesAPI.getCoverageSummary(projectItemId).catch(() => null),
+      ]);
 
-            // Get supplier name from package data (supplier relationship should be loaded)
-            // The list endpoint now includes supplier in the response
-            const supplierName = 
-              (pkg as any).supplier?.company_name || 
-              pkgDetails.data?.supplier?.company_name || 
-              null;
+      const optionsData = Array.isArray(optionsResponse.data) ? optionsResponse.data : [];
+      const coverageSummary = coverageResponse?.data || null;
 
-            return {
-              ...pkg,
-              subitem_count: subitems.length,
-              procurement_option_count: packageOptions.length,
-              coverage_percentage: itemCoverage?.coverage_percentage || 0,
-              main_item_quantity: subitems.reduce((sum: number, si: any) => sum + (si.quantity_covered || 0), 0),
-              supplier_name: supplierName,
-            };
-          } catch (err) {
-            console.error(`Failed to fetch details for package ${pkg.id}:`, err);
-            // Even if details fail, try to get supplier from the list response
-            const supplierName = (pkg as any).supplier?.company_name || null;
-            return {
-              ...pkg,
-              subitem_count: 0,
-              procurement_option_count: 0,
-              coverage_percentage: 0,
-              supplier_name: supplierName,
-            };
-          }
-        })
-      );
+      const optionCountByPackageId = optionsData.reduce((acc: Record<number, number>, opt: any) => {
+        const pkgId = Number(opt?.package_id);
+        if (Number.isFinite(pkgId)) {
+          acc[pkgId] = (acc[pkgId] || 0) + 1;
+        }
+        return acc;
+      }, {});
+
+      const packagesWithDetails = packagesData.map((pkg) => {
+        const subitems = pkg.subitems || [];
+        const supplierName = (pkg as any).supplier?.company_name || null;
+
+        return {
+          ...pkg,
+          subitem_count: subitems.length,
+          procurement_option_count: optionCountByPackageId[pkg.id] || 0,
+          coverage_percentage: toCoveragePercent(pkg, coverageSummary),
+          supplier_name: supplierName,
+        };
+      });
 
       setPackages(packagesWithDetails);
     } catch (err: any) {
@@ -173,10 +176,29 @@ export const PackageList: React.FC<PackageListProps> = ({
   };
 
   const getCoverageColor = (percentage: number) => {
+    if (percentage > 100) return 'warning';
     if (percentage === 100) return 'success';
     if (percentage > 0) return 'warning';
     return 'error';
   };
+
+  const getStatusChip = (pkg: PackageWithDetails) => {
+    const status = pkg.status || (pkg.is_active ? (pkg.is_finalized ? 'FINALIZED' : 'DRAFT') : 'INACTIVE');
+    switch (status) {
+      case 'SENT_TO_OPTIMIZATION':
+        return { label: t('procurement.sentToOptimization') || 'Sent to optimization', color: 'info' as const };
+      case 'FINALIZED':
+        return { label: t('procurement.finalized') || 'Finalized', color: 'success' as const };
+      case 'INACTIVE':
+        return { label: t('procurement.inactive') || 'Inactive', color: 'default' as const };
+      default:
+        return { label: t('procurement.draft') || 'Draft', color: 'warning' as const };
+    }
+  };
+
+  if (!enabled) {
+    return null;
+  }
 
   if (loading) {
     return (
@@ -246,7 +268,7 @@ export const PackageList: React.FC<PackageListProps> = ({
                 </Typography>
               </TableCell>
               <TableCell align="center">
-                <Tooltip title={`${Math.round(pkg.coverage_percentage || 0)}% coverage`}>
+                <Tooltip title={`${Math.round(pkg.coverage_percentage || 0)}% ${(t('procurement.thisPackageCoverage') || 'This package coverage')}`}>
                   <Box>
                     <Chip
                       label={`${Math.round(pkg.coverage_percentage || 0)}%`}
@@ -263,40 +285,26 @@ export const PackageList: React.FC<PackageListProps> = ({
                 <Chip label={pkg.procurement_option_count || 0} size="small" variant="outlined" />
               </TableCell>
               <TableCell align="center">
-                <Chip
-                  label={pkg.is_active ? (t('procurement.active') || 'Active') : (t('procurement.inactive') || 'Inactive')}
-                  size="small"
-                  color={pkg.is_active ? 'success' : 'default'}
-                />
+                <Chip {...getStatusChip(pkg)} size="small" />
               </TableCell>
               <TableCell align="center">
                 <Box display="flex" gap={0.5} justifyContent="center">
-                  {onAnalyze && (
-                    <Tooltip title={t('procurement.analyzeCoverage') || 'Analyze Coverage'}>
-                      <IconButton size="small" onClick={() => onAnalyze(pkg.id)}>
-                        <AnalyticsIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                  {onSendToOptimizer && (
-                    <Tooltip title={t('procurement.sendToOptimizer') || 'Send to Optimizer'}>
-                      <IconButton size="small" color="primary" onClick={() => onSendToOptimizer(pkg.id)}>
-                        <SendIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
                   {onEdit && (
-                    <Tooltip title={t('common.edit') || 'Edit'}>
-                      <IconButton size="small" onClick={() => onEdit(pkg.id)}>
+                    <Tooltip title={pkg.is_locked_for_optimization ? (t('procurement.rollbackRequiredBeforeEdit') || 'Rollback required before editing') : (t('common.edit') || 'Edit')}>
+                      <span>
+                      <IconButton size="small" onClick={() => onEdit(pkg.id)} disabled={pkg.is_locked_for_optimization}>
                         <EditIcon fontSize="small" />
                       </IconButton>
+                      </span>
                     </Tooltip>
                   )}
                   {onDelete && (
-                    <Tooltip title={t('common.delete') || 'Delete'}>
-                      <IconButton size="small" color="error" onClick={() => onDelete(pkg.id)}>
+                    <Tooltip title={pkg.is_locked_for_optimization ? (t('procurement.rollbackRequiredBeforeEdit') || 'Rollback required before editing') : (t('common.delete') || 'Delete')}>
+                      <span>
+                      <IconButton size="small" color="error" onClick={() => onDelete(pkg.id)} disabled={pkg.is_locked_for_optimization}>
                         <DeleteIcon fontSize="small" />
                       </IconButton>
+                      </span>
                     </Tooltip>
                   )}
                 </Box>

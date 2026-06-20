@@ -77,6 +77,7 @@ interface PackageWizardData {
   };
   discount_bundle_threshold?: number;
   discount_bundle_percent?: number;
+  is_finalized: boolean;
 }
 
 const steps = ['Metadata', 'Quantities', 'Pricing & Delivery'];
@@ -118,6 +119,7 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
       type: 'cash',
       discount_percent: 0,
     },
+    is_finalized: false,
   });
 
   // Initialize wizard data when opening (for create) or when initialData changes (for edit)
@@ -145,6 +147,7 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
           },
           discount_bundle_threshold: initialData.discount_bundle_threshold,
           discount_bundle_percent: initialData.discount_bundle_percent,
+          is_finalized: initialData.is_finalized || false,
         });
         setActiveStep(0); // Reset to first step when editing
       } else if (subItemRequirements.length > 0) {
@@ -187,8 +190,20 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
           package_id: pkg.id,
           package_name: pkg.package_name || '',
           package_type: pkg.package_type as 'FULL' | 'PARTIAL' | 'CUSTOM',
-          main_item_quantity: 0, // Will be calculated from package_subitems
-          subitem_coverages: [],
+          main_item_quantity: Number(pkg.main_item_quantity || 0),
+          subitem_coverages: (pkg.subitems || [])
+            .map((sub: any) => {
+              const requirement = subItemRequirements.find(
+                (req) => req.item_subitem_id === sub.project_item_subitem_id
+              );
+              if (!requirement) return null;
+              return {
+                sub_item_id: requirement.sub_item_id,
+                covered_quantity: Number(sub.quantity_covered || 0),
+                required_quantity: requirement.required_quantity || 0,
+              };
+            })
+            .filter((sub): sub is { sub_item_id: number; covered_quantity: number; required_quantity: number } => sub !== null),
         })),
         mockPackageCoverage]
       );
@@ -275,6 +290,7 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
         description: wizardData.description,
         is_active: true,
         main_item_quantity: wizardData.main_item_quantity || 0,
+        is_finalized: wizardData.is_finalized,
       };
 
       let newPackageId: number;
@@ -304,10 +320,16 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
         }
       }
       
-      // Create procurement option linked to package (only if required fields are present)
-      // Note: This is optional - package can exist without a procurement option initially
+      // Create or update procurement option linked to package.
+      // A package can still exist without an option, but finalized state for optimization
+      // is stored on procurement options, so we persist is_finalized whenever possible.
       if (wizardData.base_cost > 0 && wizardData.currency_id) {
         try {
+          const existingOptionsResponse = await procurementAPI.listByProjectItem(projectItemId);
+          const existingOption = (existingOptionsResponse.data || []).find(
+            (opt: any) => opt.package_id === newPackageId
+          );
+
           const optionPayload: any = {
             package_id: newPackageId,
             project_item_id: projectItemId,
@@ -327,7 +349,11 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
             is_finalized: wizardData.is_finalized || false,
           };
 
-          await procurementAPI.create(optionPayload);
+          if (existingOption?.id) {
+            await procurementAPI.update(existingOption.id, optionPayload);
+          } else {
+            await procurementAPI.create(optionPayload);
+          }
         } catch (optionErr: any) {
           // Log error but don't fail package creation - package can exist without procurement option
           console.warn('Failed to create procurement option for package:', optionErr);
@@ -380,10 +406,6 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
         await Promise.all(subitemPayloads.map(payload => packagesAPI.createSubItem(payload)));
       }
 
-      if (onPackageCreated) {
-        onPackageCreated(newPackageId);
-      }
-
       onClose();
       // Reset wizard
       setActiveStep(0);
@@ -405,7 +427,16 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
           type: 'cash',
           discount_percent: 0,
         },
+        is_finalized: false,
       });
+
+      if (onPackageCreated) {
+        try {
+          await Promise.resolve(onPackageCreated(newPackageId));
+        } catch (refreshErr) {
+          console.warn('Package created but post-create refresh failed:', refreshErr);
+        }
+      }
     } catch (err: any) {
       // Handle duplicate package name error specifically
       if (err?.response?.status === 409 || err?.response?.status === 400) {
@@ -480,7 +511,16 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
   ];
 
   const coveragePercent = coverageSummary
-    ? Math.round((coverageSummary.covered_main_item_quantity / (mainItemRequiredQuantity || 1)) * 100)
+    ? (coverageSummary.main_item?.covered / (mainItemRequiredQuantity || 1)) * 100
+    : 0;
+  const coveragePercentLabel = Math.round(coveragePercent);
+  const coveragePercentForRing = Math.min(100, Math.max(0, coveragePercent));
+  const totalRequiredForCurrent = mainItemRequiredQuantity + subItemRequirements.reduce((sum, req) => sum + (req.required_quantity || 0), 0);
+  const totalCurrentPackageCovered =
+    (wizardData.main_item_quantity || 0) +
+    Object.values(wizardData.subitem_quantities || {}).reduce((sum, qty) => sum + (Number(qty) || 0), 0);
+  const currentPackageCoveragePercent = totalRequiredForCurrent > 0
+    ? Math.round((totalCurrentPackageCovered / totalRequiredForCurrent) * 100)
     : 0;
 
   const coverageColor =
@@ -605,28 +645,44 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
                   <circle
                     cx={40} cy={40} r={33} fill="none"
                     stroke={coverageColor} strokeWidth={7}
-                    strokeDasharray={`${(Math.min(coveragePercent, 100) / 100) * 2 * Math.PI * 33} ${2 * Math.PI * 33}`}
+                    strokeDasharray={`${(coveragePercentForRing / 100) * 2 * Math.PI * 33} ${2 * Math.PI * 33}`}
                     strokeLinecap="round"
                   />
                 </svg>
                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Typography sx={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.9375rem', fontWeight: 700, color: coverageColor }}>
-                    {coveragePercent}%
+                    {coveragePercentLabel}%
                   </Typography>
                 </Box>
               </Box>
             </Box>
 
             <Typography sx={{ fontSize: '0.75rem', fontWeight: 500, color: '#14181F', textAlign: 'center', mb: 0.5 }}>
-              {coverageSummary?.is_fully_covered ? 'Fully Covered' : 'Partial Coverage'}
+              {coverageSummary?.is_over_covered
+                ? 'Covered with surplus'
+                : coverageSummary?.is_fully_covered
+                  ? 'Fully covered'
+                  : 'Partial coverage'}
             </Typography>
 
             {coverageSummary && (
               <Box sx={{ mt: 2 }}>
                 <Box sx={{ mb: 1.5 }}>
-                  <Typography sx={{ fontSize: '0.6875rem', color: '#8A92A1', mb: 0.25 }}>Main item</Typography>
+                  <Typography sx={{ fontSize: '0.6875rem', color: '#8A92A1', mb: 0.25 }}>This package coverage</Typography>
                   <Typography sx={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem', fontWeight: 600, color: '#14181F' }}>
-                    {coverageSummary.covered_main_item_quantity || 0} / {mainItemRequiredQuantity}
+                    {currentPackageCoveragePercent}%
+                  </Typography>
+                </Box>
+                <Box sx={{ mb: 1.5 }}>
+                  <Typography sx={{ fontSize: '0.6875rem', color: '#8A92A1', mb: 0.25 }}>Optimization-eligible aggregate coverage</Typography>
+                  <Typography sx={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem', fontWeight: 600, color: '#14181F' }}>
+                    {coveragePercentLabel}%
+                  </Typography>
+                </Box>
+                <Box sx={{ mb: 1.5 }}>
+                  <Typography sx={{ fontSize: '0.6875rem', color: '#8A92A1', mb: 0.25 }}>Main item aggregate</Typography>
+                  <Typography sx={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem', fontWeight: 600, color: '#14181F' }}>
+                    {coverageSummary.main_item?.covered || 0} / {mainItemRequiredQuantity}
                   </Typography>
                 </Box>
                 {subItemRequirements.length > 0 && (
@@ -653,6 +709,22 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
                     })}
                   </Box>
                 )}
+              </Box>
+            )}
+
+            {coverageSummary && coverageSummary.is_over_covered && (
+              <Box
+                sx={{
+                  mt: 2, p: 1.5, background: '#EEF5EE',
+                  border: '1px solid #CBE8CB', borderRadius: '8px',
+                }}
+              >
+                <Typography sx={{ fontSize: '0.6875rem', fontWeight: 600, color: '#1B7A4D' }}>
+                  Surplus coverage
+                </Typography>
+                <Typography sx={{ fontSize: '0.6875rem', color: '#1B7A4D', mt: 0.25 }}>
+                  Aggregate coverage exceeds required demand. Review before optimization submission.
+                </Typography>
               </Box>
             )}
 

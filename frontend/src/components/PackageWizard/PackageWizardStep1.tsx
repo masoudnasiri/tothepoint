@@ -11,7 +11,7 @@ import {
   Paper,
 } from '@mui/material';
 import { useTranslation } from 'react-i18next';
-import { suppliersAPI } from '../../services/api.ts';
+import { procurementAPI, suppliersAPI } from '../../services/api.ts';
 
 interface PackageWizardStep1Props {
   data: {
@@ -38,7 +38,7 @@ export const PackageWizardStep1: React.FC<PackageWizardStep1Props> = ({ data, on
     const fetchSuppliers = async () => {
       setLoadingSuppliers(true);
       try {
-        const response = await suppliersAPI.list();
+        const response = await suppliersAPI.list({ page: 1, size: 200 });
         // Handle paginated response structure: response.data.suppliers or direct array
         let suppliersData: Supplier[] = [];
         if (Array.isArray(response.data)) {
@@ -50,8 +50,15 @@ export const PackageWizardStep1: React.FC<PackageWizardStep1Props> = ({ data, on
         }
         setSuppliers(suppliersData);
       } catch (err) {
-        console.error('Failed to load suppliers', err);
-        setSuppliers([]); // Ensure suppliers is always an array
+        console.error('Failed to load suppliers from supplier registry, trying procurement fallback', err);
+        try {
+          const fallbackResponse = await procurementAPI.getSuppliers();
+          const fallbackData = Array.isArray(fallbackResponse.data) ? fallbackResponse.data : [];
+          setSuppliers(fallbackData);
+        } catch (fallbackErr) {
+          console.error('Fallback supplier loading also failed', fallbackErr);
+          setSuppliers([]); // Ensure suppliers is always an array
+        }
       } finally {
         setLoadingSuppliers(false);
       }

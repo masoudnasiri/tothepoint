@@ -472,6 +472,10 @@ class ProcurementPackageBase(BaseModel):
     description: Optional[str] = Field(None, description="Package description")
     is_active: bool = Field(True, description="Is this package active?")
     main_item_quantity: Optional[int] = Field(None, ge=0, description="Quantity of main item covered")
+    is_finalized: Optional[bool] = Field(
+        False,
+        description="Finalized status for optimization eligibility (computed from linked options)",
+    )
 
 
 class ProcurementPackageCreate(ProcurementPackageBase):
@@ -485,6 +489,7 @@ class ProcurementPackageUpdate(BaseModel):
     description: Optional[str] = None
     is_active: Optional[bool] = None
     main_item_quantity: Optional[int] = Field(None, ge=0)
+    is_finalized: Optional[bool] = None
 
 
 class ProcurementPackageResponse(ProcurementPackageBase):
@@ -494,6 +499,8 @@ class ProcurementPackageResponse(ProcurementPackageBase):
     created_by_id: Optional[int] = None
     supplier: Optional[SupplierSummary] = None
     subitems: Optional[List["PackageSubItemResponse"]] = Field(None, description="Sub-items included in this package")
+    status: Optional[str] = Field("DRAFT", description="DRAFT, FINALIZED, SENT_TO_OPTIMIZATION, INACTIVE")
+    is_locked_for_optimization: bool = Field(False, description="True when item has been sent to optimization")
     
     model_config = {"from_attributes": True}
 
@@ -522,6 +529,37 @@ class PackageSubItemResponse(PackageSubItemBase):
     created_at: datetime
     
     model_config = {"from_attributes": True}
+
+
+class OptimizationSubmissionRequest(BaseModel):
+    project_item_id: Optional[int] = Field(None, description="Single project item target")
+    project_item_ids: Optional[List[int]] = Field(None, description="Multiple project item targets")
+    send_all_finalized: bool = Field(False, description="Submit all finalized items in procurement scope")
+    include_incomplete_with_confirmation: bool = Field(
+        False,
+        description="Allow incomplete coverage submissions after explicit confirmation",
+    )
+    confirmed_incomplete_item_ids: List[int] = Field(
+        default_factory=list,
+        description="Subset of incomplete items explicitly approved by user",
+    )
+    max_combinations: int = Field(128, ge=1, le=512, description="Safety cap for generated combinations")
+
+    @validator("project_item_ids", always=True)
+    def validate_target_scope(cls, v, values):
+        if values.get("send_all_finalized"):
+            return v
+        if values.get("project_item_id") is not None:
+            return v
+        if v and len(v) > 0:
+            return v
+        raise ValueError(
+            "Provide project_item_id, project_item_ids, or set send_all_finalized=true"
+        )
+
+
+class OptimizationSubmissionRollbackRequest(BaseModel):
+    notes: Optional[str] = None
 
 
 # Budget Data Schemas
@@ -1121,7 +1159,12 @@ class SupplierBase(BaseModel):
     legal_entity_type: Optional[str] = Field(None, max_length=50, description="Legal entity type (LLC, Ltd., JV, etc.)")
     registration_number: Optional[str] = Field(None, max_length=100, description="Registration number")
     tax_id: Optional[str] = Field(None, max_length=100, description="Tax ID")
-    established_year: Optional[int] = Field(None, ge=1800, le=2030, description="Established year")
+    established_year: Optional[int] = Field(
+        None,
+        ge=1200,
+        le=2100,
+        description="Established year (Gregorian or Jalali)"
+    )
     
     # Location Information
     country: Optional[str] = Field(None, max_length=100, description="Country")
@@ -1194,7 +1237,7 @@ class SupplierUpdate(BaseModel):
     legal_entity_type: Optional[str] = Field(None, max_length=50)
     registration_number: Optional[str] = Field(None, max_length=100)
     tax_id: Optional[str] = Field(None, max_length=100)
-    established_year: Optional[int] = Field(None, ge=1800, le=2030)
+    established_year: Optional[int] = Field(None, ge=1200, le=2100)
     
     # Location Information
     country: Optional[str] = Field(None, max_length=100)
