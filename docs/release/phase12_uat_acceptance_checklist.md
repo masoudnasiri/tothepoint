@@ -51,6 +51,19 @@
 - [ ] Coverage state filter works (`all/no package/partial/full/over-covered/missing components`)
 - [ ] Coverage labels distinguish current package vs aggregate vs optimization-eligible semantics
 
+## چک‌لیست اختصاصی فاز 12D
+
+- [ ] Bulk rollback button (`Rollback from optimization`) is visible for sent items
+- [ ] Rollback preview dialog supports checklist filters (package type, coverage state, supplier type, single/multiple supplier, warning-confirmed incomplete)
+- [ ] IRR price range filter (min/max) affects preview as expected
+- [ ] Date range filter with selectable date field affects preview as expected
+- [ ] Preview shows matched/rollbackable/unsafe counts and unsafe skip reasons
+- [ ] Execute endpoint rejects rollback when confirmation flag is false
+- [ ] Unsafe items are skipped (not silently rolled back) with explicit reason payload
+- [ ] Safe selected items rollback successfully and item state changes out of `sent_to_optimization`
+- [ ] Package create/edit/delete actions become available again after rollback
+- [ ] Bulk rollback audit events are present (success/skip/summary)
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker

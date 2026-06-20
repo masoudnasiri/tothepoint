@@ -4,6 +4,7 @@ Phase 3: Package-based procurement management
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -39,6 +40,10 @@ from app.services.package_combination_service import (
     analyze_project_item_package_combinations,
     mark_project_item_sent_to_optimization,
     rollback_project_item_optimization_submission,
+)
+from app.services.optimization_rollback_service import (
+    build_bulk_rollback_preview,
+    execute_bulk_rollback,
 )
 
 router = APIRouter(prefix="/packages", tags=["packages"])
@@ -113,6 +118,50 @@ async def _resolve_target_project_item_ids(
     if request.project_item_ids:
         ids.extend([int(v) for v in request.project_item_ids])
     return sorted(set(ids))
+
+
+class OptimizationRollbackFilterRequest(BaseModel):
+    include_full_package_items: bool = True
+    include_partial_package_items: bool = True
+    include_complete_coverage_items: bool = True
+    include_incomplete_coverage_items: bool = True
+    include_over_covered_items: bool = True
+    include_domestic_suppliers: bool = True
+    include_foreign_suppliers: bool = True
+    include_single_supplier_items: bool = True
+    include_multiple_supplier_items: bool = True
+    include_warning_incomplete_submissions: bool = True
+    min_total_cost_irr: Optional[float] = Field(
+        None, description="Minimum IRR-equivalent procurement cost"
+    )
+    max_total_cost_irr: Optional[float] = Field(
+        None, description="Maximum IRR-equivalent procurement cost"
+    )
+    date_from: Optional[str] = Field(None, description="YYYY-MM-DD")
+    date_to: Optional[str] = Field(None, description="YYYY-MM-DD")
+    date_field: str = Field(
+        "submitted_at",
+        pattern="^(submitted_at|delivery_date|purchase_date|project_need_date)$",
+    )
+    project_ids: List[int] = Field(default_factory=list)
+    supplier_ids: List[int] = Field(default_factory=list)
+
+
+class OptimizationRollbackPreviewRequest(BaseModel):
+    filters: OptimizationRollbackFilterRequest = Field(
+        default_factory=OptimizationRollbackFilterRequest
+    )
+
+
+class OptimizationRollbackExecuteRequest(BaseModel):
+    filters: OptimizationRollbackFilterRequest = Field(
+        default_factory=OptimizationRollbackFilterRequest
+    )
+    selected_item_ids: List[int] = Field(default_factory=list)
+    confirmed: bool = Field(
+        False, description="Must be true to execute rollback"
+    )
+    notes: Optional[str] = None
 
 
 @router.post("/", response_model=ProcurementPackageResponse, status_code=status.HTTP_201_CREATED)
@@ -784,4 +833,101 @@ async def rollback_packages_from_optimization(
         "status": record.status,
         "rolled_back_at": record.rolled_back_at.isoformat() if record.rolled_back_at else None,
     }
+
+
+@router.post("/optimization-rollback-preview")
+async def preview_bulk_optimization_rollback(
+    request: OptimizationRollbackPreviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Preview rollback eligibility for sent-to-optimization items using checklist/range filters.
+    This endpoint is read-only and does not mutate data.
+    """
+    if current_user.role not in ["procurement", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only procurement/admin users can preview optimization rollback",
+        )
+
+    preview = await build_bulk_rollback_preview(
+        db,
+        filters=request.filters.model_dump(),
+    )
+    return preview
+
+
+@router.post("/optimization-rollback")
+async def execute_bulk_optimization_rollback(
+    request: OptimizationRollbackExecuteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Execute controlled bulk rollback for safe sent-to-optimization items.
+    """
+    if current_user.role not in ["procurement", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only procurement/admin users can execute optimization rollback",
+        )
+
+    result = await execute_bulk_rollback(
+        db,
+        filters=request.filters.model_dump(),
+        selected_item_ids=request.selected_item_ids,
+        confirmed=request.confirmed,
+        user_id=current_user.id,
+        notes=request.notes,
+    )
+    await db.commit()
+
+    for row in result.get("rolled_back_items", []):
+        try:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="ITEM_OPTIMIZATION_BULK_ROLLBACK",
+                entity_type="project_item",
+                entity_id=row.get("project_item_id"),
+                details={
+                    "item_code": row.get("item_code"),
+                    "rolled_back_at": row.get("rolled_back_at"),
+                },
+            )
+        except Exception:
+            pass
+
+    for row in result.get("skipped_items", []):
+        try:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="ITEM_OPTIMIZATION_BULK_ROLLBACK_SKIPPED",
+                entity_type="project_item",
+                entity_id=row.get("project_item_id"),
+                details=row,
+            )
+        except Exception:
+            pass
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="ITEM_OPTIMIZATION_BULK_ROLLBACK_SUMMARY",
+            entity_type="optimization_submission",
+            entity_id=None,
+            details={
+                "rolled_back_count": len(result.get("rolled_back_items", [])),
+                "skipped_count": len(result.get("skipped_items", [])),
+                "error_count": len(result.get("errors", [])),
+                "preview_summary": result.get("preview_summary", {}),
+            },
+        )
+    except Exception:
+        pass
+
+    return result
 

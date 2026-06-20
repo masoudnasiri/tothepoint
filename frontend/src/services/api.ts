@@ -490,6 +490,51 @@ export const packagesAPI = {
   }) => api.post('/packages/optimization-submission', payload),
   rollbackOptimizationSubmission: (projectItemId: number, notes?: string) =>
     api.post(`/packages/optimization-submission/${projectItemId}/rollback`, { notes }),
+  previewBulkRollback: (payload: {
+    filters: {
+      include_full_package_items?: boolean;
+      include_partial_package_items?: boolean;
+      include_complete_coverage_items?: boolean;
+      include_incomplete_coverage_items?: boolean;
+      include_over_covered_items?: boolean;
+      include_domestic_suppliers?: boolean;
+      include_foreign_suppliers?: boolean;
+      include_single_supplier_items?: boolean;
+      include_multiple_supplier_items?: boolean;
+      include_warning_incomplete_submissions?: boolean;
+      min_total_cost_irr?: number;
+      max_total_cost_irr?: number;
+      date_from?: string;
+      date_to?: string;
+      date_field?: 'submitted_at' | 'delivery_date' | 'purchase_date' | 'project_need_date';
+      project_ids?: number[];
+      supplier_ids?: number[];
+    };
+  }) => api.post('/packages/optimization-rollback-preview', payload),
+  executeBulkRollback: (payload: {
+    filters: {
+      include_full_package_items?: boolean;
+      include_partial_package_items?: boolean;
+      include_complete_coverage_items?: boolean;
+      include_incomplete_coverage_items?: boolean;
+      include_over_covered_items?: boolean;
+      include_domestic_suppliers?: boolean;
+      include_foreign_suppliers?: boolean;
+      include_single_supplier_items?: boolean;
+      include_multiple_supplier_items?: boolean;
+      include_warning_incomplete_submissions?: boolean;
+      min_total_cost_irr?: number;
+      max_total_cost_irr?: number;
+      date_from?: string;
+      date_to?: string;
+      date_field?: 'submitted_at' | 'delivery_date' | 'purchase_date' | 'project_need_date';
+      project_ids?: number[];
+      supplier_ids?: number[];
+    };
+    selected_item_ids?: number[];
+    confirmed: boolean;
+    notes?: string;
+  }) => api.post('/packages/optimization-rollback', payload),
 };
 
 // Supplier Payments API

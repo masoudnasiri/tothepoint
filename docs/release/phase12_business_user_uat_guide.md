@@ -156,3 +156,28 @@
    - تمایز بین `This package coverage` و `Aggregate/Optimization-eligible coverage` مشخص باشد.
    - مقادیر بیش از 100% به‌صورت surplus/over-coverage نمایش داده شوند، نه صرفا full.
 
+## سناریوهای الزامی فاز 12D (Bulk Rollback from Optimization)
+
+1. **دکمه بازگردانی گروهی**
+   - در صفحه Procurement، دکمه `Rollback from optimization / بازگردانی از بهینه‌سازی` هنگام وجود آیتم Sent نمایش داده شود.
+   - اگر آیتم rollbackable موجود نباشد، وضعیت غیرفعال/اطلاع‌رسانی مناسب دیده شود.
+
+2. **دیالوگ پیش‌نمایش بازگردانی**
+   - فیلترهای چک‌باکسی (نوع پکیج، پوشش، نوع تامین‌کننده، تک/چند تامین‌کننده، ارسال ناقص تاییدشده) قابل انتخاب باشند.
+   - فیلتر بازه هزینه `IRR` (حداقل/حداکثر) و فیلتر بازه تاریخ (`from/to`) قابل اعمال باشند.
+   - انتخاب فیلد تاریخ (`sent date / delivery / purchase / need date`) در UI قابل تغییر باشد.
+
+3. **خروجی پیش‌نمایش**
+   - شمارنده‌های `matched / rollbackable / unsafe` نمایش داده شوند.
+   - آیتم‌های unsafe با دلیل رد شدن نمایش داده شوند.
+   - هشدار واضح درباره unlock شدن ویرایش پکیج پس از rollback وجود داشته باشد.
+
+4. **اجرای بازگردانی با تایید صریح**
+   - بدون تایید صریح، rollback اجرا نشود.
+   - فقط آیتم‌های safe بازگردانی شوند؛ unsafe ها skip شوند.
+   - در پایان، summary شامل rolled-back/skipped نمایش داده شود.
+
+5. **بازگشت قابلیت ویرایش پس از rollback**
+   - برای آیتم rollback‌شده، create/edit/delete پکیج دوباره فعال شود.
+   - وضعیت آیتم از `sent_to_optimization` به `rolled_back_from_optimization` تغییر کند.
+

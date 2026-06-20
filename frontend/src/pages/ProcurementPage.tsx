@@ -5,7 +5,9 @@ import {
   Button,
   IconButton,
   Dialog,
+  DialogTitle,
   DialogContent,
+  DialogActions,
   TextField,
   Alert,
   CircularProgress,
@@ -13,6 +15,11 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Checkbox,
+  FormControlLabel,
+  FormGroup,
+  Divider,
+  Chip,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -100,6 +107,58 @@ interface Supplier {
   company_name: string;
 }
 
+type RollbackDateField = 'submitted_at' | 'delivery_date' | 'purchase_date' | 'project_need_date';
+
+interface BulkRollbackFilters {
+  include_full_package_items: boolean;
+  include_partial_package_items: boolean;
+  include_complete_coverage_items: boolean;
+  include_incomplete_coverage_items: boolean;
+  include_over_covered_items: boolean;
+  include_domestic_suppliers: boolean;
+  include_foreign_suppliers: boolean;
+  include_single_supplier_items: boolean;
+  include_multiple_supplier_items: boolean;
+  include_warning_incomplete_submissions: boolean;
+  min_total_cost_irr?: number;
+  max_total_cost_irr?: number;
+  date_from?: string;
+  date_to?: string;
+  date_field: RollbackDateField;
+  project_ids: number[];
+  supplier_ids: number[];
+}
+
+interface BulkRollbackPreviewItem {
+  project_item_id: number;
+  item_code: string;
+  item_name?: string;
+  package_type_bucket: string;
+  coverage_state: string;
+  supplier_bucket: string;
+  supplier_count: number;
+  total_cost_irr?: number | null;
+  selected_date?: string | null;
+  skip_reasons?: Array<{ code?: string; reason?: string; count?: number }>;
+}
+
+interface BulkRollbackPreviewResponse {
+  matched_items: BulkRollbackPreviewItem[];
+  rollbackable_items: BulkRollbackPreviewItem[];
+  unsafe_items: BulkRollbackPreviewItem[];
+  summary: {
+    matched_count: number;
+    rollbackable_count: number;
+    unsafe_count: number;
+    by_package_type: Record<string, number>;
+    by_coverage_state: Record<string, number>;
+    by_supplier_type: Record<string, number>;
+    by_date_range: Record<string, number>;
+    by_cost_range: Record<string, number>;
+  };
+  warnings: string[];
+}
+
 export const ProcurementPage: React.FC = () => {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
@@ -147,6 +206,27 @@ export const ProcurementPage: React.FC = () => {
   const [optimizationFilter, setOptimizationFilter] = useState<'all' | 'not_sent' | 'sent' | 'rolled_back'>('all');
   const [coverageFilter, setCoverageFilter] = useState<'all' | 'no_package' | 'partial' | 'full' | 'over_covered' | 'missing_components'>('all');
   const [notice, setNotice] = useState('');
+  const [bulkRollbackOpen, setBulkRollbackOpen] = useState(false);
+  const [bulkRollbackLoading, setBulkRollbackLoading] = useState(false);
+  const [bulkRollbackExecuting, setBulkRollbackExecuting] = useState(false);
+  const [bulkRollbackNote, setBulkRollbackNote] = useState('');
+  const [bulkRollbackFilters, setBulkRollbackFilters] = useState<BulkRollbackFilters>({
+    include_full_package_items: true,
+    include_partial_package_items: true,
+    include_complete_coverage_items: true,
+    include_incomplete_coverage_items: true,
+    include_over_covered_items: true,
+    include_domestic_suppliers: true,
+    include_foreign_suppliers: true,
+    include_single_supplier_items: true,
+    include_multiple_supplier_items: true,
+    include_warning_incomplete_submissions: true,
+    date_field: 'submitted_at',
+    project_ids: [],
+    supplier_ids: [],
+  });
+  const [bulkRollbackPreview, setBulkRollbackPreview] = useState<BulkRollbackPreviewResponse | null>(null);
+  const [bulkRollbackSelectedIds, setBulkRollbackSelectedIds] = useState<number[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -263,6 +343,95 @@ export const ProcurementPage: React.FC = () => {
     }
   };
 
+  const buildBulkRollbackPayload = () => ({
+    filters: {
+      ...bulkRollbackFilters,
+      min_total_cost_irr:
+        bulkRollbackFilters.min_total_cost_irr === undefined ||
+        Number.isNaN(Number(bulkRollbackFilters.min_total_cost_irr))
+          ? undefined
+          : Number(bulkRollbackFilters.min_total_cost_irr),
+      max_total_cost_irr:
+        bulkRollbackFilters.max_total_cost_irr === undefined ||
+        Number.isNaN(Number(bulkRollbackFilters.max_total_cost_irr))
+          ? undefined
+          : Number(bulkRollbackFilters.max_total_cost_irr),
+      date_from: bulkRollbackFilters.date_from || undefined,
+      date_to: bulkRollbackFilters.date_to || undefined,
+    },
+  });
+
+  const openBulkRollbackDialog = () => {
+    setBulkRollbackOpen(true);
+    setBulkRollbackPreview(null);
+    setBulkRollbackSelectedIds([]);
+    setBulkRollbackNote('');
+  };
+
+  const runBulkRollbackPreview = async () => {
+    try {
+      setBulkRollbackLoading(true);
+      const response = await packagesAPI.previewBulkRollback(buildBulkRollbackPayload());
+      const preview = response.data as BulkRollbackPreviewResponse;
+      setBulkRollbackPreview(preview);
+      setBulkRollbackSelectedIds(
+        (preview.rollbackable_items || []).map((item) => Number(item.project_item_id))
+      );
+    } catch (err: any) {
+      setError(formatApiError(err, t('procurement.rollbackFailed') || 'Rollback preview failed'));
+    } finally {
+      setBulkRollbackLoading(false);
+    }
+  };
+
+  const executeBulkRollback = async () => {
+    if (bulkRollbackSelectedIds.length === 0) {
+      setError(t('procurement.noRollbackSelection') || 'Select at least one rollbackable item.');
+      return;
+    }
+    const yes = window.confirm(
+      t('procurement.confirmBulkRollback') ||
+      'Rollback selected items from optimization and unlock package editing?'
+    );
+    if (!yes) return;
+
+    try {
+      setBulkRollbackExecuting(true);
+      const response = await packagesAPI.executeBulkRollback({
+        ...buildBulkRollbackPayload(),
+        selected_item_ids: bulkRollbackSelectedIds,
+        confirmed: true,
+        notes: bulkRollbackNote || undefined,
+      });
+      const data = response.data || {};
+      const rolledBack = data?.rolled_back_items?.length || 0;
+      const skipped = data?.skipped_items?.length || 0;
+      setNotice(
+        `${t('procurement.bulkRollbackSummary') || 'Bulk rollback'}: ${rolledBack} ${t('procurement.rolledBack') || 'rolled back'}, ${skipped} ${t('procurement.skipped') || 'skipped'}`
+      );
+      if ((data?.warnings || []).length > 0) {
+        setError((data.warnings as string[]).join('\n'));
+      }
+      setBulkRollbackOpen(false);
+      setBulkRollbackPreview(null);
+      setBulkRollbackSelectedIds([]);
+      setPackageRefreshTrigger((p) => p + 1);
+      await fetchData();
+    } catch (err: any) {
+      setError(formatApiError(err, t('procurement.rollbackFailed') || 'Bulk rollback failed'));
+    } finally {
+      setBulkRollbackExecuting(false);
+    }
+  };
+
+  const toggleRollbackSelection = (projectItemId: number) => {
+    setBulkRollbackSelectedIds((prev) => (
+      prev.includes(projectItemId)
+        ? prev.filter((id) => id !== projectItemId)
+        : [...prev, projectItemId]
+    ));
+  };
+
   const calculateSummaryStats = async (items?: ItemWithDetails[]) => {
     const toProcess = items || itemsWithDetails;
     const uniqueProjectIds = Array.from(new Set(toProcess.map((it) => it.project_id)));
@@ -311,6 +480,8 @@ export const ProcurementPage: React.FC = () => {
   const handleAccordionChange = (key: string) => (_: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedAccordion(isExpanded ? key : false);
   };
+
+  const sentItemsCount = itemsWithDetails.filter((item) => item.is_sent_to_optimization).length;
 
   const openItemDetails = async (itemDetails: ItemWithDetails) => {
     setSelectedItemDetails(itemDetails);
@@ -455,6 +626,16 @@ export const ProcurementPage: React.FC = () => {
               }}
             >
               {t('procurement.sendAllFinalizedToOptimization') || 'Send all finalized packages to optimization'}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              color="warning"
+              startIcon={<RestartAltIcon sx={{ fontSize: 15 }} />}
+              disabled={sentItemsCount === 0}
+              onClick={openBulkRollbackDialog}
+            >
+              {t('procurement.bulkRollbackFromOptimization') || 'Rollback from optimization'}
             </Button>
           </>
         ) : undefined}
@@ -767,6 +948,273 @@ export const ProcurementPage: React.FC = () => {
           </Box>
         </>
       )}
+
+      <Dialog
+        open={bulkRollbackOpen}
+        onClose={() => !bulkRollbackExecuting && setBulkRollbackOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          {t('procurement.bulkRollbackFromOptimization') || 'Rollback from optimization'}
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ color: rivarTokens.ink500, mb: 2 }}>
+            {t('procurement.bulkRollbackHint') || 'Preview safe rollbackable sent items, then confirm to unlock package editing.'}
+          </Typography>
+
+          <FormGroup row sx={{ mb: 1 }}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_full_package_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_full_package_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterFullPackages') || 'Full package items'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_partial_package_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_partial_package_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterPartialPackages') || 'Partial package items'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_complete_coverage_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_complete_coverage_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterCompleteCoverage') || 'Complete coverage'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_incomplete_coverage_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_incomplete_coverage_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterIncompleteCoverage') || 'Incomplete coverage'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_over_covered_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_over_covered_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterOverCovered') || 'Over-covered / surplus'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_domestic_suppliers}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_domestic_suppliers: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterDomestic') || 'Domestic suppliers'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_foreign_suppliers}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_foreign_suppliers: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterForeign') || 'Foreign suppliers'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_single_supplier_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_single_supplier_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterSingleSupplier') || 'Single supplier'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_multiple_supplier_items}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_multiple_supplier_items: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterMultipleSupplier') || 'Multiple suppliers'}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={bulkRollbackFilters.include_warning_incomplete_submissions}
+                  onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, include_warning_incomplete_submissions: e.target.checked }))}
+                />
+              }
+              label={t('procurement.rollbackFilterWarningIncomplete') || 'Warning-based incomplete submissions'}
+            />
+          </FormGroup>
+
+          <Divider sx={{ my: 1.5 }} />
+          <Grid container spacing={1.5} sx={{ mb: 2 }}>
+            <Grid item xs={12} sm={4}>
+              <TextField
+                label={t('procurement.minCostIrr') || 'Min Cost (IRR)'}
+                type="number"
+                value={bulkRollbackFilters.min_total_cost_irr ?? ''}
+                onChange={(e) =>
+                  setBulkRollbackFilters((prev) => ({
+                    ...prev,
+                    min_total_cost_irr: e.target.value === '' ? undefined : Number(e.target.value),
+                  }))
+                }
+                size="small"
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <TextField
+                label={t('procurement.maxCostIrr') || 'Max Cost (IRR)'}
+                type="number"
+                value={bulkRollbackFilters.max_total_cost_irr ?? ''}
+                onChange={(e) =>
+                  setBulkRollbackFilters((prev) => ({
+                    ...prev,
+                    max_total_cost_irr: e.target.value === '' ? undefined : Number(e.target.value),
+                  }))
+                }
+                size="small"
+                fullWidth
+              />
+            </Grid>
+            <Grid item xs={12} sm={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel>{t('procurement.rollbackDateField') || 'Date Field'}</InputLabel>
+                <Select
+                  label={t('procurement.rollbackDateField') || 'Date Field'}
+                  value={bulkRollbackFilters.date_field}
+                  onChange={(e) =>
+                    setBulkRollbackFilters((prev) => ({ ...prev, date_field: e.target.value as RollbackDateField }))
+                  }
+                >
+                  <MenuItem value="submitted_at">{t('procurement.rollbackDateSubmittedAt') || 'Sent-to-optimization date'}</MenuItem>
+                  <MenuItem value="delivery_date">{t('procurement.rollbackDateDelivery') || 'Supplier expected delivery date'}</MenuItem>
+                  <MenuItem value="purchase_date">{t('procurement.rollbackDatePurchase') || 'Purchase/order date'}</MenuItem>
+                  <MenuItem value="project_need_date">{t('procurement.rollbackDateNeed') || 'Project need/delivery date'}</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label={t('procurement.fromDate') || 'From Date'}
+                type="date"
+                value={bulkRollbackFilters.date_from || ''}
+                onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, date_from: e.target.value || undefined }))}
+                size="small"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                label={t('procurement.toDate') || 'To Date'}
+                type="date"
+                value={bulkRollbackFilters.date_to || ''}
+                onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, date_to: e.target.value || undefined }))}
+                size="small"
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+          </Grid>
+
+          <Button
+            variant="outlined"
+            onClick={runBulkRollbackPreview}
+            disabled={bulkRollbackLoading}
+            sx={{ mb: 2 }}
+          >
+            {bulkRollbackLoading
+              ? (t('procurement.previewingRollback') || 'Previewing...')
+              : (t('procurement.previewRollback') || 'Preview rollback')}
+          </Button>
+
+          {bulkRollbackPreview && (
+            <Box>
+              <Box sx={{ mb: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Chip label={`${t('procurement.matchedItems') || 'Matched'}: ${bulkRollbackPreview.summary.matched_count}`} size="small" />
+                <Chip label={`${t('procurement.rollbackableItems') || 'Rollbackable'}: ${bulkRollbackPreview.summary.rollbackable_count}`} size="small" color="success" />
+                <Chip label={`${t('procurement.unsafeItems') || 'Unsafe'}: ${bulkRollbackPreview.summary.unsafe_count}`} size="small" color="warning" />
+              </Box>
+
+              {(bulkRollbackPreview.warnings || []).length > 0 && (
+                <Alert severity="warning" sx={{ mb: 1 }}>
+                  {(bulkRollbackPreview.warnings || []).slice(0, 4).join(' | ')}
+                </Alert>
+              )}
+
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                {t('procurement.rollbackableSelection') || 'Rollbackable item selection'}
+              </Typography>
+              <Box sx={{ maxHeight: 180, overflowY: 'auto', border: `1px solid ${rivarTokens.line}`, borderRadius: rivarTokens.radiusSm, p: 1 }}>
+                {(bulkRollbackPreview.rollbackable_items || []).map((item) => (
+                  <FormControlLabel
+                    key={item.project_item_id}
+                    control={
+                      <Checkbox
+                        checked={bulkRollbackSelectedIds.includes(item.project_item_id)}
+                        onChange={() => toggleRollbackSelection(item.project_item_id)}
+                      />
+                    }
+                    label={`${item.item_code} · ${item.package_type_bucket} · ${item.coverage_state} · ${item.total_cost_irr ? `${Math.round(item.total_cost_irr).toLocaleString()} IRR` : (t('procurement.costUnavailable') || 'Cost unavailable')}`}
+                  />
+                ))}
+              </Box>
+
+              {(bulkRollbackPreview.unsafe_items || []).length > 0 && (
+                <>
+                  <Typography variant="body2" sx={{ fontWeight: 600, mt: 1.5, mb: 0.5 }}>
+                    {t('procurement.unsafeItems') || 'Unsafe items'}
+                  </Typography>
+                  <Box sx={{ maxHeight: 140, overflowY: 'auto', border: `1px solid ${rivarTokens.line}`, borderRadius: rivarTokens.radiusSm, p: 1 }}>
+                    {(bulkRollbackPreview.unsafe_items || []).slice(0, 12).map((item) => (
+                      <Typography key={item.project_item_id} variant="caption" display="block" sx={{ color: rivarTokens.ink500, mb: 0.5 }}>
+                        {item.item_code}: {(item.skip_reasons || []).map((r) => r.reason || r.code).join(' | ')}
+                      </Typography>
+                    ))}
+                  </Box>
+                </>
+              )}
+
+              <TextField
+                label={t('procurement.rollbackNotes') || 'Rollback notes'}
+                value={bulkRollbackNote}
+                onChange={(e) => setBulkRollbackNote(e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+                sx={{ mt: 1.5 }}
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkRollbackOpen(false)} disabled={bulkRollbackExecuting}>
+            {t('common.cancel') || 'Cancel'}
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={executeBulkRollback}
+            disabled={bulkRollbackExecuting || bulkRollbackSelectedIds.length === 0}
+          >
+            {bulkRollbackExecuting
+              ? (t('procurement.rollbackExecuting') || 'Rolling back...')
+              : (t('procurement.confirmRollback') || 'Confirm rollback')}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Coverage Summary Modal */}
       {coverageModalOpen && selectedProjectIdForCoverage && (
