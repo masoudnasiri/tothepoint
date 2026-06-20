@@ -61,6 +61,12 @@ Deploy the accepted branding baseline (`94a8a86`) to the pilot/demo environment,
   - contains `Version` label text
 - Status: pass
 
+Post-verification UI feedback adjustment (same phase scope):
+
+- Sidebar logo size reduced for cleaner layout.
+- Sidebar identity text simplified to only `Rivar by Corbit` (version remains in footer to avoid duplication).
+- Updated file: `frontend/src/components/Layout.tsx`
+
 Note: Browser automation was not introduced in this phase; verification used deployed HTTP endpoint checks and runtime bundle/content inspection.
 
 ## Verification Commands and Results (Pilot/Demo Stack)
@@ -125,4 +131,4 @@ Also updated:
 
 ## Phase 11B Status
 
-`closed` (pending commit/push of refreshed package/documentation artifacts)
+`closed`

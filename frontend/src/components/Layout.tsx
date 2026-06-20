@@ -42,7 +42,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
-import { BRAND_NAME, getRuntimeVersion, PRODUCT_NAME } from '../utils/appIdentity.ts';
+import { BRAND_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
 
 const drawerWidth = 240;
 
@@ -228,19 +228,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           src="/rivar.png"
           alt="Rivar logo"
           sx={{
-            width: 120,
+            width: 82,
             height: 'auto',
-            mb: 1,
+            mb: 0.75,
           }}
         />
-        <Typography variant="h6" noWrap component="div" sx={{ textAlign: 'center' }}>
-          {PRODUCT_NAME}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', fontWeight: 500 }}>
           {BRAND_NAME}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
-          Version {appVersion}
         </Typography>
       </Toolbar>
       <Divider />
