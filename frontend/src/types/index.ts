@@ -357,6 +357,7 @@ export interface OptimizationResult {
 export interface OptimizationRunRequest {
   max_time_slots?: number;
   time_limit_seconds?: number;
+  require_all_items?: boolean;
   budget_mode?: 'constrained' | 'allow_shortage';
   budget_scenario?: 'minimum_feasible' | 'average_candidate' | 'conservative' | 'selected_result';
 }
@@ -401,6 +402,8 @@ export interface OptimizationRunResponse {
   items_optimized: number;
   execution_time_seconds: number;
   message?: string;
+  error_code?: string;
+  diagnostics?: Record<string, any>;
   budget_mode?: string;
   budget_precheck?: OptimizationFinancialAnalysis;
 }

@@ -146,6 +146,8 @@ interface OptimizationResponse {
   items_optimized: number;
   proposals: OptimizationProposal[];
   message?: string;
+  error_code?: string;
+  diagnostics?: Record<string, any>;
 }
 
 export const OptimizationPageEnhanced: React.FC = () => {
@@ -323,6 +325,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
         {
           max_time_slots: optimizationConfig.max_time_slots,
           time_limit_seconds: optimizationConfig.time_limit_seconds,
+          require_all_items: false,
           budget_mode: budgetMode,
           budget_scenario: 'minimum_feasible',
         },
@@ -353,7 +356,22 @@ export const OptimizationPageEnhanced: React.FC = () => {
         );
       } else {
         console.log('[ENHANCED OPTIMIZATION] FAILED! Setting error message');
-        setError(`Optimization failed: ${response.data.message}`);
+        const diagnostics = response.data?.diagnostics || {};
+        const missingCandidates = (diagnostics.items_missing_candidates || []).length;
+        const missingCoverage = (diagnostics.items_missing_coverage || []).length;
+        const filteredByBudget = diagnostics.items_filtered_by_budget || 0;
+        const reasonParts = [
+          missingCandidates > 0 ? `${missingCandidates} item(s) missing candidates` : '',
+          missingCoverage > 0 ? `${missingCoverage} item(s) missing dated/covered candidates` : '',
+          filteredByBudget > 0 ? `${filteredByBudget} item(s) filtered by budget` : '',
+        ].filter(Boolean);
+        const baseMessage = response.data?.message || 'No feasible solution was generated.';
+        const modeNote =
+          budgetMode === 'allow_shortage'
+            ? ' Budget shortage was not used as a blocker in this mode.'
+            : '';
+        const reasonText = reasonParts.length > 0 ? ` Diagnostics: ${reasonParts.join(' | ')}.` : '';
+        setError(`Optimization failed: ${baseMessage}${modeNote}${reasonText}`);
       }
     } catch (err: any) {
       console.error('[ENHANCED OPTIMIZATION] ERROR:', err);
@@ -760,6 +778,23 @@ export const OptimizationPageEnhanced: React.FC = () => {
       {success && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
           {success}
+        </Alert>
+      )}
+
+      {lastRun && (lastRun.status === 'INFEASIBLE' || lastRun.status === 'ERROR') && lastRun.diagnostics && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Optimization Diagnostics
+          </Typography>
+          <Typography variant="body2">
+            Mode: {String(lastRun.diagnostics.budget_mode || '-')} | Solver status: {String(lastRun.diagnostics.solver_status || '-')}
+          </Typography>
+          <Typography variant="body2">
+            Missing candidates: {(lastRun.diagnostics.items_missing_candidates || []).length} | Missing coverage/dates: {(lastRun.diagnostics.items_missing_coverage || []).length}
+          </Typography>
+          <Typography variant="body2">
+            Budget constraints enabled: {lastRun.diagnostics.budget_constraints_enabled ? 'Yes' : 'No'} | Filtered by budget: {Number(lastRun.diagnostics.items_filtered_by_budget || 0)}
+          </Typography>
         </Alert>
       )}
 

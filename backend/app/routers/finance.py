@@ -181,6 +181,10 @@ async def run_enhanced_optimization(
     )
     response.budget_mode = request.budget_mode
     response.budget_precheck = precheck
+    if response.diagnostics is None:
+        response.diagnostics = {}
+    response.diagnostics["budget_mode"] = request.budget_mode
+    response.diagnostics["budget_constraints_enabled"] = request.budget_mode == "constrained"
 
     for proposal in response.proposals:
         original_payload = [
@@ -246,6 +250,16 @@ async def run_enhanced_optimization(
                 "excluded_items_count": excluded_count,
                 "unmet_demand_items": excluded_count,
             }
+            response.diagnostics["items_filtered_by_budget"] = (
+                int(response.diagnostics.get("items_filtered_by_budget", 0))
+                + max(len(deferred_items), excluded_count)
+            )
+
+    if request.budget_mode == "allow_shortage" and response.status not in {"OPTIMAL", "FEASIBLE"}:
+        response.message = (
+            "Budget shortage was not used as a blocker in allow-shortage mode. "
+            f"{response.message or 'No non-budget feasible solution was generated.'}"
+        )
 
     return response
 

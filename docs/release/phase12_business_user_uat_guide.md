@@ -210,3 +210,24 @@
    - نمایش نماد ارز برای IRR/USD/EUR/AED/CNY/TRY صحیح باشد.
    - نمایش اشتباه از جنس `$` برای همه ارزها قابل قبول نیست.
 
+## سناریوهای الزامی فاز 12E-1 (Optimization Feasibility Diagnostics)
+
+1. **تست هر دو مود اجرا**
+   - یکبار `Optimize within current budget` اجرا شود.
+   - یکبار `Optimize all items and show financial shortage analysis` اجرا شود.
+
+2. **قاعده allow-shortage**
+   - در مود allow-shortage، کمبود بودجه نباید علت بلاک‌کننده اجرا باشد.
+   - اگر اجرای بهینه‌سازی شکست خورد، پیام باید علت غیر‌بودجه‌ای را با diagnostics نشان دهد.
+
+3. **شفافیت علت شکست**
+   - پیام شکست نباید صرفا بودجه/هزینه را حدس بزند.
+   - باید مواردی مثل `no eligible candidates`، `missing coverage/dates` یا قیود عملیاتی را روشن کند.
+
+4. **رفتار partial feasible**
+   - اگر بعضی آیتم‌ها candidate معتبر دارند و بعضی ندارند، نتیجه partial تولید شود (وقتی all-or-nothing اجباری نیست).
+   - آیتم‌های skipped/infeasible با دلیل قابل مشاهده باشند.
+
+5. **تحلیل مالی در allow-shortage**
+   - در صورت تولید نتیجه، تحلیل کمبود مالی برای proposal/result قابل مشاهده باشد.
+

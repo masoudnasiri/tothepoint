@@ -67,6 +67,8 @@ class EnhancedProcurementOptimizer:
         self.run_id = str(uuid.uuid4())
         self.start_time = None
         self.dependency_graph = None
+        self.diagnostics: Dict[str, Any] = self._new_diagnostics()
+        self.last_error_code: Optional[str] = None
         
     async def run_optimization(
         self, 
@@ -83,6 +85,12 @@ class EnhancedProcurementOptimizer:
             strategies: List of strategies to use (default: all strategies)
         """
         self.start_time = datetime.now()
+        self.diagnostics = self._new_diagnostics()
+        self.diagnostics["budget_mode"] = self.budget_mode
+        self.diagnostics["budget_constraints_enabled"] = self.budget_mode == "constrained"
+        self.diagnostics["lead_time_constraints_enabled"] = True
+        self.diagnostics["require_all_items"] = bool(getattr(request, "require_all_items", False))
+        self.last_error_code = None
         
         try:
             # Load and validate data
@@ -120,23 +128,8 @@ class EnhancedProcurementOptimizer:
             
             # Create user-friendly message
             if len(proposals) == 0:
-                user_message = (
-                    "❌ Could not generate any feasible solutions.\n\n"
-                    "📝 Possible reasons and solutions:\n\n"
-                    "1️⃣ Budget constraints too tight:\n"
-                    "   • Go to Finance → Budget Management\n"
-                    "   • Increase monthly budgets\n"
-                    "   • Add more budget periods\n\n"
-                    "2️⃣ Procurement options too expensive:\n"
-                    "   • Go to Procurement page\n"
-                    "   • Add more cost-effective supplier options\n"
-                    "   • Review base costs and payment terms\n\n"
-                    "3️⃣ Lead times too long:\n"
-                    "   • Check supplier lead times\n"
-                    "   • Add suppliers with shorter lead times\n"
-                    "   • Adjust item delivery dates if possible\n\n"
-                    "💡 Tip: Try increasing the time limit or using a different solver (Glop, CBC)."
-                )
+                self.last_error_code = self._derive_error_code()
+                user_message = self._build_no_solution_message()
             else:
                 user_message = f"✅ Successfully generated {len(proposals)} proposal(s) using {self.solver_type} solver"
             
@@ -148,7 +141,9 @@ class EnhancedProcurementOptimizer:
                 total_cost=best_proposal.total_cost if best_proposal else Decimal('0'),
                 items_optimized=best_proposal.items_count if best_proposal else 0,
                 proposals=proposals,
-                message=user_message
+                message=user_message,
+                error_code=self.last_error_code,
+                diagnostics=self.diagnostics,
             )
             
             logger.info(f"DEBUG: Returning optimization response with run_id: {response.run_id} (type: {type(response.run_id)})")
@@ -159,6 +154,15 @@ class EnhancedProcurementOptimizer:
             execution_time = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0
             # Format error message for user
             error_msg = str(e)
+            error_code = "OPTIMIZATION_EXCEPTION"
+            if "No finalized procurement options" in error_msg or "No items with finalized procurement options" in error_msg:
+                error_code = "NO_ELIGIBLE_CANDIDATES"
+                self.diagnostics["candidate_options"] = 0
+            elif "No budget data" in error_msg:
+                error_code = "NO_BUDGET_DATA"
+            elif "No project items" in error_msg:
+                error_code = "NO_ELIGIBLE_ITEMS"
+            self.last_error_code = error_code
             if "No active projects" in error_msg or "No project items" in error_msg or \
                "No procurement options" in error_msg or "No budget data" in error_msg:
                 # User-friendly validation errors - pass through as-is
@@ -187,7 +191,9 @@ class EnhancedProcurementOptimizer:
                 total_cost=Decimal('0'),
                 items_optimized=0,
                 proposals=[],
-                message=user_message
+                message=user_message,
+                error_code=error_code,
+                diagnostics=self.diagnostics,
             )
     
     async def _generate_multiple_proposals(
@@ -230,6 +236,10 @@ class EnhancedProcurementOptimizer:
                 
         except Exception as e:
             logger.error(f"Strategy {strategy} failed: {str(e)}")
+            self.last_error_code = "MODEL_BUILD_ERROR"
+            self.diagnostics["solver_status"] = "ERROR"
+            self.diagnostics.setdefault("constraint_summary", {})
+            self.diagnostics["constraint_summary"]["exception"] = str(e)
             return None
     
     async def _solve_with_cpsat(
@@ -251,74 +261,59 @@ class EnhancedProcurementOptimizer:
         
         items_processed = 0
         variables_created = 0
+        missing_required_items: List[str] = []
         
         for item in self.project_items:
             logger.info(f"DEBUG: Processing item {item.item_code} (project_id: {item.project_id}, id: {item.id})")
-            
-            # Check delivery options from relationship (DeliveryOption table) - NEW SYSTEM
-            # Fallback to JSON field for legacy items - OLD SYSTEM
-            has_delivery_options = False
-            if item.delivery_options_rel and len(item.delivery_options_rel) > 0:
-                has_delivery_options = True
-                logger.info(f"DEBUG: Item {item.item_code} has {len(item.delivery_options_rel)} delivery options from table")
-            elif item.delivery_options:
-                try:
-                    import json
-                    delivery_options = json.loads(item.delivery_options) if isinstance(item.delivery_options, str) else item.delivery_options
-                    if delivery_options and len(delivery_options) > 0:
-                        has_delivery_options = True
-                        logger.info(f"DEBUG: Item {item.item_code} has {len(delivery_options)} delivery options from JSON (legacy)")
-                except Exception as e:
-                    logger.error(f"DEBUG: Failed to parse delivery options for {item.item_code}: {e}")
-            
-            if not has_delivery_options:
-                logger.warning(f"❌ Item {item.item_code} has NO delivery options - SKIPPING")
-                continue
-            
-            item_options = [opt for opt in self.procurement_options.values() 
-                          if opt.item_code == item.item_code and opt.project_item_id == item.id]
-            
-            # Use actual purchase and delivery dates from procurement options
-            # No need to calculate time slots - use the real dates directly
-            valid_times = []
-            for option in item_options:
-                if option.purchase_date and option.expected_delivery_date:
-                    # Use a simple time slot based on the option ID
-                    # Each procurement option gets its own time slot
-                    time_slot = option.id  # Use option ID as time slot
-                    valid_times.append(time_slot)
-            
-            logger.info(f"DEBUG: Item {item.item_code} using time slots from procurement options: {valid_times}")
-            
-            if not valid_times:
-                logger.warning(f"❌ Item {item.item_code} has NO valid procurement options with dates - SKIPPING")
-                continue
-            
-            logger.info(f"DEBUG: Item {item.item_code} has {len(item_options)} procurement options:")
-            for opt in item_options:
-                logger.info(f"  - Option {opt.id}: {opt.supplier_name} (cost: {opt.base_cost}, lead_time: {opt.lomc_lead_time})")
-            
+
+            item_options = [
+                opt for opt in self.procurement_options.values()
+                if opt.project_item_id == item.id
+            ]
             if not item_options:
+                self._append_item_diagnostic("items_missing_candidates", item.item_code, "no_finalized_candidate")
+                if request.require_all_items:
+                    missing_required_items.append(item.item_code)
                 logger.warning(f"❌ Item {item.item_code} has NO finalized procurement options - SKIPPING")
                 continue
-            
-            logger.info(f"✅ Processing item {item.item_code}: {len(item_options)} options, {len(valid_times)} time slots")
+
+            valid_options = [
+                opt for opt in item_options
+                if opt.purchase_date and opt.expected_delivery_date
+            ]
+            if not valid_options:
+                self._append_item_diagnostic("items_missing_coverage", item.item_code, "missing_purchase_or_delivery_date")
+                self.diagnostics["items_filtered_by_lead_time"] += 1
+                if request.require_all_items:
+                    missing_required_items.append(item.item_code)
+                logger.warning(f"❌ Item {item.item_code} has NO dated procurement options - SKIPPING")
+                continue
+
+            logger.info(f"✅ Processing item {item.item_code}: {len(valid_options)} dated options")
             items_processed += 1
             
-            for option in item_options:
-                for delivery_time in valid_times:
-                    # Use actual purchase and delivery dates from procurement option
-                    # No need to calculate purchase_time - use the real dates
-                    if option.purchase_date and option.expected_delivery_date:
-                        var_name = f"buy_{item.project_id}_{item.item_code}_{option.id}_{delivery_time}"
-                        variables[var_name] = model.NewBoolVar(var_name)
-                        variables_created += 1
-                        logger.debug(f"    Created variable: {var_name}")
+            for option in valid_options:
+                # Keep time-slot mapping deterministic and independent from item_code parsing.
+                delivery_time = option.id
+                var_name = self._make_var_name(item.project_id, item.id, option.id, delivery_time)
+                variables[var_name] = model.NewBoolVar(var_name)
+                variables_created += 1
+                logger.debug(f"    Created variable: {var_name}")
         
         logger.info(f"=== MODEL BUILDING SUMMARY ===")
         logger.info(f"Items processed: {items_processed}/{len(self.project_items)}")
         logger.info(f"Variables created: {variables_created}")
         logger.info(f"Model ready for solving...")
+        self.diagnostics["constraint_summary"] = {
+            "candidate_items_considered": len(self.project_items),
+            "items_with_solver_variables": items_processed,
+            "variables_created": variables_created,
+        }
+        if missing_required_items:
+            self.diagnostics["items_missing_candidates"].extend(missing_required_items)
+            self.last_error_code = "REQUIRE_ALL_ITEMS_UNSATISFIED"
+            self.diagnostics["solver_status"] = "SKIPPED_REQUIRE_ALL_ITEMS"
+            return None
         
         # Add demand fulfillment constraints
         self._add_cpsat_demand_constraints(model, variables)
@@ -339,6 +334,12 @@ class EnhancedProcurementOptimizer:
             solver.parameters.cp_model_presolve = True
         
         status = solver.Solve(model)
+        self.diagnostics["solver_status"] = (
+            "OPTIMAL" if status == cp_model.OPTIMAL
+            else "FEASIBLE" if status == cp_model.FEASIBLE
+            else "INFEASIBLE" if status == cp_model.INFEASIBLE
+            else "UNKNOWN"
+        )
         
         logger.info(f"=== SOLVER RESULTS ===")
         logger.info(f"Solver status: {status}")
@@ -378,6 +379,7 @@ class EnhancedProcurementOptimizer:
         else:
             logger.warning(f"❌ Optimization failed with status: {status}")
             logger.warning(f"Possible reasons: No feasible solution, budget constraints too tight, or no valid items")
+            self.last_error_code = self._derive_error_code()
         
         return None
     
@@ -404,45 +406,21 @@ class EnhancedProcurementOptimizer:
         
         # Build decision variables (continuous [0,1] for LP relaxation)
         for item in self.project_items:
-            # Check delivery options from relationship (NEW) or JSON (legacy)
-            has_delivery_options = False
-            delivery_options_count = 0
-            if item.delivery_options_rel and len(item.delivery_options_rel) > 0:
-                has_delivery_options = True
-                delivery_options_count = len(item.delivery_options_rel)
-            elif item.delivery_options:
-                try:
-                    import json
-                    delivery_options = json.loads(item.delivery_options) if isinstance(item.delivery_options, str) else item.delivery_options
-                    if delivery_options and len(delivery_options) > 0:
-                        has_delivery_options = True
-                        delivery_options_count = len(delivery_options)
-                except:
-                    pass
-            if not has_delivery_options:
-                continue
-            
-            # Use a larger range to accommodate lead times (start from 5 instead of 1)
-            # Use delivery_options_count or default to max_time_slots if none found
-            valid_times = list(range(5, min(delivery_options_count + 5 if delivery_options_count > 0 else request.max_time_slots, request.max_time_slots + 1)))
-            item_options = [opt for opt in self.procurement_options.values() 
-                          if opt.item_code == item.item_code and opt.project_item_id == item.id]
-            
+            item_options = [
+                opt for opt in self.procurement_options.values()
+                if opt.project_item_id == item.id and opt.purchase_date and opt.expected_delivery_date
+            ]
             for option in item_options:
-                for delivery_time in valid_times:
-                    purchase_time = delivery_time - option.lomc_lead_time
-                    if purchase_time < 1:
-                        continue
-                    
-                    var_name = f"buy_{item.project_id}_{item.item_code}_{option.id}_{delivery_time}"
-                    # Use continuous variable [0, 1] for LP relaxation
-                    variables[var_name] = solver.NumVar(0, 1, var_name)
+                delivery_time = option.id
+                var_name = self._make_var_name(item.project_id, item.id, option.id, delivery_time)
+                # Use continuous variable [0, 1] for LP relaxation
+                variables[var_name] = solver.NumVar(0, 1, var_name)
         
         # Add demand fulfillment constraints
         item_groups = {}
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            key = (int(parts[1]), parts[2])  # (project_id, item_code)
+            project_id, project_item_id, _option_id, _delivery_time = self._parse_var_name(var_name)
+            key = (project_id, project_item_id)
             if key not in item_groups:
                 item_groups[key] = []
             item_groups[key].append(var)
@@ -494,6 +472,11 @@ class EnhancedProcurementOptimizer:
         # Solve
         solver.SetTimeLimit(request.time_limit_seconds * 1000)  # milliseconds
         status = solver.Solve()
+        self.diagnostics["solver_status"] = (
+            "OPTIMAL" if status == pywraplp.Solver.OPTIMAL
+            else "FEASIBLE" if status == pywraplp.Solver.FEASIBLE
+            else "INFEASIBLE"
+        )
         
         if status in [pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE]:
             # Round LP solution to integer solution
@@ -535,45 +518,21 @@ class EnhancedProcurementOptimizer:
         
         # Build binary decision variables
         for item in self.project_items:
-            # Check delivery options from relationship (NEW) or JSON (legacy)
-            has_delivery_options = False
-            delivery_options_count = 0
-            if item.delivery_options_rel and len(item.delivery_options_rel) > 0:
-                has_delivery_options = True
-                delivery_options_count = len(item.delivery_options_rel)
-            elif item.delivery_options:
-                try:
-                    import json
-                    delivery_options = json.loads(item.delivery_options) if isinstance(item.delivery_options, str) else item.delivery_options
-                    if delivery_options and len(delivery_options) > 0:
-                        has_delivery_options = True
-                        delivery_options_count = len(delivery_options)
-                except:
-                    pass
-            if not has_delivery_options:
-                continue
-            
-            # Use a larger range to accommodate lead times (start from 5 instead of 1)
-            # Use delivery_options_count or default to max_time_slots if none found
-            valid_times = list(range(5, min(delivery_options_count + 5 if delivery_options_count > 0 else request.max_time_slots, request.max_time_slots + 1)))
-            item_options = [opt for opt in self.procurement_options.values() 
-                          if opt.item_code == item.item_code and opt.project_item_id == item.id]
-            
+            item_options = [
+                opt for opt in self.procurement_options.values()
+                if opt.project_item_id == item.id and opt.purchase_date and opt.expected_delivery_date
+            ]
             for option in item_options:
-                for delivery_time in valid_times:
-                    purchase_time = delivery_time - option.lomc_lead_time
-                    if purchase_time < 1:
-                        continue
-                    
-                    var_name = f"buy_{item.project_id}_{item.item_code}_{option.id}_{delivery_time}"
-                    # Binary variable
-                    variables[var_name] = solver.IntVar(0, 1, var_name)
+                delivery_time = option.id
+                var_name = self._make_var_name(item.project_id, item.id, option.id, delivery_time)
+                # Binary variable
+                variables[var_name] = solver.IntVar(0, 1, var_name)
         
         # Add demand fulfillment constraints
         item_groups = {}
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            key = (int(parts[1]), parts[2])
+            project_id, project_item_id, _option_id, _delivery_time = self._parse_var_name(var_name)
+            key = (project_id, project_item_id)
             if key not in item_groups:
                 item_groups[key] = []
             item_groups[key].append(var)
@@ -624,6 +583,11 @@ class EnhancedProcurementOptimizer:
         # Solve
         solver.SetTimeLimit(request.time_limit_seconds * 1000)
         status = solver.Solve()
+        self.diagnostics["solver_status"] = (
+            "OPTIMAL" if status == pywraplp.Solver.OPTIMAL
+            else "FEASIBLE" if status == pywraplp.Solver.FEASIBLE
+            else "INFEASIBLE"
+        )
         
         if status in [pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE]:
             decisions = self._extract_mip_decisions(solver, variables)
@@ -731,6 +695,97 @@ class EnhancedProcurementOptimizer:
         return analysis
     
     # ============== Helper Methods ==============
+
+    def _new_diagnostics(self) -> Dict[str, Any]:
+        return {
+            "budget_mode": self.budget_mode,
+            "eligible_project_items": 0,
+            "items_sent_to_optimization": 0,
+            "finalized_packages": 0,
+            "candidate_options": 0,
+            "valid_combinations": 0,
+            "full_coverage_combinations": 0,
+            "partial_confirmed_combinations": 0,
+            "items_missing_candidates": [],
+            "items_missing_coverage": [],
+            "items_filtered_by_budget": 0,
+            "items_filtered_by_lead_time": 0,
+            "items_filtered_by_currency": 0,
+            "items_filtered_by_status": 0,
+            "budget_constraints_enabled": self.budget_mode == "constrained",
+            "lead_time_constraints_enabled": True,
+            "solver_status": "",
+            "constraint_summary": {},
+        }
+
+    def _append_item_diagnostic(self, field: str, item_code: str, reason: str) -> None:
+        if field not in self.diagnostics:
+            self.diagnostics[field] = []
+        entry = f"{item_code}: {reason}"
+        if entry not in self.diagnostics[field]:
+            self.diagnostics[field].append(entry)
+
+    def _make_var_name(
+        self, project_id: int, project_item_id: int, option_id: int, delivery_time: int
+    ) -> str:
+        # Use delimiter-safe structure because item_code can contain underscores.
+        return f"buy|{project_id}|{project_item_id}|{option_id}|{delivery_time}"
+
+    def _parse_var_name(self, var_name: str) -> Tuple[int, int, int, int]:
+        if "|" in var_name:
+            _prefix, project_id, project_item_id, option_id, delivery_time = var_name.split("|")
+            return int(project_id), int(project_item_id), int(option_id), int(delivery_time)
+
+        # Backward-compatible parser for legacy names: buy_<project_id>_<item_code>_<option_id>_<delivery_time>
+        parts = var_name.split("_")
+        if len(parts) < 5:
+            raise ValueError(f"Invalid decision variable name: {var_name}")
+        project_id = int(parts[1])
+        option_id = int(parts[-2])
+        delivery_time = int(parts[-1])
+        option = self.procurement_options.get(option_id)
+        if not option or option.project_item_id is None:
+            raise ValueError(f"Cannot resolve option/project item from variable: {var_name}")
+        return project_id, int(option.project_item_id), option_id, delivery_time
+
+    def _derive_error_code(self) -> str:
+        if self.diagnostics.get("candidate_options", 0) <= 0:
+            return "NO_ELIGIBLE_CANDIDATES"
+        if self.diagnostics.get("constraint_summary", {}).get("variables_created", 0) <= 0:
+            return "NO_VALID_CANDIDATES_AFTER_FILTERS"
+        if self.budget_mode == "constrained":
+            return "NO_FEASIBLE_SOLUTIONS_WITH_BUDGET"
+        return "NO_FEASIBLE_SOLUTIONS"
+
+    def _build_no_solution_message(self) -> str:
+        if self.budget_mode == "allow_shortage":
+            if self.diagnostics.get("candidate_options", 0) <= 0:
+                return (
+                    "Optimization could not run because no eligible finalized procurement candidates were found. "
+                    "Budget shortage was not used as a blocker in allow-shortage mode."
+                )
+            if self.diagnostics.get("constraint_summary", {}).get("variables_created", 0) <= 0:
+                return (
+                    "Budget shortage was not used as a blocker in allow-shortage mode. "
+                    "Optimization failed because all candidates were filtered out before solving "
+                    "(missing dates/coverage/eligibility)."
+                )
+            return (
+                "Budget shortage was not used as a blocker in allow-shortage mode. "
+                "Optimization still found no feasible solution due to non-budget constraints; "
+                "review diagnostics for exact dropped-item reasons."
+            )
+
+        if self.diagnostics.get("constraint_summary", {}).get("variables_created", 0) <= 0:
+            return (
+                "No feasible result could be generated because no valid candidate remained after eligibility checks. "
+                "Review diagnostics for missing candidates/coverage."
+            )
+
+        return (
+            "No feasible result could be generated within the current constrained mode. "
+            "Review diagnostics for budget-limited and non-budget filtering details."
+        )
     
     async def _load_data(self):
         """Load all necessary data from database with validation"""
@@ -769,22 +824,24 @@ class EnhancedProcurementOptimizer:
         }
         
         # Load project items with delivery options relationship
-        # ONLY load items that are finalized by PMO (is_finalized == True)
         from sqlalchemy.orm import selectinload
-        items_result = await self.db.execute(
+        all_items_result = await self.db.execute(
             select(ProjectItem)
             .options(selectinload(ProjectItem.delivery_options_rel))
             .where(
                 ProjectItem.project_id.in_(self.projects.keys()),
-                ProjectItem.is_finalized == True  # Only finalized items
             )
         )
-        all_items = list(items_result.scalars().all())
+        all_items = list(all_items_result.scalars().all())
+        finalized_items = [item for item in all_items if bool(item.is_finalized)]
+        self.diagnostics["eligible_project_items"] = len(finalized_items)
+        self.diagnostics["items_sent_to_optimization"] = len(finalized_items)
+        self.diagnostics["items_filtered_by_status"] = max(len(all_items) - len(finalized_items), 0)
         if settings.enable_package_based_optimization:
-            self.project_items = all_items
+            self.project_items = finalized_items
         else:
             self.project_items = [
-                item for item in all_items
+                item for item in finalized_items
                 if item.id not in decided_project_item_ids
             ]
         
@@ -811,6 +868,10 @@ class EnhancedProcurementOptimizer:
                 )
         
         # Load procurement options - ONLY FINALIZED OPTIONS for optimization
+        options_all_result = await self.db.execute(
+            select(ProcurementOption).where(ProcurementOption.is_active == True)
+        )
+        all_active_options = options_all_result.scalars().all()
         options_result = await self.db.execute(
             select(ProcurementOption).where(
                 ProcurementOption.is_active == True,
@@ -827,6 +888,14 @@ class EnhancedProcurementOptimizer:
             filtered_options.append(opt)
 
         self.procurement_options = {opt.id: opt for opt in filtered_options}
+        self.diagnostics["candidate_options"] = len(self.procurement_options)
+        self.diagnostics["finalized_packages"] = len(
+            {opt.package_id for opt in self.procurement_options.values() if opt.package_id is not None}
+        )
+        self.diagnostics["items_filtered_by_status"] += max(
+            len(all_active_options) - len(self.procurement_options),
+            0,
+        )
         
         logger.info(f"DEBUG: Loaded {len(self.procurement_options)} finalized procurement options:")
         for opt_id, opt in self.procurement_options.items():
@@ -861,10 +930,13 @@ class EnhancedProcurementOptimizer:
             logger.info(f"  - {item_code} (project_item_id: {project_item_id})")
         
         items_before_filter = len(self.project_items)
+        item_codes_before_filter = {item.item_code for item in self.project_items}
         self.project_items = [
             item for item in self.project_items
             if (item.item_code, item.id) in project_items_with_finalized_options
         ]
+        for item_code in sorted(item_codes_before_filter - {item.item_code for item in self.project_items}):
+            self._append_item_diagnostic("items_missing_candidates", item_code, "no_finalized_candidate")
         
         logger.info(f"DEBUG: Filtered {items_before_filter} items down to {len(self.project_items)} items")
         for item in self.project_items:
@@ -1003,15 +1075,7 @@ class EnhancedProcurementOptimizer:
         """Add demand fulfillment constraints for CP-SAT"""
         item_groups = {}
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            project_id = int(parts[1])
-            item_code = parts[2]
-            option_id = int(parts[3])
-            
-            # Get the project_item_id from the procurement option
-            option = self.procurement_options[option_id]
-            project_item_id = option.project_item_id
-            
+            project_id, project_item_id, _option_id, _delivery_time = self._parse_var_name(var_name)
             key = (project_id, project_item_id)
             if key not in item_groups:
                 item_groups[key] = []
@@ -1065,25 +1129,30 @@ class EnhancedProcurementOptimizer:
         time_groups = {}
         
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            delivery_time = int(parts[4])
-            option_id = int(parts[3])
-            project_id = int(parts[1])
-            item_code = parts[2]
+            project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
             
             option = self.procurement_options[option_id]
             purchase_time = delivery_time - option.lomc_lead_time
             
             # Skip options with impossible lead times (purchase time in the past or too far in the past)
             if purchase_time < 0:
-                logger.debug(f"Skipping option {option_id} for {item_code}: purchase_time={purchase_time} (negative)")
+                logger.debug(
+                    f"Skipping option {option_id} for project_item_id {project_item_id}: "
+                    f"purchase_time={purchase_time} (negative)"
+                )
                 continue
             
             if purchase_time not in time_groups:
                 time_groups[purchase_time] = []
             
-            item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+            item = next(
+                (
+                    i
+                    for i in self.project_items
+                    if i.project_id == project_id and i.id == project_item_id
+                ),
+                None,
+            )
             
             if item:
                 time_groups[purchase_time].append((var, option, item))
@@ -1166,15 +1235,17 @@ class EnhancedProcurementOptimizer:
         value_terms = []
         
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            option_id = int(parts[3])
-            project_id = int(parts[1])
-            item_code = parts[2]
-            delivery_time = int(parts[4])
+            project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
             
             option = self.procurement_options[option_id]
-            item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+            item = next(
+                (
+                    i
+                    for i in self.project_items
+                    if i.project_id == project_id and i.id == project_item_id
+                ),
+                None,
+            )
             
             if not item:
                 continue
@@ -1284,15 +1355,17 @@ class EnhancedProcurementOptimizer:
         PURCHASE_BONUS = 50000.0  # $50K bonus per item purchased (80% of avg cost)
         
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            option_id = int(parts[3])
-            project_id = int(parts[1])
-            item_code = parts[2]
-            delivery_time = int(parts[4])
+            project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
             
             option = self.procurement_options[option_id]
-            item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+            item = next(
+                (
+                    i
+                    for i in self.project_items
+                    if i.project_id == project_id and i.id == project_item_id
+                ),
+                None,
+            )
             
             if not item:
                 continue
@@ -1332,11 +1405,7 @@ class EnhancedProcurementOptimizer:
         time_groups = {}
         
         for var_name, var in variables.items():
-            parts = var_name.split('_')
-            delivery_time = int(parts[4])
-            option_id = int(parts[3])
-            project_id = int(parts[1])
-            item_code = parts[2]
+            project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
             
             option = self.procurement_options[option_id]
             purchase_time = delivery_time - option.lomc_lead_time
@@ -1344,8 +1413,14 @@ class EnhancedProcurementOptimizer:
             if purchase_time < 1:
                 continue
             
-            item = next((i for i in self.project_items 
-                        if i.project_id == project_id and i.item_code == item_code), None)
+            item = next(
+                (
+                    i
+                    for i in self.project_items
+                    if i.project_id == project_id and i.id == project_item_id
+                ),
+                None,
+            )
             
             if item:
                 cost, currency = self._calculate_effective_cost(option, item)
@@ -1401,13 +1476,9 @@ class EnhancedProcurementOptimizer:
         
         for var_name, var in variables.items():
             if solver.Value(var) == 1:
-                parts = var_name.split('_')
-                project_id = int(parts[1])
-                item_code = parts[2]
-                option_id = int(parts[3])
-                delivery_time = int(parts[4])
+                project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
                 
-                decision = self._create_decision(project_id, item_code, option_id, delivery_time)
+                decision = self._create_decision(project_id, project_item_id, option_id, delivery_time)
                 if decision:
                     decisions.append(decision)
         
@@ -1420,13 +1491,9 @@ class EnhancedProcurementOptimizer:
         # Collect all variables with value > 0.5 (rounding threshold)
         for var_name, var in variables.items():
             if var.solution_value() > 0.5:
-                parts = var_name.split('_')
-                project_id = int(parts[1])
-                item_code = parts[2]
-                option_id = int(parts[3])
-                delivery_time = int(parts[4])
+                project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
                 
-                decision = self._create_decision(project_id, item_code, option_id, delivery_time)
+                decision = self._create_decision(project_id, project_item_id, option_id, delivery_time)
                 if decision:
                     decisions.append(decision)
         
@@ -1438,25 +1505,33 @@ class EnhancedProcurementOptimizer:
         
         for var_name, var in variables.items():
             if var.solution_value() > 0.5:  # Should be exactly 1 for binary vars
-                parts = var_name.split('_')
-                project_id = int(parts[1])
-                item_code = parts[2]
-                option_id = int(parts[3])
-                delivery_time = int(parts[4])
+                project_id, project_item_id, option_id, delivery_time = self._parse_var_name(var_name)
                 
-                decision = self._create_decision(project_id, item_code, option_id, delivery_time)
+                decision = self._create_decision(project_id, project_item_id, option_id, delivery_time)
                 if decision:
                     decisions.append(decision)
         
         return decisions
     
-    def _create_decision(self, project_id: int, item_code: str, option_id: int, delivery_time: int) -> Optional[OptimizationDecision]:
+    def _create_decision(
+        self,
+        project_id: int,
+        project_item_id: int,
+        option_id: int,
+        delivery_time: int,
+    ) -> Optional[OptimizationDecision]:
         """Create an OptimizationDecision from solution data"""
         option = self.procurement_options.get(option_id)
         
-        # FIXED: Find the item by project_item_id from the procurement option
-        item = next((i for i in self.project_items 
-                    if i.project_id == project_id and i.id == option.project_item_id), None)
+        # FIXED: Find the item by project_item_id from the variable key
+        item = next(
+            (
+                i
+                for i in self.project_items
+                if i.project_id == project_id and i.id == project_item_id
+            ),
+            None,
+        )
         project = self.projects.get(project_id)
         
         if not (option and item and project):
@@ -1521,7 +1596,7 @@ class EnhancedProcurementOptimizer:
         return OptimizationDecision(
             project_id=project_id,
             project_code=project.project_code,
-            item_code=item_code,
+            item_code=item.item_code,
             item_name=item.item_name or item_code,
             procurement_option_id=option_id,
             supplier_name=option.supplier_name,

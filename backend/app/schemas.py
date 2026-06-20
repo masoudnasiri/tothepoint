@@ -608,6 +608,13 @@ class OptimizationRunRequest(BaseModel):
     time_limit_seconds: int = Field(300, ge=10, le=3600)
     split_into_bunches: bool = Field(False, description="Split results into first bunch and rest")
     first_bunch_size: Optional[int] = Field(None, ge=1, description="Number of items in first bunch (by priority)")
+    require_all_items: bool = Field(
+        False,
+        description=(
+            "When false, optimization can return partial feasible results and report skipped/infeasible items. "
+            "When true, all eligible items must be satisfied."
+        ),
+    )
     budget_mode: Literal["constrained", "allow_shortage"] = Field(
         "allow_shortage",
         description=(
@@ -718,6 +725,8 @@ class OptimizationRunResponse(BaseModel):
     items_optimized: int
     proposals: List[OptimizationProposal]
     message: Optional[str] = None
+    error_code: Optional[str] = None
+    diagnostics: Optional[Dict[str, Any]] = None
     budget_mode: Optional[str] = None
     budget_precheck: Optional[OptimizationFinancialAnalysis] = None
 

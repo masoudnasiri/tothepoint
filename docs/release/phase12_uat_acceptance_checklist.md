@@ -75,6 +75,16 @@
 - [ ] Proposal/result-level financial analysis is accessible and coherent
 - [ ] Currency display uses correct symbols/labels for IRR/USD/EUR/AED/CNY/TRY
 
+## چک‌لیست اختصاصی فاز 12E-1
+
+- [ ] Both execution modes are testable (`constrained` and `allow_shortage`)
+- [ ] `allow_shortage` mode does not fail because of budget shortage alone
+- [ ] On failure, diagnostics identify non-budget root cause (not generic message)
+- [ ] Response includes machine-readable `error_code` and structured `diagnostics`
+- [ ] Partial feasible behavior works when only subset of items has valid candidates
+- [ ] Skipped/infeasible item reasons are visible
+- [ ] Budget-filtered count is visible in constrained runs
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker
