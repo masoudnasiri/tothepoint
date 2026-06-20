@@ -43,7 +43,7 @@ class TestProcurementOptionCRUD:
     
     @pytest.mark.asyncio
     async def test_create_with_project_item_id(
-        self, db_session, test_project_item, test_supplier, test_currency
+        self, db_session, test_project_item, test_supplier, test_currency, test_package
     ):
         """Test creating procurement option with project_item_id (legacy)"""
         option_data = ProcurementOptionCreate(
@@ -61,7 +61,7 @@ class TestProcurementOptionCRUD:
         assert option.project_item_id == test_project_item.id
         # Package_id may be resolved if flag enabled
         if settings.enable_package_procurement:
-            assert option.package_id is not None
+            assert option.package_id == test_package.id
     
     @pytest.mark.asyncio
     async def test_create_with_item_code_only(
@@ -150,7 +150,7 @@ class TestDeliveryOptionCRUD:
     
     @pytest.mark.asyncio
     async def test_create_with_project_item_id_only(
-        self, db_session, test_project_item
+        self, db_session, test_project_item, test_package
     ):
         """Test creating delivery option with project_item_id only (legacy)"""
         option_data = DeliveryOptionCreate(
@@ -166,7 +166,7 @@ class TestDeliveryOptionCRUD:
         assert option.project_item_id == test_project_item.id
         # Package_id may be resolved if flag enabled
         if settings.enable_package_procurement:
-            assert option.package_id is not None
+            assert option.package_id == test_package.id
     
     @pytest.mark.asyncio
     async def test_create_no_reference(self, db_session):

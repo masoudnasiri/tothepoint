@@ -6,16 +6,16 @@ from typing import List, Optional
 from datetime import date, datetime
 
 from app.database import get_db
-from app.models import SupplierPayment as SupplierPaymentModel, FinalizedDecision, Project, User
+from app.models import SupplierPayment as SupplierPaymentModel, FinalizedDecision, Project, User, ProcurementOption
 from app.schemas import (
     SupplierPaymentCreate, 
     SupplierPaymentUpdate, 
-    SupplierPaymentResponse,
-    SupplierPayment
+    SupplierPaymentResponse
 )
 from app.auth import get_current_user
 from app.schemas import User as UserSchema
 from app.cashflow_sync_service import CashflowSyncService
+from app.crud import log_audit
 
 router = APIRouter(prefix="/supplier-payments", tags=["supplier-payments"])
 
@@ -98,9 +98,11 @@ async def list_supplier_payments(
             "id": payment.id,
             "decision_id": payment.decision_id,
             "supplier_name": payment.supplier_name,
+            "supplier_id": payment.supplier_id,
             "item_code": payment.item_code,
             "project_id": payment.project_id,
             "project_name": payment.project.name if payment.project else None,
+            "package_id": payment.package_id,
             "payment_date": payment.payment_date,
             "payment_amount": payment.payment_amount,
             "currency": payment.currency,
@@ -154,9 +156,11 @@ async def get_supplier_payment(
         "id": payment.id,
         "decision_id": payment.decision_id,
         "supplier_name": payment.supplier_name,
+        "supplier_id": payment.supplier_id,
         "item_code": payment.item_code,
         "project_id": payment.project_id,
         "project_name": payment.project.name if payment.project else None,
+        "package_id": payment.package_id,
         "payment_date": payment.payment_date,
         "payment_amount": payment.payment_amount,
         "currency": payment.currency,
@@ -182,7 +186,10 @@ async def create_supplier_payment(
     # Verify the decision exists and user has access
     decision_stmt = select(FinalizedDecision).where(
         FinalizedDecision.id == payment_data.decision_id
-    ).options(selectinload(FinalizedDecision.project))
+    ).options(
+        selectinload(FinalizedDecision.project),
+        selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+    )
     
     decision_result = await db.execute(decision_stmt)
     decision = decision_result.scalar_one_or_none()
@@ -206,8 +213,10 @@ async def create_supplier_payment(
     supplier_payment = SupplierPaymentModel(
         decision_id=payment_data.decision_id,
         supplier_name=payment_data.supplier_name,
+        supplier_id=payment_data.supplier_id or (decision.procurement_option.supplier_id if decision.procurement_option else None),
         item_code=payment_data.item_code,
         project_id=payment_data.project_id,
+        package_id=decision.package_id,
         payment_date=payment_data.payment_date,
         payment_amount=payment_data.payment_amount,
         currency=payment_data.currency,
@@ -234,14 +243,37 @@ async def create_supplier_payment(
     project_stmt = select(Project).where(Project.id == supplier_payment.project_id)
     project_result = await db.execute(project_stmt)
     project = project_result.scalar_one_or_none()
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="SUPPLIER_PAYMENT_CREATE",
+            entity_type="supplier_payment",
+            entity_id=supplier_payment.id,
+            details={
+                "decision_id": supplier_payment.decision_id,
+                "project_id": supplier_payment.project_id,
+                "package_id": supplier_payment.package_id,
+                "supplier_id": supplier_payment.supplier_id,
+                "supplier_name": supplier_payment.supplier_name,
+                "payment_amount": float(supplier_payment.payment_amount),
+                "currency": supplier_payment.currency,
+                "status": supplier_payment.status,
+            },
+        )
+    except Exception:
+        pass
     
     return {
         "id": supplier_payment.id,
         "decision_id": supplier_payment.decision_id,
         "supplier_name": supplier_payment.supplier_name,
+        "supplier_id": supplier_payment.supplier_id,
         "item_code": supplier_payment.item_code,
         "project_id": supplier_payment.project_id,
         "project_name": project.name if project else None,
+        "package_id": supplier_payment.package_id,
         "payment_date": supplier_payment.payment_date,
         "payment_amount": supplier_payment.payment_amount,
         "currency": supplier_payment.currency,
@@ -265,7 +297,7 @@ async def update_supplier_payment(
     """
     Update a supplier payment.
     """
-    stmt = select(SupplierPayment).where(SupplierPaymentModel.id == payment_id)
+    stmt = select(SupplierPaymentModel).where(SupplierPaymentModel.id == payment_id)
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
     
@@ -298,14 +330,28 @@ async def update_supplier_payment(
     project_stmt = select(Project).where(Project.id == payment.project_id)
     project_result = await db.execute(project_stmt)
     project = project_result.scalar_one_or_none()
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="SUPPLIER_PAYMENT_UPDATE",
+            entity_type="supplier_payment",
+            entity_id=payment.id,
+            details=update_data,
+        )
+    except Exception:
+        pass
     
     return {
         "id": payment.id,
         "decision_id": payment.decision_id,
         "supplier_name": payment.supplier_name,
+        "supplier_id": payment.supplier_id,
         "item_code": payment.item_code,
         "project_id": payment.project_id,
         "project_name": project.name if project else None,
+        "package_id": payment.package_id,
         "payment_date": payment.payment_date,
         "payment_amount": payment.payment_amount,
         "currency": payment.currency,
@@ -349,6 +395,23 @@ async def delete_supplier_payment(
     
     await db.delete(payment)
     await db.commit()
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="SUPPLIER_PAYMENT_DELETE",
+            entity_type="supplier_payment",
+            entity_id=payment_id,
+            details={
+                "decision_id": payment.decision_id,
+                "project_id": payment.project_id,
+                "package_id": payment.package_id,
+                "supplier_id": payment.supplier_id,
+            },
+        )
+    except Exception:
+        pass
     
     # Remove from cash flow system
     try:
@@ -393,7 +456,7 @@ async def get_decision_supplier_payments(
             raise HTTPException(status_code=403, detail="Access denied to this decision")
     
     # Get supplier payments for this decision
-    stmt = select(SupplierPayment).where(
+    stmt = select(SupplierPaymentModel).where(
         SupplierPaymentModel.decision_id == decision_id
     ).options(
         selectinload(SupplierPaymentModel.project),
@@ -410,9 +473,11 @@ async def get_decision_supplier_payments(
             "id": payment.id,
             "decision_id": payment.decision_id,
             "supplier_name": payment.supplier_name,
+            "supplier_id": payment.supplier_id,
             "item_code": payment.item_code,
             "project_id": payment.project_id,
             "project_name": payment.project.name if payment.project else None,
+            "package_id": payment.package_id,
             "payment_date": payment.payment_date,
             "payment_amount": payment.payment_amount,
             "currency": payment.currency,

@@ -448,8 +448,27 @@ DATE=$(date +%Y%m%d_%H%M%S)
 
 mkdir -p "$BACKUP_DIR"
 
+DB_SERVICE=""
+if docker-compose config --services | grep -qx "postgres"; then
+    DB_SERVICE="postgres"
+elif docker-compose config --services | grep -qx "db"; then
+    DB_SERVICE="db"
+else
+    echo "ERROR: Could not find database service (expected 'postgres' or 'db')."
+    exit 1
+fi
+
+echo "Using database service: $DB_SERVICE"
 echo "Creating database backup..."
-docker-compose exec -T db pg_dump -U postgres procurement_dss > "$BACKUP_DIR/db_backup_$DATE.sql"
+if ! docker-compose exec -T "$DB_SERVICE" pg_dump -U postgres procurement_dss > "$BACKUP_DIR/db_backup_$DATE.sql"; then
+    echo "ERROR: Database backup failed."
+    exit 1
+fi
+
+if [ ! -s "$BACKUP_DIR/db_backup_$DATE.sql" ]; then
+    echo "ERROR: Backup file is empty."
+    exit 1
+fi
 
 echo "Backup saved: $BACKUP_DIR/db_backup_$DATE.sql"
 

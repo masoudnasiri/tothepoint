@@ -57,7 +57,8 @@ METHOD 2: MANUAL UPDATE (If script fails)
    cd ~/pdss  (or ~/pdss-linux-v1.0.0)
 
 2. Create backup:
-   docker-compose exec -T db pg_dump -U postgres procurement_dss > ~/backup_$(date +%Y%m%d).sql
+   DB_SERVICE=$(docker-compose config --services | grep -E "^(postgres|db)$" | head -1)
+   docker-compose exec -T "$DB_SERVICE" pg_dump -U postgres procurement_dss > ~/backup_$(date +%Y%m%d).sql
    tar -czf ~/code_backup_$(date +%Y%m%d).tar.gz backend/ frontend/
 
 3. Stop platform:
@@ -245,9 +246,9 @@ If update still doesn't work after following these instructions:
    grep -i "get_password_hash" backend/app/crud.py
    grep -i "SECURITY NOTICE" frontend/src/pages/LoginPage.tsx
 
-3. Force complete rebuild:
+3. Force complete rebuild (non-destructive):
    cd ~/pdss
-   docker-compose down -v
+   docker-compose down
    docker-compose build --no-cache
    docker-compose up -d
 

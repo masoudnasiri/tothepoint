@@ -737,6 +737,8 @@ class FinalizedDecision(FinalizedDecisionBase):
     # Phase 3: Package context in response
     package_name: Optional[str] = Field(None, description="Package name (if package_id is set)")
     package_type: Optional[str] = Field(None, description="Package type: FULL, PARTIAL, CUSTOM")
+    supplier_id: Optional[int] = Field(None, description="Supplier ID resolved from procurement option")
+    supplier_name: Optional[str] = Field(None, description="Supplier name resolved from procurement option")
     
     model_config = {"from_attributes": True}
 
@@ -965,6 +967,10 @@ class InvoiceResponse(InvoiceBase):
     item_code: str
     project_name: str
     supplier_name: str
+    package_id: Optional[int] = None
+    package_name: Optional[str] = None
+    package_type: Optional[str] = None
+    supplier_id: Optional[int] = None
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -1000,6 +1006,10 @@ class PaymentResponse(PaymentBase):
     item_code: str
     project_name: str
     supplier_name: str
+    package_id: Optional[int] = None
+    package_name: Optional[str] = None
+    package_type: Optional[str] = None
+    supplier_id: Optional[int] = None
     status: str
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -1030,8 +1040,10 @@ class BulkDelete(BaseModel):
 class SupplierPaymentBase(BaseModel):
     decision_id: int = Field(..., description="ID of the finalized decision")
     supplier_name: str = Field(..., min_length=1, max_length=200, description="Supplier name")
+    supplier_id: Optional[int] = Field(None, description="Supplier ID (normalized supplier reference)")
     item_code: str = Field(..., min_length=1, max_length=100, description="Item code")
     project_id: int = Field(..., description="Project ID")
+    package_id: Optional[int] = Field(None, description="Package ID (for package-based decisions)")
     payment_date: date = Field(..., description="Payment date")
     payment_amount: Decimal = Field(..., gt=0, description="Payment amount")
     currency: str = Field(..., min_length=3, max_length=10, description="Currency code")
@@ -1058,6 +1070,8 @@ class SupplierPaymentUpdate(BaseModel):
 
 class SupplierPayment(SupplierPaymentBase):
     id: int
+    package_id: Optional[int] = None
+    supplier_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     created_by_id: Optional[int] = None

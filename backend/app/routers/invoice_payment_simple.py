@@ -1,19 +1,30 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, desc, asc
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from datetime import datetime
 
 from app.database import get_db
-from app.models import FinalizedDecision
+from app.models import FinalizedDecision, ProcurementOption
 from app.schemas import (
     InvoiceCreate, InvoiceUpdate, InvoiceResponse,
     PaymentCreate, PaymentUpdate, PaymentResponse,
     InvoicePaymentSummary
 )
 from app.cashflow_sync_service import CashflowSyncService
+from app.crud import log_audit
 
 router = APIRouter(prefix="/api/invoice-payment", tags=["invoice-payment"])
+
+
+def _resolve_supplier_name(decision: FinalizedDecision) -> str:
+    if decision.procurement_option:
+        if decision.procurement_option.supplier and decision.procurement_option.supplier.company_name:
+            return decision.procurement_option.supplier.company_name
+        if decision.procurement_option.supplier_name:
+            return decision.procurement_option.supplier_name
+    return "Unknown Supplier"
 
 # Invoice Management
 @router.get("/invoices", response_model=List[InvoiceResponse])
@@ -32,6 +43,9 @@ async def list_invoices(
     # Query finalized decisions that have invoice data
     query = select(FinalizedDecision).where(
         FinalizedDecision.actual_invoice_issue_date.isnot(None)
+    ).options(
+        selectinload(FinalizedDecision.package),
+        selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
     )
     
     # Apply filters
@@ -74,7 +88,11 @@ async def list_invoices(
             notes=decision.notes or "",
             item_code=decision.item_code,
             project_name=f"Project {decision.project_id}",
-            supplier_name="Unknown Supplier",
+            supplier_name=_resolve_supplier_name(decision),
+            package_id=decision.package_id,
+            package_name=decision.package.package_name if decision.package else None,
+            package_type=decision.package.package_type if decision.package else None,
+            supplier_id=decision.procurement_option.supplier_id if decision.procurement_option else None,
             status="sent" if decision.actual_invoice_issue_date else "draft",
             created_at=decision.created_at,
             updated_at=decision.updated_at
@@ -94,7 +112,12 @@ async def create_invoice(invoice: InvoiceCreate, db: AsyncSession = Depends(get_
     try:
         # Find the decision
         result = await db.execute(
-            select(FinalizedDecision).where(FinalizedDecision.id == invoice.decision_id)
+            select(FinalizedDecision)
+            .options(
+                selectinload(FinalizedDecision.package),
+                selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+            )
+            .where(FinalizedDecision.id == invoice.decision_id)
         )
         decision = result.scalar_one_or_none()
         
@@ -102,7 +125,8 @@ async def create_invoice(invoice: InvoiceCreate, db: AsyncSession = Depends(get_
             raise HTTPException(status_code=404, detail="Decision not found")
         
         # Check if item is already fully paid
-        final_cost = float(decision.final_cost)
+        final_cost_base = decision.final_cost_amount if decision.final_cost_amount is not None else decision.final_cost
+        final_cost = float(final_cost_base or 0)
         total_paid = float(decision.actual_payment_amount or 0)
         
         # Check if item is fully paid
@@ -153,6 +177,25 @@ async def create_invoice(invoice: InvoiceCreate, db: AsyncSession = Depends(get_
         
         await db.commit()
         await db.refresh(decision)
+
+        try:
+            await log_audit(
+                db,
+                user_id=None,
+                action="INVOICE_CREATE",
+                entity_type="finalized_decision",
+                entity_id=decision.id,
+                details={
+                    "decision_id": decision.id,
+                    "package_id": decision.package_id,
+                    "supplier_id": decision.procurement_option.supplier_id if decision.procurement_option else None,
+                    "invoice_number": invoice.invoice_number,
+                    "invoice_amount": float(invoice.invoice_amount),
+                    "currency": invoice.currency,
+                },
+            )
+        except Exception:
+            pass
         
         # Return the updated decision as an invoice response
         return InvoiceResponse(
@@ -167,11 +210,17 @@ async def create_invoice(invoice: InvoiceCreate, db: AsyncSession = Depends(get_
             notes=decision.notes or "",
             item_code=decision.item_code,
             project_name=f"Project {decision.project_id}",
-            supplier_name="Unknown Supplier",
+            supplier_name=_resolve_supplier_name(decision),
+            package_id=decision.package_id,
+            package_name=decision.package.package_name if decision.package else None,
+            package_type=decision.package.package_type if decision.package else None,
+            supplier_id=decision.procurement_option.supplier_id if decision.procurement_option else None,
             status="sent" if decision.actual_invoice_issue_date else "draft",
             created_at=decision.created_at,
             updated_at=decision.updated_at
         )
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to create invoice: {str(e)}")
@@ -197,11 +246,23 @@ async def delete_invoice(invoice_id: int, db: AsyncSession = Depends(get_db)):
         # Clear invoice data from the decision
         decision.actual_invoice_issue_date = None
         decision.actual_invoice_amount = None
+        decision.actual_invoice_amount_value = None
         decision.actual_invoice_amount_currency = None
         decision.actual_invoice_received_date = None
-        decision.payment_terms = None
         
         await db.commit()
+
+        try:
+            await log_audit(
+                db,
+                user_id=None,
+                action="INVOICE_DELETE",
+                entity_type="finalized_decision",
+                entity_id=decision.id,
+                details={"decision_id": decision.id, "package_id": decision.package_id},
+            )
+        except Exception:
+            pass
         
         return {"message": "Invoice deleted successfully"}
     except Exception as e:
@@ -225,6 +286,9 @@ async def list_payments(
     # Query finalized decisions that have payment data
     query = select(FinalizedDecision).where(
         FinalizedDecision.actual_payment_date.isnot(None)
+    ).options(
+        selectinload(FinalizedDecision.package),
+        selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
     )
     
     # Apply filters
@@ -267,7 +331,11 @@ async def list_payments(
             notes=decision.notes or "",
             item_code=decision.item_code,
             project_name=f"Project {decision.project_id}",
-            supplier_name="Unknown Supplier",
+            supplier_name=_resolve_supplier_name(decision),
+            package_id=decision.package_id,
+            package_name=decision.package.package_name if decision.package else None,
+            package_type=decision.package.package_type if decision.package else None,
+            supplier_id=decision.procurement_option.supplier_id if decision.procurement_option else None,
             status="completed" if decision.actual_payment_date else "pending",
             created_at=decision.created_at,
             updated_at=decision.updated_at
@@ -287,7 +355,12 @@ async def create_payment(payment: PaymentCreate, db: AsyncSession = Depends(get_
     try:
         # Find the decision (using invoice_id as decision_id for now)
         result = await db.execute(
-            select(FinalizedDecision).where(FinalizedDecision.id == payment.invoice_id)
+            select(FinalizedDecision)
+            .options(
+                selectinload(FinalizedDecision.package),
+                selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+            )
+            .where(FinalizedDecision.id == payment.invoice_id)
         )
         decision = result.scalar_one_or_none()
         
@@ -305,6 +378,25 @@ async def create_payment(payment: PaymentCreate, db: AsyncSession = Depends(get_
         
         await db.commit()
         await db.refresh(decision)
+
+        try:
+            await log_audit(
+                db,
+                user_id=None,
+                action="PAYMENT_IN_CREATE",
+                entity_type="finalized_decision",
+                entity_id=decision.id,
+                details={
+                    "decision_id": decision.id,
+                    "package_id": decision.package_id,
+                    "supplier_id": decision.procurement_option.supplier_id if decision.procurement_option else None,
+                    "payment_amount": float(payment.payment_amount),
+                    "currency": payment.currency,
+                    "payment_method": payment.payment_method,
+                },
+            )
+        except Exception:
+            pass
         
         # Create cash flow event directly without using the sync service
         try:
@@ -346,11 +438,17 @@ async def create_payment(payment: PaymentCreate, db: AsyncSession = Depends(get_
             notes=payment.notes or "",
             item_code=decision.item_code,
             project_name=f"Project {decision.project_id}",
-            supplier_name="Unknown Supplier",
+            supplier_name=_resolve_supplier_name(decision),
+            package_id=decision.package_id,
+            package_name=decision.package.package_name if decision.package else None,
+            package_type=decision.package.package_type if decision.package else None,
+            supplier_id=decision.procurement_option.supplier_id if decision.procurement_option else None,
             status="completed" if decision.actual_payment_date else "pending",
-            created_at=current_time.isoformat(),
-            updated_at=current_time.isoformat()
+            created_at=current_time,
+            updated_at=current_time
         )
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to create payment: {str(e)}")
@@ -375,12 +473,23 @@ async def delete_payment(payment_id: int, db: AsyncSession = Depends(get_db)):
     # Clear payment data from the decision
     decision.actual_payment_date = None
     decision.actual_payment_amount = None
-    decision.actual_payment_currency = None
-    decision.actual_payment_method = None
-    decision.actual_payment_reference = None
-    decision.actual_payment_notes = None
+    decision.actual_payment_amount_value = None
+    decision.actual_payment_amount_currency = None
+    decision.actual_payment_installments = None
     
     await db.commit()
+
+    try:
+        await log_audit(
+            db,
+            user_id=None,
+            action="PAYMENT_IN_DELETE",
+            entity_type="finalized_decision",
+            entity_id=decision.id,
+            details={"decision_id": decision.id, "package_id": decision.package_id},
+        )
+    except Exception:
+        pass
     
     # Remove from cash flow system
     try:

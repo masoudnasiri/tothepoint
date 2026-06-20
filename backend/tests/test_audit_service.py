@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from sqlalchemy import select, text
 from app.services.audit_service import log_phase3_operation, log_feature_flag_event
+from app.config import settings
 
 
 class TestAuditService:
@@ -74,7 +75,7 @@ class TestAuditService:
         assert metadata["used_legacy_reference"] is False
         assert metadata["test"] == "data"
         assert "feature_flags" in metadata
-        assert metadata["feature_flags"]["enable_package_procurement"] is False
+        assert metadata["feature_flags"]["enable_package_procurement"] is settings.enable_package_procurement
     
     @pytest.mark.asyncio
     async def test_log_feature_flag_event_creates_record(self, db_session):

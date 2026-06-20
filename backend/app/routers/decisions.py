@@ -15,6 +15,7 @@ from app.models import User, FinalizedDecision, ProjectItem, ProcurementOption, 
 from app.config import settings
 from app.validators.package_validators import resolve_package_from_project_item
 from app.services.package_service import validate_package_coverage_for_lock
+from app.crud import log_audit
 from app import schemas
 from app.schemas import (
     FinalizedDecision as FinalizedDecisionSchema, 
@@ -51,6 +52,20 @@ def _decision_boundary_conditions(
     if item_code:
         conditions.append(FinalizedDecision.item_code == item_code)
     return conditions
+
+
+def _enrich_decision_response(decision: FinalizedDecision) -> FinalizedDecision:
+    """Populate response-only package/supplier context fields on ORM object."""
+    if decision.package is not None:
+        decision.package_name = decision.package.package_name
+        decision.package_type = decision.package.package_type
+    if decision.procurement_option is not None:
+        decision.supplier_id = decision.procurement_option.supplier_id
+        if decision.procurement_option.supplier and decision.procurement_option.supplier.company_name:
+            decision.supplier_name = decision.procurement_option.supplier.company_name
+        else:
+            decision.supplier_name = decision.procurement_option.supplier_name
+    return decision
 
 
 @router.get("/", response_model=List[FinalizedDecisionSchema])
@@ -110,10 +125,16 @@ async def list_finalized_decisions(
             )
         )
     
+    query = query.options(
+        selectinload(FinalizedDecision.package),
+        selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+    )
+
     result = await db.execute(
         query.offset(skip).limit(limit).order_by(FinalizedDecision.decision_date.desc())
     )
-    return result.scalars().all()
+    decisions = result.scalars().all()
+    return [_enrich_decision_response(decision) for decision in decisions]
 
 
 @router.get("/count")
@@ -723,8 +744,9 @@ async def get_decision(
     result = await db.execute(
         select(FinalizedDecision)
         .options(
+            selectinload(FinalizedDecision.package),
             selectinload(FinalizedDecision.project_item),
-            selectinload(FinalizedDecision.procurement_option)
+            selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier)
         )
         .where(FinalizedDecision.id == decision_id)
     )
@@ -736,7 +758,7 @@ async def get_decision(
             detail="Decision not found"
         )
     
-    return decision
+    return _enrich_decision_response(decision)
 
 
 @router.put("/{decision_id}", response_model=FinalizedDecisionSchema)
@@ -778,12 +800,13 @@ async def update_decision(
     result = await db.execute(
         select(FinalizedDecision)
         .options(
+            selectinload(FinalizedDecision.package),
             selectinload(FinalizedDecision.project_item),
-            selectinload(FinalizedDecision.procurement_option)
+            selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier)
         )
         .where(FinalizedDecision.id == decision_id)
     )
-    return result.scalar_one()
+    return _enrich_decision_response(result.scalar_one())
 
 
 @router.delete("/{decision_id}")
@@ -1073,6 +1096,22 @@ async def finalize_decisions(
                 logger.info(f"✅ Reactivated cashflow events for {len(eligible_ids)} re-finalized decision(s)")
         
         await db.commit()
+
+        try:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="DECISION_FINALIZE",
+                entity_type="finalized_decision",
+                entity_id=None,
+                details={
+                    "finalize_all": request.finalize_all,
+                    "finalized_count": count,
+                    "decision_ids": eligible_ids,
+                },
+            )
+        except Exception:
+            pass
         
         return {
             "message": f"Successfully finalized {count} decision(s)",
@@ -1124,6 +1163,7 @@ async def update_decision_status(
             )
     
     # Update status
+    old_status = decision.status
     update_data = {'status': status_update.status}
     
     if status_update.status == 'LOCKED':
@@ -1163,9 +1203,32 @@ async def update_decision_status(
     
     # Fetch and return updated decision
     result = await db.execute(
-        select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
+        select(FinalizedDecision)
+        .options(
+            selectinload(FinalizedDecision.package),
+            selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+        )
+        .where(FinalizedDecision.id == decision_id)
     )
-    return result.scalar_one()
+    updated_decision = result.scalar_one()
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="DECISION_STATUS_UPDATE",
+            entity_type="finalized_decision",
+            entity_id=decision_id,
+            details={
+                "from_status": old_status,
+                "to_status": status_update.status,
+                "package_id": updated_decision.package_id,
+            },
+        )
+    except Exception:
+        pass
+
+    return _enrich_decision_response(updated_decision)
 
 
 @router.post("/{decision_id}/actual-invoice", response_model=FinalizedDecisionSchema)
@@ -1218,11 +1281,32 @@ async def enter_actual_invoice_data(
     
     await db.commit()
     
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="DECISION_ACTUAL_INVOICE_ENTER",
+            entity_type="finalized_decision",
+            entity_id=decision_id,
+            details={
+                "package_id": decision.package_id,
+                "actual_invoice_issue_date": str(invoice_data.actual_invoice_issue_date),
+                "actual_invoice_amount": float(invoice_data.actual_invoice_amount),
+            },
+        )
+    except Exception:
+        pass
+
     # Fetch and return updated decision
     result = await db.execute(
-        select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
+        select(FinalizedDecision)
+        .options(
+            selectinload(FinalizedDecision.package),
+            selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+        )
+        .where(FinalizedDecision.id == decision_id)
     )
-    return result.scalar_one()
+    return _enrich_decision_response(result.scalar_one())
 
 
 @router.post("/{decision_id}/actual-payment", response_model=FinalizedDecisionSchema)
@@ -1298,8 +1382,29 @@ async def enter_actual_payment_data(
     
     await db.commit()
     
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="DECISION_ACTUAL_PAYMENT_ENTER",
+            entity_type="finalized_decision",
+            entity_id=decision_id,
+            details={
+                "package_id": decision.package_id,
+                "actual_payment_date": str(payment_data.actual_payment_date),
+                "actual_payment_amount": float(payment_data.actual_payment_amount),
+            },
+        )
+    except Exception:
+        pass
+
     # Fetch and return updated decision
     result = await db.execute(
-        select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
+        select(FinalizedDecision)
+        .options(
+            selectinload(FinalizedDecision.package),
+            selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
+        )
+        .where(FinalizedDecision.id == decision_id)
     )
-    return result.scalar_one()
+    return _enrich_decision_response(result.scalar_one())

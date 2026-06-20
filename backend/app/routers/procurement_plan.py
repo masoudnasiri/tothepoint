@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 from app.database import get_db
 from app.models import FinalizedDecision, User, Project, ProjectItem, ProcurementOption, ProjectAssignment, CashflowEvent, SupplierPayment
 from app.models_invoice_payment import Invoice, Payment, PaymentStatus
+from app.crud import log_audit
 from app.schemas import (
     FinalizedDecision as FinalizedDecisionSchema,
     ProcurementDeliveryConfirmationRequest,
@@ -30,6 +31,42 @@ router = APIRouter(prefix="/procurement-plan", tags=["Procurement Plan"])
 logger = logging.getLogger(__name__)
 
 
+def _payment_status_rank(status_value: str) -> int:
+    """Rank payment statuses so we can merge table/legacy sources safely."""
+    ranks = {"not_paid": 0, "partially_paid": 1, "fully_paid": 2}
+    return ranks.get(status_value or "not_paid", 0)
+
+
+def _pick_stronger_payment_status(current: str, candidate: str) -> str:
+    return candidate if _payment_status_rank(candidate) > _payment_status_rank(current) else current
+
+
+def _derive_payment_in_from_decision(decision: FinalizedDecision) -> str:
+    """Fallback payment-in status from FinalizedDecision actual invoice/payment fields."""
+    invoice_amount = decision.actual_invoice_amount_value or decision.actual_invoice_amount
+    payment_amount = decision.actual_payment_amount_value or decision.actual_payment_amount
+
+    if not invoice_amount:
+        return "not_paid"
+
+    paid = float(payment_amount or 0)
+    invoiced = float(invoice_amount)
+    if paid >= invoiced:
+        return "fully_paid"
+    if paid > 0:
+        return "partially_paid"
+    return "not_paid"
+
+
+def _resolve_supplier_name(decision: FinalizedDecision) -> Optional[str]:
+    """Prefer normalized supplier relation, then legacy supplier_name."""
+    if decision.procurement_option:
+        if decision.procurement_option.supplier and decision.procurement_option.supplier.company_name:
+            return decision.procurement_option.supplier.company_name
+        return decision.procurement_option.supplier_name
+    return None
+
+
 async def _batch_calculate_payment_statuses(decision_ids: List[int], db: AsyncSession) -> Dict[int, Dict[str, str]]:
     """
     Batch calculate Payment In and Payment Out statuses for multiple decisions.
@@ -40,6 +77,15 @@ async def _batch_calculate_payment_statuses(decision_ids: List[int], db: AsyncSe
     
     # Initialize all statuses to 'not_paid'
     statuses_map = {did: {'payment_in_status': 'not_paid', 'payment_out_status': 'not_paid'} for did in decision_ids}
+    decisions_result = await db.execute(
+        select(FinalizedDecision).where(FinalizedDecision.id.in_(decision_ids))
+    )
+    decisions = decisions_result.scalars().all()
+    decisions_dict = {d.id: d for d in decisions}
+
+    # Fallback source: decision-level actual invoice/payment fields.
+    for decision_id, decision in decisions_dict.items():
+        statuses_map[decision_id]['payment_in_status'] = _derive_payment_in_from_decision(decision)
     
     try:
         # Batch query all invoices for these decisions
@@ -76,9 +122,13 @@ async def _batch_calculate_payment_statuses(decision_ids: List[int], db: AsyncSe
                 total_paid = payments_by_invoice.get(invoice.id, 0)
                 
                 if total_paid >= invoice_amount:
-                    statuses_map[decision_id]['payment_in_status'] = 'fully_paid'
+                    statuses_map[decision_id]['payment_in_status'] = _pick_stronger_payment_status(
+                        statuses_map[decision_id]['payment_in_status'], 'fully_paid'
+                    )
                 elif total_paid > 0:
-                    statuses_map[decision_id]['payment_in_status'] = 'partially_paid'
+                    statuses_map[decision_id]['payment_in_status'] = _pick_stronger_payment_status(
+                        statuses_map[decision_id]['payment_in_status'], 'partially_paid'
+                    )
     except Exception as e:
         # If Invoice/Payment tables don't exist or models aren't accessible, skip Payment In calculation
         logger.warning(f"Error calculating Payment In statuses: {e}")
@@ -92,13 +142,6 @@ async def _batch_calculate_payment_statuses(decision_ids: List[int], db: AsyncSe
             )
         )
         supplier_payments = supplier_payments_result.scalars().all()
-        
-        # Batch query decisions to get final_cost
-        decisions_result = await db.execute(
-            select(FinalizedDecision).where(FinalizedDecision.id.in_(decision_ids))
-        )
-        decisions = decisions_result.scalars().all()
-        decisions_dict = {d.id: d for d in decisions}
         
         # Calculate total supplier payments per decision
         payments_by_decision = {}
@@ -128,7 +171,12 @@ async def _calculate_payment_statuses(decision_id: int, db: AsyncSession) -> Dic
     Calculate Payment In and Payment Out statuses for a decision.
     Returns: {'payment_in_status': '...', 'payment_out_status': '...'}
     """
-    payment_in_status = "not_paid"
+    decision_result = await db.execute(
+        select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
+    )
+    decision = decision_result.scalar_one_or_none()
+
+    payment_in_status = _derive_payment_in_from_decision(decision) if decision else "not_paid"
     payment_out_status = "not_paid"
     
     try:
@@ -151,11 +199,9 @@ async def _calculate_payment_statuses(decision_id: int, db: AsyncSession) -> Dic
             invoice_amount = float(invoice.invoice_amount)
             
             if total_paid_in >= invoice_amount:
-                payment_in_status = "fully_paid"
+                payment_in_status = _pick_stronger_payment_status(payment_in_status, "fully_paid")
             elif total_paid_in > 0:
-                payment_in_status = "partially_paid"
-            else:
-                payment_in_status = "not_paid"
+                payment_in_status = _pick_stronger_payment_status(payment_in_status, "partially_paid")
     except Exception as e:
         logger.warning(f"Error calculating Payment In status for decision {decision_id}: {e}")
     
@@ -170,12 +216,6 @@ async def _calculate_payment_statuses(decision_id: int, db: AsyncSession) -> Dic
         supplier_payments = supplier_payments_result.scalars().all()
         
         if supplier_payments:
-            # Get the decision to compare with final_cost
-            decision_result = await db.execute(
-                select(FinalizedDecision).where(FinalizedDecision.id == decision_id)
-            )
-            decision = decision_result.scalar_one_or_none()
-            
             if decision:
                 total_paid_out = sum(float(sp.payment_amount) for sp in supplier_payments)
                 final_cost = float(decision.final_cost_amount) if decision.final_cost_amount else float(decision.final_cost)
@@ -206,6 +246,9 @@ def _filter_decision_for_role(decision: FinalizedDecision, user_role: str, payme
         "id": decision.id,
         "item_code": decision.item_code,
         "project_id": decision.project_id,
+        "package_id": decision.package_id,
+        "package_name": decision.package.package_name if decision.package else None,
+        "package_type": decision.package.package_type if decision.package else None,
         "quantity": decision.quantity,
         "delivery_date": decision.delivery_date,
         "delivery_status": decision.delivery_status,
@@ -220,7 +263,8 @@ def _filter_decision_for_role(decision: FinalizedDecision, user_role: str, payme
             "final_cost": float(decision.final_cost_amount) if decision.final_cost_amount else None,
             "final_cost_currency": decision.final_cost_currency or 'IRR',
             "purchase_date": decision.purchase_date,
-            "supplier_name": decision.procurement_option.supplier_name if decision.procurement_option else None,
+            "supplier_name": _resolve_supplier_name(decision),
+            "supplier_id": decision.procurement_option.supplier_id if decision.procurement_option else None,
             "procurement_option_id": decision.procurement_option_id,
             "is_correct_item_confirmed": decision.is_correct_item_confirmed,
             "procurement_delivery_notes": decision.procurement_delivery_notes,
@@ -294,7 +338,8 @@ async def list_procurement_plan(
     ).options(
         selectinload(FinalizedDecision.project),
         selectinload(FinalizedDecision.project_item),
-        selectinload(FinalizedDecision.procurement_option)
+        selectinload(FinalizedDecision.package),
+        selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
     )
     
     # Apply filters
@@ -409,7 +454,8 @@ async def get_procurement_plan_item(
     ).options(
         selectinload(FinalizedDecision.project),
         selectinload(FinalizedDecision.project_item),
-        selectinload(FinalizedDecision.procurement_option),
+        selectinload(FinalizedDecision.package),
+        selectinload(FinalizedDecision.procurement_option).selectinload(ProcurementOption.supplier),
         selectinload(FinalizedDecision.procurement_confirmed_by),
         selectinload(FinalizedDecision.pm_accepted_by)
     )
@@ -487,6 +533,23 @@ async def confirm_delivery(
     
     await db.commit()
     await db.refresh(decision)
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROCUREMENT_PLAN_CONFIRM_DELIVERY",
+            entity_type="finalized_decision",
+            entity_id=decision.id,
+            details={
+                "delivery_status": decision.delivery_status,
+                "package_id": decision.package_id,
+                "project_id": decision.project_id,
+                "actual_delivery_date": str(decision.actual_delivery_date) if decision.actual_delivery_date else None,
+            },
+        )
+    except Exception:
+        pass
     
     return {
         "message": "Delivery confirmed successfully",
@@ -551,6 +614,23 @@ async def accept_delivery(
     
     await db.commit()
     await db.refresh(decision)
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROCUREMENT_PLAN_ACCEPT_DELIVERY",
+            entity_type="finalized_decision",
+            entity_id=decision.id,
+            details={
+                "delivery_status": decision.delivery_status,
+                "package_id": decision.package_id,
+                "project_id": decision.project_id,
+                "accepted_by_pm": bool(decision.is_accepted_by_pm),
+            },
+        )
+    except Exception:
+        pass
     
     return {
         "message": "Delivery accepted successfully",
@@ -620,6 +700,23 @@ async def enter_invoice_data(
     
     await db.commit()
     await db.refresh(decision)
+
+    try:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="PROCUREMENT_PLAN_ENTER_INVOICE",
+            entity_type="finalized_decision",
+            entity_id=decision.id,
+            details={
+                "package_id": decision.package_id,
+                "project_id": decision.project_id,
+                "actual_invoice_amount": float(invoice_data.actual_invoice_amount),
+                "actual_invoice_issue_date": str(invoice_data.actual_invoice_issue_date),
+            },
+        )
+    except Exception:
+        pass
     
     return {
         "message": "Invoice data entered successfully",
