@@ -6,10 +6,13 @@ Run immediately after deployment.
 
 - [ ] `docker compose ps` shows backend and postgres healthy.
 - [ ] `curl -sS http://127.0.0.1:8000/health` returns healthy.
+- [ ] `/health` includes `version: 1.0.0-rc1`, `product: Rivar`, `producer: Corbit`.
 
 ## Core Product
 
 - [ ] Login works.
+- [ ] Browser title shows `Rivar | Corbit`.
+- [ ] Favicon/logo loads from `rivar.png`.
 - [ ] Dashboard loads.
 - [ ] Projects and project items load.
 - [ ] Procurement page and package list load.

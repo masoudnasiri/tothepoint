@@ -3,12 +3,15 @@
   "package_version": "rc1",
   "source_branch": "restart/baseline-before-github-push",
   "source_baseline_commit": "ea30aa2",
-  "phase10_release_commit": "TBD",
+  "phase10_release_commit": "e811238",
+  "phase11a_branding_commit": "94a8a86",
+  "phase11b_package_refresh_commit": "see-phase11b-git-commit",
   "created_on": "2026-06-20",
   "scope": [
     "controlled release rollout",
     "deployment readiness",
-    "pilot sign-off package"
+    "pilot sign-off package",
+    "branding and runtime identity verification refresh"
   ],
   "contains": {
     "release_docs": [
@@ -19,12 +22,25 @@
       "CHECKSUMS.sha256"
     ],
     "update_package_snapshot": [
+      "update_package/update_files/VERSION",
+      "update_package/update_files/backend/VERSION",
+      "update_package/update_files/backend/app/app_metadata.py",
+      "update_package/update_files/backend/app/main.py",
       "update_package/update-deployed-platform.sh",
       "update_package/QUICK_UPDATE_COMPLETE.sh",
       "update_package/README.txt",
       "update_package/update_files/backend/app/crud.py",
       "update_package/update_files/backend/app/schemas.py",
-      "update_package/update_files/frontend/src/pages/LoginPage.tsx"
+      "update_package/update_files/frontend/public/index.html",
+      "update_package/update_files/frontend/public/manifest.json",
+      "update_package/update_files/frontend/public/rivar.png",
+      "update_package/update_files/frontend/src/App.tsx",
+      "update_package/update_files/frontend/src/components/Layout.tsx",
+      "update_package/update_files/frontend/src/pages/LoginPage.tsx",
+      "update_package/update_files/frontend/src/utils/appIdentity.ts",
+      "update_package/update_files/frontend/src/i18n/en.json",
+      "update_package/update_files/frontend/src/i18n/fa.json",
+      "update_package/update_files/frontend/src/responsive.css"
     ],
     "deployment_scripts": [
       "deployment_scripts/linux/update-deployed-platform.sh",
@@ -43,10 +59,18 @@
     "docker volumes"
   ],
   "verification_summary": {
-    "docker_health": "pass",
+    "docker_health": "pass (pdss_demo)",
     "backend_tests": "39 passed, 4 skipped, 38 warnings",
     "phase8_smoke": "3 passed, 20 warnings",
     "frontend_build": "success (compiled with warnings)",
+    "backend_health_identity": "pass (version=1.0.0-rc1, product=Rivar, producer=Corbit)",
+    "frontend_identity": "pass (title/manifest/logo served from deployed demo stack)",
     "demo_cleanup_check": "pass (DEMO_RC8_ rows removed)"
+  },
+  "deployment_verification": {
+    "target_path": "/root/pdss_demo",
+    "backend_port": 18010,
+    "frontend_port": 13010,
+    "backup_file": "/root/pdss_backups/pdss_demo_pre_94a8a86_20260620_113854.sql"
   }
 }

@@ -10,8 +10,8 @@
 
 Use one of:
 
-1. `e811238` (accepted Phase 10 controlled release package commit), or
-2. Latest Phase 11 docs-only release-control commit (preferred if including Phase 11 governance artifacts in tagged snapshot).
+1. `94a8a86` (accepted Phase 11A branding identity commit), or
+2. Latest Phase 11B release-control commit (preferred if including pilot deployment verification + package refresh artifacts in tagged snapshot).
 
 ## Current Policy
 

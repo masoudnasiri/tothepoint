@@ -3,6 +3,7 @@
 ## Summary
 
 RC1 delivers a stabilized package-aware procurement flow with operational finance compatibility, audit traceability, demo tooling, and hardened update safety.
+Phase 11B refresh adds deployed product identity visibility (`Rivar by Corbit`) and runtime version verification (`1.0.0-rc1`).
 
 ## Included Capabilities
 
@@ -14,6 +15,8 @@ RC1 delivers a stabilized package-aware procurement flow with operational financ
 - audit log coverage for key lifecycle actions
 - deterministic demo dataset create/cleanup tooling
 - validated backup/update safety gates from Phase 7
+- runtime identity and version exposure via `/health` (`version`, `product`, `producer`)
+- frontend identity consistency (title, manifest, logo, login/shell attribution)
 
 ## Verification Snapshot
 
@@ -22,6 +25,7 @@ RC1 delivers a stabilized package-aware procurement flow with operational financ
 - Phase 8 smoke: `3 passed, 20 warnings`
 - Frontend build: success (`Compiled with warnings`)
 - Demo cleanup verification: pass (`DEMO_RC8_` rows removed)
+- Runtime health identity: pass (`version=1.0.0-rc1`, `product=Rivar`, `producer=Corbit`)
 
 ## Upgrade Notes
 

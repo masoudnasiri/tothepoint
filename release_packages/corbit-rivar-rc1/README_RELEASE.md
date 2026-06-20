@@ -1,6 +1,7 @@
 # Corbit Rivar RC1 Controlled Release Package
 
 This package is prepared for controlled rollout and pilot sign-off.
+It is refreshed for Phase 11B to include branding/runtime identity updates from commit `94a8a86`.
 
 ## Package Contents
 
@@ -12,11 +13,19 @@ This package is prepared for controlled rollout and pilot sign-off.
 - `update_package/`: update package snapshot including update files
 - `deployment_scripts/`: deployment, backup, and restore scripts
 
+Phase 11B additions in update snapshot include:
+
+- `VERSION` and `backend/VERSION` (`1.0.0-rc1`)
+- backend identity metadata and health exposure (`backend/app/app_metadata.py`, `backend/app/main.py`)
+- frontend branding files (`frontend/public/index.html`, `frontend/public/manifest.json`, `frontend/public/rivar.png`)
+- frontend runtime identity wiring (`frontend/src/App.tsx`, `frontend/src/components/Layout.tsx`, `frontend/src/pages/LoginPage.tsx`, `frontend/src/utils/appIdentity.ts`, `frontend/src/i18n/en.json`, `frontend/src/i18n/fa.json`)
+
 ## Pre-Deployment Requirements
 
 1. Take a database backup before applying updates.
 2. Confirm Docker is healthy and compose services are running.
 3. Confirm target environment branch/commit matches approved baseline.
+4. Verify `/health` returns `version`, `product`, and `producer` identity fields after deploy.
 
 ## Deployment (Linux)
 

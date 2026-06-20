@@ -13,6 +13,8 @@ Corbit Rivar supports package-aware procurement planning and execution with fina
 - Phase 9: RC UAT and sign-off
 - Phase 10: controlled release package and pilot approval gate
 - Phase 11: repository hygiene, final diff review, pilot release governance docs
+- Phase 11A: product branding/identity (`Rivar by Corbit`) and release version visibility
+- Phase 11B: pilot branding deployment verification and RC1 package refresh
 
 ## Verification Results (Latest)
 
@@ -20,6 +22,8 @@ Corbit Rivar supports package-aware procurement planning and execution with fina
 - Backend tests: `39 passed, 4 skipped, 38 warnings`
 - Phase 8 smoke test: `3 passed, 20 warnings`
 - Frontend build: success (`Compiled with warnings`)
+- Deployed `/health` identity: `version=1.0.0-rc1`, `product=Rivar`, `producer=Corbit`
+- Deployed frontend identity: title `Rivar | Corbit`, manifest/logo endpoints served
 
 ## UAT and Release Decision
 
@@ -38,6 +42,7 @@ Corbit Rivar supports package-aware procurement planning and execution with fina
 - Release package path: `release_packages/corbit-rivar-rc1/`
 - Use hardened update scripts and backup-first workflow.
 - Validate with post-deploy smoke checklist in package.
+- Latest pilot verification target: `/root/pdss_demo` (ports: backend `18010`, frontend `13010`).
 
 ## Rollback Notes
 

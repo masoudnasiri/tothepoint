@@ -12,6 +12,7 @@ Focused product identity pass only (no business feature development):
 
 - Version source:
   - `VERSION`
+  - `backend/VERSION`
   - `backend/app/app_metadata.py`
   - `backend/app/main.py`
 - Browser identity:
@@ -58,13 +59,18 @@ Focused product identity pass only (no business feature development):
 
 ## Version Storage and Source-of-Truth
 
-Single source of truth:
+Version source of truth:
 
 - `VERSION` file at repository root (`1.0.0-rc1`)
+
+Runtime container copy for current backend build context:
+
+- `backend/VERSION` (`1.0.0-rc1`)
 
 Runtime wiring:
 
 - Backend loads version from `VERSION` via `backend/app/app_metadata.py`.
+- Backend runtime in Docker currently reads `backend/VERSION` (mirrors root `VERSION`) due backend-only build context.
 - `/health` and root API info now expose this runtime version and identity fields.
 - Frontend reads runtime version from backend `/health` through `getRuntimeVersion()`.
 
