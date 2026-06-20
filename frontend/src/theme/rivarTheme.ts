@@ -277,7 +277,8 @@ export const createRivarTheme = (isPersian: boolean = false, direction: 'ltr' | 
           root: {
             border: `1px solid ${rivarTokens.line}`,
             borderRadius: rivarTokens.radiusMd,
-            overflow: 'hidden',
+            overflowX: 'auto',    // allow horizontal scroll — never clip action columns
+            overflowY: 'visible',
           },
         },
       },

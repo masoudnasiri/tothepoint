@@ -155,15 +155,21 @@ export const PackageList: React.FC<PackageListProps> = ({
 
   const getPackageTypeColor = (type: string) => {
     switch (type) {
-      case 'FULL':
-        return 'primary';
-      case 'PARTIAL':
-        return 'secondary';
-      case 'CUSTOM':
-        return 'default';
-      default:
-        return 'default';
+      case 'FULL':   return 'primary';
+      case 'PARTIAL': return 'secondary';
+      case 'CUSTOM':  return 'default';
+      default:        return 'default';
     }
+  };
+
+  // Backend returns uppercase (FULL/PARTIAL/CUSTOM), i18n keys use camelCase (Full/Partial/Custom)
+  const getPackageTypeLabel = (type: string) => {
+    const keyMap: Record<string, string> = {
+      FULL:    'procurement.packageTypeFull',
+      PARTIAL: 'procurement.packageTypePartial',
+      CUSTOM:  'procurement.packageTypeCustom',
+    };
+    return t(keyMap[type] || 'procurement.packageTypeCustom') || type;
   };
 
   const getCoverageColor = (percentage: number) => {
@@ -218,7 +224,7 @@ export const PackageList: React.FC<PackageListProps> = ({
             <TableRow key={pkg.id}>
               <TableCell>
                 <Typography variant="body2" fontWeight="medium">
-                  {pkg.package_name || `${itemCode} - ${t(`procurement.packageType${pkg.package_type}`)}`}
+                  {pkg.package_name || `${itemCode} - ${getPackageTypeLabel(pkg.package_type)}`}
                 </Typography>
                 {pkg.description && (
                   <Typography variant="caption" color="text.secondary" display="block">
@@ -229,7 +235,7 @@ export const PackageList: React.FC<PackageListProps> = ({
               </TableCell>
               <TableCell align="center">
                 <Chip
-                  label={t(`procurement.packageType${pkg.package_type}`) || pkg.package_type}
+                  label={getPackageTypeLabel(pkg.package_type)}
                   size="small"
                   color={getPackageTypeColor(pkg.package_type)}
                 />
