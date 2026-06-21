@@ -96,6 +96,15 @@
 - [ ] Required budget is numerically consistent across header/cards/charts/period totals
 - [ ] Persian UI keeps Jalali period labels consistently in budget-analysis visuals
 
+## چک‌لیست اختصاصی فاز 12E-3
+
+- [ ] UAT deployment is confirmed on updated scenario-binding code path (canonical endpoint wiring)
+- [ ] Legacy `decisions/budget-analysis` body is not used for Budget Analysis main rendering
+- [ ] Canonical scenario endpoint fields (`selected_scenario_candidates`, `critical_periods`, `surplus_shortage_by_currency`) are reflected in UI behavior
+- [ ] Selected-result financial analysis is model-specific and includes `تحلیل مالی مدل انتخابی`
+- [ ] Local proposal edits/removals/additions update displayed total cost and item count immediately
+- [ ] Controlled optimizer diagnostics captured for CP-SAT and GLOP strategy outputs
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker

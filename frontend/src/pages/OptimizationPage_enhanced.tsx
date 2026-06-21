@@ -683,6 +683,21 @@ export const OptimizationPageEnhanced: React.FC = () => {
   }
 
   const selectedProposal = lastRun?.proposals[selectedProposalIndex];
+  const hasLocalChanges =
+    Object.keys(editedDecisions).length > 0 || removedDecisions.size > 0 || addedDecisions.length > 0;
+  const effectiveSelectedDecisions = selectedProposal
+    ? selectedProposal.decisions
+        .filter((decision) => !removedDecisions.has(`${decision.project_id}_${decision.item_code}`))
+        .map((decision) => editedDecisions[`${decision.project_id}_${decision.item_code}`] || decision)
+        .concat(addedDecisions)
+    : [];
+  const effectiveSelectedItemsCount = effectiveSelectedDecisions.length;
+  const effectiveSelectedTotalCost = effectiveSelectedDecisions.reduce(
+    (sum, decision) => sum + Number(decision.final_cost || 0),
+    0
+  );
+  const getDisplayProposalCost = (proposal: OptimizationProposal, index: number) =>
+    index === selectedProposalIndex && selectedProposal ? effectiveSelectedTotalCost : proposal.total_cost;
 
   return (
     <Box>
@@ -913,7 +928,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         <Box>
                           <Typography variant="body2">{proposal.proposal_name}</Typography>
                           <Typography variant="caption" color="text.secondary">
-                            {formatCurrency(proposal.total_cost)}
+                            {formatCurrency(getDisplayProposalCost(proposal, index))}
                           </Typography>
                         </Box>
                       </Box>
@@ -936,7 +951,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     </Typography>
                   </Box>
                   <Box display="flex" gap={1} alignItems="center">
-                    {(Object.keys(editedDecisions).length > 0 || removedDecisions.size > 0 || addedDecisions.length > 0) && (
+                    {hasLocalChanges && (
                       <Chip 
                         label={t('optimization.hasLocalChanges')}
                         color="warning"
@@ -944,7 +959,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                       />
                     )}
                     <Chip 
-                      label={`${selectedProposal.items_count} ${t('optimization.items')}`}
+                      label={`${effectiveSelectedItemsCount} ${t('optimization.items')}`}
                       color="primary"
                       variant="outlined"
                     />
@@ -975,7 +990,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         Total Cost
                       </Typography>
                       <Typography variant="h5">
-                        {formatCurrency(selectedProposal.total_cost)}
+                        {formatCurrency(effectiveSelectedTotalCost)}
                       </Typography>
                     </Paper>
                   </Grid>
@@ -1012,6 +1027,11 @@ export const OptimizationPageEnhanced: React.FC = () => {
                       </Box>
                     </AccordionSummary>
                     <AccordionDetails>
+                      {hasLocalChanges && (
+                        <Alert severity="info" sx={{ mb: 2 }}>
+                          Proposal totals now reflect local edits/removals. Financial analysis updates after saving the edited proposal.
+                        </Alert>
+                      )}
                       <Grid container spacing={2}>
                         <Grid item xs={12} md={6}>
                           <Paper sx={{ p: 2, height: '100%' }}>
