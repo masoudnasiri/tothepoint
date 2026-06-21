@@ -105,6 +105,17 @@
 - [ ] Local proposal edits/removals/additions update displayed total cost and item count immediately
 - [ ] Controlled optimizer diagnostics captured for CP-SAT and GLOP strategy outputs
 
+## چک‌لیست اختصاصی فاز 12E-4
+
+- [ ] Persian budget-shortage decision modal is fully localized (no English labels)
+- [ ] `Total Purchase Cost (IRR)` and `Weighted Objective Cost (IRR)` are shown as separate semantics
+- [ ] For one run, selected-result panel and Budget Analysis (`selected_result`) show the same required budget
+- [ ] Currency cards keep original currency totals separate from IRR equivalent
+- [ ] USD/EUR/AED/CNY/TRY labels are not used for IRR-equivalent values
+- [ ] Period allocation totals equal selected-result total purchase cost (no duplicated milestone sums)
+- [ ] Selected-result response includes trace/reconciliation details for auditability
+- [ ] `minimum_feasible` scenario remains single-candidate-per-item (no alternative double counting)
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker

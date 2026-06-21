@@ -196,6 +196,21 @@ class CurrencyConversionService:
         currencies.add(BASE_CURRENCY)
         
         return sorted(list(currencies))
+
+    async def get_rate_to_base(self, currency: str, transaction_date: date) -> Decimal:
+        """
+        Return exchange rate from `currency` to base currency (IRR) at transaction date.
+        """
+        normalized = (currency or BASE_CURRENCY).strip().upper()
+        if normalized == BASE_CURRENCY:
+            return Decimal("1")
+        rate = await self._get_exchange_rate(normalized, BASE_CURRENCY, transaction_date)
+        if not rate:
+            raise ValueError(
+                f"No exchange rate found for {normalized} to {BASE_CURRENCY} "
+                f"on or before {transaction_date}"
+            )
+        return Decimal(str(rate))
     
     async def get_rate_history(
         self, 

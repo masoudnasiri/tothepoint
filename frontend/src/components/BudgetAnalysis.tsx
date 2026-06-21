@@ -50,6 +50,7 @@ interface BudgetAnalysisProps {
   projectIds?: number[];
   startDate?: string;
   endDate?: string;
+  runId?: string;
   onAnalysisComplete?: (status: string) => void;
 }
 
@@ -77,6 +78,13 @@ interface ScenarioAnalysisData {
   recommendations: string[];
   warnings: string[];
   narrative_report?: string;
+  trace_lines?: Array<Record<string, any>>;
+  reconciliation?: {
+    differences?: string[];
+    [key: string]: any;
+  };
+  total_purchase_cost_irr?: number;
+  weighted_objective_cost_irr?: number | null;
   double_count_prevented?: boolean;
 }
 
@@ -84,6 +92,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
   projectIds,
   startDate,
   endDate,
+  runId,
   onAnalysisComplete,
 }) => {
   const { t, i18n } = useTranslation();
@@ -125,6 +134,9 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       if (endDate) {
         params.end_date = endDate;
       }
+      if ((scenario === 'selected_optimization_result' || scenario === 'selected_result') && runId) {
+        params.run_id = runId;
+      }
       const response = await financeAPI.getOptimizationBudgetAnalysis(params);
       const data = response.data as ScenarioAnalysisData;
       if (!data.surplus_shortage_by_currency) {
@@ -149,11 +161,11 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
         onAnalysisComplete(data.budget_status);
       }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Failed to load budget analysis');
+      setError(err?.response?.data?.detail || t('optimization.errorLoadingBudgetAnalysis'));
     } finally {
       setLoading(false);
     }
-  }, [scenario, projectIds, startDate, endDate, onAnalysisComplete]);
+  }, [scenario, projectIds, startDate, endDate, runId, onAnalysisComplete, t]);
 
   useEffect(() => {
     fetchBudgetAnalysis();
@@ -221,28 +233,28 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={4}>
               <FormControl fullWidth size="small">
-                <InputLabel id="budget-scenario-label">Scenario</InputLabel>
+                <InputLabel id="budget-scenario-label">{t('optimization.scenario')}</InputLabel>
                 <Select
                   labelId="budget-scenario-label"
                   value={scenario}
-                  label="Scenario"
+                  label={t('optimization.scenario')}
                   onChange={(event) => setScenario(event.target.value)}
                 >
-                  <MenuItem value="minimum_feasible">Minimum feasible budget</MenuItem>
-                  <MenuItem value="average_candidate">Average candidate budget</MenuItem>
-                  <MenuItem value="worst_case">Worst-case budget</MenuItem>
-                  <MenuItem value="selected_optimization_result">Selected optimization result budget</MenuItem>
+                  <MenuItem value="minimum_feasible">{t('optimization.minimumFeasibleBudget')}</MenuItem>
+                  <MenuItem value="average_candidate">{t('optimization.averageCandidateBudget')}</MenuItem>
+                  <MenuItem value="worst_case">{t('optimization.worstCaseBudget')}</MenuItem>
+                  <MenuItem value="selected_optimization_result">{t('optimization.selectedResultBudget')}</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={8}>
               <Typography variant="body2" color="text.secondary">
-                Each item is counted once per scenario. Alternative supplier/package combinations are not summed together.
+                {t('optimization.scenarioCountRule')}
               </Typography>
               <Typography variant="body2" sx={{ mt: 0.5 }}>
-                Scenario: <strong>{analysisData.scenario}</strong>
+                {t('optimization.scenario')}: <strong>{analysisData.scenario}</strong>
                 {analysisData.analysis_scope === 'optimization_result' && analysisData.optimization_result_id
-                  ? ` | Result ID: ${analysisData.optimization_result_id}`
+                  ? ` | ${t('optimization.resultId')}: ${analysisData.optimization_result_id}`
                   : ''}
               </Typography>
               {!!analysisData.narrative_report && (
@@ -276,13 +288,20 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
             />
           </Box>
           <Typography variant="body2" sx={{ mt: 1 }}>
-            Required IRR: <strong>{formatCurrency(analysisData.budget_required_irr, 'IRR')}</strong> | Available IRR:{' '}
+            {t('optimization.requiredIrr')}: <strong>{formatCurrency(analysisData.budget_required_irr, 'IRR')}</strong> | {t('optimization.availableIrr')}:{' '}
             <strong>{formatCurrency(analysisData.budget_available_irr, 'IRR')}</strong> |{' '}
-            {Number(analysisData.surplus_or_shortage_irr) >= 0 ? 'Surplus' : 'Shortage'}:{' '}
+            {Number(analysisData.surplus_or_shortage_irr) >= 0 ? t('optimization.surplus') : t('optimization.shortage')}:{' '}
             <strong>{formatCurrency(Math.abs(analysisData.surplus_or_shortage_irr), 'IRR')}</strong>
           </Typography>
         </CardContent>
       </Card>
+
+      {(analysisData.reconciliation?.differences || []).length > 0 && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          <AlertTitle>{t('optimization.financialTotalsNeedReview')}</AlertTitle>
+          {(analysisData.reconciliation?.differences || []).slice(0, 5).join(' | ')}
+        </Alert>
+      )}
 
       {(analysisData.critical_periods || []).length > 0 && (
         <Alert severity="warning" sx={{ mb: 3 }}>
@@ -340,9 +359,9 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                 formatter={(value: number) => formatCurrency(value, 'IRR')}
               />
               <Legend />
-              <Bar dataKey="required" fill="#1976d2" name="Required (IRR)" />
-              <Bar dataKey="available" fill="#4caf50" name="Available (IRR)" />
-              <Line dataKey="gap" stroke="#9c27b0" name="Surplus/Shortage (IRR)" strokeWidth={2} />
+              <Bar dataKey="required" fill="#1976d2" name={t('optimization.requiredIrr')} />
+              <Bar dataKey="available" fill="#4caf50" name={t('optimization.availableIrr')} />
+              <Line dataKey="gap" stroke="#9c27b0" name={t('optimization.surplusShortageIrr')} strokeWidth={2} />
             </ComposedChart>
           </ResponsiveContainer>
         </CardContent>
@@ -361,13 +380,13 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
               </AccordionSummary>
               <AccordionDetails>
                 <Typography variant="body2">
-                  Required: <strong>{formatCurrency(period.required_irr, 'IRR')}</strong>
+                  {t('optimization.required')}: <strong>{formatCurrency(period.required_irr, 'IRR')}</strong>
                 </Typography>
                 <Typography variant="body2">
-                  Available: <strong>{formatCurrency(period.available_irr, 'IRR')}</strong>
+                  {t('optimization.available')}: <strong>{formatCurrency(period.available_irr, 'IRR')}</strong>
                 </Typography>
                 <Typography variant="body2" sx={{ color: Number(period.gap_irr) >= 0 ? '#4caf50' : '#f44336' }}>
-                  {Number(period.gap_irr) >= 0 ? 'Surplus' : 'Shortage'}:{' '}
+                  {Number(period.gap_irr) >= 0 ? t('optimization.surplus') : t('optimization.shortage')}:{' '}
                   <strong>{formatCurrency(Math.abs(period.gap_irr), 'IRR')}</strong>
                 </Typography>
               </AccordionDetails>
@@ -392,7 +411,7 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
       {(analysisData.warnings || []).length > 0 && (
         <Card>
           <CardContent>
-            <Typography variant="h6" gutterBottom>Warnings</Typography>
+            <Typography variant="h6" gutterBottom>{t('optimization.warning')}</Typography>
             <Divider sx={{ mb: 1.5 }} />
             <List>
               {analysisData.warnings.map((warning, idx) => (

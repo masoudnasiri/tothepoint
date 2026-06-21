@@ -401,6 +401,10 @@ export interface OptimizationFinancialAnalysis {
   critical_periods?: string[];
   periods: OptimizationFinancialPeriod[];
   charts?: Record<string, any>;
+  trace_lines?: Array<Record<string, any>>;
+  reconciliation?: Record<string, any>;
+  total_purchase_cost_irr?: number;
+  weighted_objective_cost_irr?: number | null;
   top_shortage_contributors: Array<Record<string, any>>;
   warnings: string[];
   recommendations: string[];

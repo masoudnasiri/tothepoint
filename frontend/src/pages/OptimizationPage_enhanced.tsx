@@ -103,6 +103,7 @@ interface OptimizationProposal {
   strategy_type: string;
   total_cost: number;
   weighted_cost: number;
+  total_purchase_cost_irr?: number;
   status: string;
   items_count: number;
   decisions: OptimizationDecision[];
@@ -134,6 +135,13 @@ interface OptimizationProposal {
     recommendations: string[];
     warnings: string[];
     narrative_report?: string;
+    trace_lines?: Array<Record<string, any>>;
+    reconciliation?: {
+      differences?: string[];
+      [key: string]: any;
+    };
+    total_purchase_cost_irr?: number;
+    weighted_objective_cost_irr?: number | null;
   };
 }
 
@@ -759,7 +767,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
       {/* Budget Analysis Tab */}
       {mainTabValue === 1 && (
-        <BudgetAnalysis />
+        <BudgetAnalysis runId={lastRun?.run_id} />
       )}
 
       {/* Optimization Tab */}
@@ -882,7 +890,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               <Grid item xs={12} sm={6} md={3}>
                 <Paper sx={{ p: 2, bgcolor: 'info.light' }}>
                   <Typography variant="body2" color="text.secondary">
-                    Best Total Cost
+                    {t('optimization.bestTotalPurchaseCost')}
                   </Typography>
                   <Typography variant="h6">
                     {formatCurrency(lastRun.total_cost)}
@@ -987,17 +995,21 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   <Grid item xs={12} sm={6}>
                     <Paper sx={{ p: 2 }}>
                       <Typography variant="body2" color="text.secondary">
-                        Total Cost
+                        {t('optimization.totalPurchaseCost')}
                       </Typography>
                       <Typography variant="h5">
-                        {formatCurrency(effectiveSelectedTotalCost)}
+                        {formatCurrency(
+                          selectedProposal.financial_analysis?.total_purchase_cost_irr
+                            ?? selectedProposal.total_purchase_cost_irr
+                            ?? effectiveSelectedTotalCost
+                        )}
                       </Typography>
                     </Paper>
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <Paper sx={{ p: 2 }}>
                       <Typography variant="body2" color="text.secondary">
-                        Weighted Cost
+                        {t('optimization.weightedObjectiveCost')}
                       </Typography>
                       <Typography variant="h5">
                         {formatCurrency(selectedProposal.weighted_cost)}
@@ -1036,7 +1048,30 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         <Grid item xs={12} md={6}>
                           <Paper sx={{ p: 2, height: '100%' }}>
                             <Typography variant="body2" color="text.secondary">
-                              Required budget (IRR)
+                              {t('optimization.totalPurchaseCost')}
+                            </Typography>
+                            <Typography variant="h6">
+                              {formatCurrencyAmount(
+                                selectedProposal.financial_analysis.total_purchase_cost_irr
+                                  ?? selectedProposal.financial_analysis.budget_required_irr,
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                              {t('optimization.weightedObjectiveCost')}
+                            </Typography>
+                            <Typography variant="h6">
+                              {formatCurrencyAmount(
+                                selectedProposal.financial_analysis.weighted_objective_cost_irr
+                                  ?? selectedProposal.weighted_cost
+                                  ?? 0,
+                                'IRR',
+                                i18n.language || 'en-US'
+                              )}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                              {t('optimization.requiredBudgetIrr')}
                             </Typography>
                             <Typography variant="h6">
                               {formatCurrencyAmount(
@@ -1046,7 +1081,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                               )}
                             </Typography>
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                              Available budget (IRR)
+                              {t('optimization.availableIrr')}
                             </Typography>
                             <Typography variant="h6">
                               {formatCurrencyAmount(
@@ -1056,7 +1091,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                               )}
                             </Typography>
                             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                              Surplus / shortage (IRR)
+                              {t('optimization.surplusShortageIrr')}
                             </Typography>
                             <Typography
                               variant="h6"
@@ -1077,7 +1112,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         <Grid item xs={12} md={6}>
                           <Paper sx={{ p: 2, height: '100%' }}>
                             <Typography variant="body2" color="text.secondary" gutterBottom>
-                              Required budget by currency
+                              {t('optimization.requiredBudgetByCurrency')}
                             </Typography>
                             {Object.entries(selectedProposal.financial_analysis.budget_required_by_currency || {}).map(
                               ([currency, amount]) => (
@@ -1088,7 +1123,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             )}
                             <Divider sx={{ my: 1 }} />
                             <Typography variant="body2" color="text.secondary" gutterBottom>
-                              Available budget by currency
+                              {t('optimization.availableBudgetByCurrency')}
                             </Typography>
                             {Object.entries(selectedProposal.financial_analysis.budget_available_by_currency || {}).map(
                               ([currency, amount]) => (
@@ -1099,6 +1134,13 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             )}
                           </Paper>
                         </Grid>
+                        {(selectedProposal.financial_analysis.reconciliation?.differences || []).length > 0 && (
+                          <Grid item xs={12}>
+                            <Alert severity="warning">
+                              {t('optimization.financialTotalsNeedReview')}: {(selectedProposal.financial_analysis.reconciliation?.differences || []).slice(0, 5).join(' | ')}
+                            </Alert>
+                          </Grid>
+                        )}
                         {selectedProposal.financial_analysis.narrative_report && (
                           <Grid item xs={12}>
                             <Alert
@@ -1321,28 +1363,28 @@ export const OptimizationPageEnhanced: React.FC = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>Budget shortage detected</DialogTitle>
+        <DialogTitle>{t('optimization.budgetShortageDetected')}</DialogTitle>
         <DialogContent>
           <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
-            Budget shortage should be handled as a warning decision point. Choose how to proceed.
+            {t('optimization.budgetShortageDecisionMessage')}
           </Alert>
           {budgetPrecheck && (
             <Grid container spacing={2}>
               <Grid item xs={12} md={6}>
                 <Typography variant="body2" color="text.secondary">
-                  Scenario
+                  {t('optimization.scenario')}
                 </Typography>
                 <Typography variant="body1">{budgetPrecheck.scenario || 'minimum_feasible'}</Typography>
               </Grid>
               <Grid item xs={12} md={6}>
                 <Typography variant="body2" color="text.secondary">
-                  Budget status
+                  {t('optimization.budgetStatusLabel')}
                 </Typography>
                 <Typography variant="body1">{budgetPrecheck.budget_status}</Typography>
               </Grid>
               <Grid item xs={12} md={4}>
                 <Typography variant="body2" color="text.secondary">
-                  Required budget
+                  {t('optimization.requiredBudget')}
                 </Typography>
                 <Typography variant="body1">
                   {formatCurrencyAmount(budgetPrecheck.budget_required_irr || 0, 'IRR', i18n.language || 'en-US')}
@@ -1350,7 +1392,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               </Grid>
               <Grid item xs={12} md={4}>
                 <Typography variant="body2" color="text.secondary">
-                  Available budget
+                  {t('optimization.availableBudget')}
                 </Typography>
                 <Typography variant="body1">
                   {formatCurrencyAmount(budgetPrecheck.budget_available_irr || 0, 'IRR', i18n.language || 'en-US')}
@@ -1358,7 +1400,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               </Grid>
               <Grid item xs={12} md={4}>
                 <Typography variant="body2" color="text.secondary">
-                  Shortage
+                  {t('optimization.shortage')}
                 </Typography>
                 <Typography variant="body1" color="error.main">
                   {formatCurrencyAmount(
@@ -1384,7 +1426,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               setSuccess('Optimization cancelled. You can update budget and try again.');
             }}
           >
-            Cancel and update budget
+            {t('optimization.cancelAndUpdateBudget')}
           </Button>
           <Box display="flex" gap={1}>
             <Button
@@ -1395,7 +1437,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               }}
               disabled={optimizing}
             >
-              Optimize within current budget
+              {t('optimization.optimizeWithinCurrentBudget')}
             </Button>
             <Button
               variant="contained"
@@ -1406,7 +1448,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               }}
               disabled={optimizing}
             >
-              Optimize all items and show financial shortage analysis
+              {t('optimization.optimizeAllWithShortageAnalysis')}
             </Button>
           </Box>
         </DialogActions>

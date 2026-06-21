@@ -2,6 +2,7 @@
 Finance and optimization endpoints
 """
 
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
@@ -185,6 +186,7 @@ async def run_enhanced_optimization(
         response.diagnostics = {}
     response.diagnostics["budget_mode"] = request.budget_mode
     response.diagnostics["budget_constraints_enabled"] = request.budget_mode == "constrained"
+    response.diagnostics["legacy_solver_total_cost"] = str(response.total_cost)
 
     for proposal in response.proposals:
         original_payload = [
@@ -198,6 +200,7 @@ async def run_enhanced_optimization(
                 if hasattr(decision.purchase_date, "isoformat")
                 else str(decision.purchase_date),
                 "quantity": decision.quantity,
+                "final_cost": decision.final_cost,
             }
             for decision in proposal.decisions
         ]
@@ -235,8 +238,10 @@ async def run_enhanced_optimization(
             db,
             decisions=decisions_payload,
             budget_mode=request.budget_mode,
+            weighted_objective_cost_irr=proposal.weighted_cost,
         )
         proposal.financial_analysis = proposal_analysis
+        proposal.total_purchase_cost_irr = proposal_analysis.total_purchase_cost_irr
 
         if request.budget_mode == "constrained":
             excluded_count = max(precheck.items_analyzed - proposal.items_count, 0)
@@ -254,6 +259,18 @@ async def run_enhanced_optimization(
                 int(response.diagnostics.get("items_filtered_by_budget", 0))
                 + max(len(deferred_items), excluded_count)
             )
+
+    if response.proposals:
+        best_purchase = min(
+            response.proposals,
+            key=lambda p: p.total_purchase_cost_irr
+            if p.total_purchase_cost_irr is not None
+            else Decimal("Infinity"),
+        )
+        if best_purchase.total_purchase_cost_irr is not None:
+            response.total_cost = best_purchase.total_purchase_cost_irr
+            response.items_optimized = best_purchase.items_count
+            response.diagnostics["total_cost_semantics"] = "total_purchase_cost_irr"
 
     if request.budget_mode == "allow_shortage" and response.status not in {"OPTIMAL", "FEASIBLE"}:
         response.message = (

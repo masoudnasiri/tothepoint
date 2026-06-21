@@ -684,7 +684,12 @@
     "bulkRollbackSummary": "بازگردانی گروهی",
     "rolledBack": "بازگردانی شد",
     "skipped": "رد شد",
-    "noRollbackSelection": "حداقل یک قلم قابل بازگردانی را انتخاب کنید."
+    "noRollbackSelection": "حداقل یک قلم قابل بازگردانی را انتخاب کنید.",
+    "rollbackSelectAtLeastOneFilter": "حداقل یک فیلتر بازگردانی را انتخاب کنید.",
+    "selectAllFilters": "انتخاب همه فیلترها",
+    "deselectAllFilters": "لغو انتخاب همه فیلترها",
+    "selectAllItems": "انتخاب همه",
+    "deselectAllItems": "لغو انتخاب همه"
   },
 
   "optimization": {
@@ -759,6 +764,7 @@
     "totalAvailable": "کل در دسترس",
     "gap": "فاصله",
     "surplus": "مازاد",
+    "shortage": "کسری بودجه",
     "deficit": "کسری",
     "cumulativeCashFlowBudgetByPeriod": "جریان نقدینگی تجمعی و بودجه بر اساس دوره",
     "showsCumulativeOutflows": "نمایش خروجی‌های تجمعی (هزینه‌ها)، ورودی‌ها (فاکتورها)، بودجه و موقعیت خالص در طول زمان",
@@ -804,7 +810,33 @@
     "cumulativeInflowLabel": "ورودی تجمعی {{currency}}",
     "cumulativeBudgetLabel": "بودجه تجمعی {{currency}}",
     "netPositionLabel": "موقعیت خالص {{currency}}",
-    "gapLabel": "فاصله {{currency}}"
+    "gapLabel": "فاصله {{currency}}",
+    "scenario": "سناریو",
+    "minimumFeasibleBudget": "بودجه حداقل قابل اجرا",
+    "averageCandidateBudget": "بودجه میانگین گزینه‌ها",
+    "worstCaseBudget": "بودجه بدترین حالت",
+    "selectedResultBudget": "بودجه نتیجه انتخاب‌شده بهینه‌سازی",
+    "scenarioCountRule": "هر قلم در هر سناریو فقط یک‌بار محاسبه می‌شود و گزینه‌های جایگزین با هم جمع نمی‌شوند.",
+    "resultId": "شناسه نتیجه",
+    "requiredIrr": "بودجه مورد نیاز (ریال)",
+    "availableIrr": "بودجه موجود (ریال)",
+    "surplusShortageIrr": "مازاد / کسری (ریال)",
+    "required": "مورد نیاز",
+    "bestTotalPurchaseCost": "بهترین هزینه کل خرید (ریال)",
+    "totalPurchaseCost": "هزینه کل خرید (ریال)",
+    "weightedObjectiveCost": "هزینه هدف وزن‌دهی‌شده (ریال)",
+    "requiredBudgetIrr": "بودجه مورد نیاز (ریال)",
+    "requiredBudgetByCurrency": "بودجه مورد نیاز به تفکیک ارز",
+    "availableBudgetByCurrency": "بودجه موجود به تفکیک ارز",
+    "financialTotalsNeedReview": "جمع‌های مالی نیاز به بازبینی دارند",
+    "budgetShortageDetected": "کسری بودجه شناسایی شد",
+    "budgetShortageDecisionMessage": "کسری بودجه باید به‌عنوان هشدار و نقطه تصمیم‌گیری نمایش داده شود. روش ادامه را انتخاب کنید.",
+    "budgetStatusLabel": "وضعیت بودجه",
+    "requiredBudget": "بودجه مورد نیاز",
+    "availableBudget": "بودجه موجود",
+    "cancelAndUpdateBudget": "لغو و بازگشت به مدیریت بودجه",
+    "optimizeWithinCurrentBudget": "ادامه با بودجه موجود",
+    "optimizeAllWithShortageAnalysis": "بهینه‌سازی همه اقلام با نمایش تحلیل کسری بودجه"
   },
 
   "finance": {

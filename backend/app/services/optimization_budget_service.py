@@ -5,7 +5,7 @@ Phase 12E-0: Scenario-based optimization budget analysis and financial reporting
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import uuid
@@ -477,6 +477,87 @@ def _build_chart_payload(periods: Sequence[OptimizationFinancialPeriod]) -> Dict
     }
 
 
+def _payment_allocations(
+    *,
+    total_amount: Decimal,
+    payment_terms: Any,
+    base_date: date,
+) -> List[Tuple[date, Decimal]]:
+    payload = payment_terms if isinstance(payment_terms, dict) else {}
+    schedule = payload.get("schedule") if isinstance(payload, dict) else None
+    if not isinstance(schedule, list) or not schedule:
+        return [(base_date, total_amount)]
+
+    raw_parts: List[Tuple[date, Decimal]] = []
+    total_percent = Decimal("0")
+    for row in schedule:
+        if not isinstance(row, dict):
+            continue
+        percent = _as_decimal(row.get("percent"))
+        if percent <= 0:
+            continue
+        due_offset = int(row.get("due_offset") or 0)
+        due_date = base_date + timedelta(days=due_offset)
+        raw_parts.append((due_date, percent))
+        total_percent += percent
+
+    if total_percent <= 0:
+        return [(base_date, total_amount)]
+
+    allocations: List[Tuple[date, Decimal]] = []
+    running = Decimal("0")
+    for idx, (due_date, percent) in enumerate(raw_parts):
+        if idx == len(raw_parts) - 1:
+            amount_part = total_amount - running
+        else:
+            amount_part = (total_amount * percent) / total_percent
+            running += amount_part
+        allocations.append((due_date, amount_part))
+    return allocations
+
+
+def _build_reconciliation(
+    *,
+    optimizer_total_cost_irr: Decimal,
+    weighted_objective_cost_irr: Optional[Decimal],
+    required_irr: Decimal,
+    trace_lines: Sequence[Dict[str, Any]],
+    periods: Sequence[OptimizationFinancialPeriod],
+    warnings: Sequence[str],
+) -> Dict[str, Any]:
+    epsilon = Decimal("0.01")
+    trace_total = sum(
+        (_as_decimal(row.get("total_irr", row.get("required_irr", Decimal("0")))) for row in trace_lines),
+        Decimal("0"),
+    )
+    period_total = sum((row.required_irr for row in periods), Decimal("0"))
+    differences: List[str] = []
+    if abs(trace_total - required_irr) > epsilon:
+        differences.append(
+            f"trace_total_irr ({trace_total}) != financial_required_budget_irr ({required_irr})"
+        )
+    if abs(period_total - required_irr) > epsilon:
+        differences.append(
+            f"period_total_irr ({period_total}) != financial_required_budget_irr ({required_irr})"
+        )
+    if optimizer_total_cost_irr and abs(optimizer_total_cost_irr - required_irr) > epsilon:
+        differences.append(
+            f"optimizer_total_cost_irr ({optimizer_total_cost_irr}) != financial_required_budget_irr ({required_irr})"
+        )
+    if warnings:
+        differences.extend([f"warning: {w}" for w in warnings])
+
+    return {
+        "optimizer_total_cost_irr": optimizer_total_cost_irr,
+        "weighted_objective_cost_irr": weighted_objective_cost_irr,
+        "sum_trace_total_irr": trace_total,
+        "financial_required_budget_irr": required_irr,
+        "currency_card_total_irr_equivalent": required_irr,
+        "period_total_irr": period_total,
+        "differences": differences,
+    }
+
+
 def _build_recommendations(status: str) -> List[str]:
     if status == "OK":
         return [
@@ -602,6 +683,17 @@ async def build_optimization_budget_analysis(
         critical_periods=critical_periods,
         periods=periods,
         charts=_build_chart_payload(periods),
+        trace_lines=_serialize_selected_candidates(selected_candidates),
+        reconciliation=_build_reconciliation(
+            optimizer_total_cost_irr=required_irr,
+            weighted_objective_cost_irr=None,
+            required_irr=required_irr,
+            trace_lines=_serialize_selected_candidates(selected_candidates),
+            periods=periods,
+            warnings=warnings,
+        ),
+        total_purchase_cost_irr=required_irr,
+        weighted_objective_cost_irr=None,
         top_shortage_contributors=_serialize_top_contributors(selected_candidates),
         warnings=sorted(set(warnings)),
         recommendations=recommendations,
@@ -611,10 +703,10 @@ async def build_optimization_budget_analysis(
 
 async def _build_candidates_from_result_rows(
     db: AsyncSession, result_rows: Sequence[OptimizationResult]
-) -> Tuple[List[ScenarioCandidate], List[str]]:
+) -> Tuple[List[ScenarioCandidate], List[str], List[Dict[str, Any]], Decimal]:
     warnings: List[str] = []
     if not result_rows:
-        return [], warnings
+        return [], warnings, [], Decimal("0")
 
     option_ids = [int(row.procurement_option_id) for row in result_rows]
     options_result = await db.execute(
@@ -623,6 +715,8 @@ async def _build_candidates_from_result_rows(
     option_map = {int(opt.id): opt for opt in options_result.scalars().all()}
     conversion_service = CurrencyConversionService(db)
     candidates: List[ScenarioCandidate] = []
+    trace_lines: List[Dict[str, Any]] = []
+    optimizer_total_cost_irr = Decimal("0")
 
     for row in result_rows:
         option = option_map.get(int(row.procurement_option_id))
@@ -631,14 +725,20 @@ async def _build_candidates_from_result_rows(
                 f"Optimization result {row.id} references missing procurement option {row.procurement_option_id}"
             )
             continue
-        amount = _as_decimal(option.cost_amount) + _as_decimal(option.shipping_cost)
+        quantity = int(row.quantity or 1)
+        amount = _as_decimal(row.final_cost)
+        if amount <= 0:
+            amount = (_as_decimal(option.cost_amount) + _as_decimal(option.shipping_cost)) * Decimal(quantity)
         currency = _normalize_currency(option.cost_currency)
         tx_date = option.purchase_date or date.today()
         total_irr: Optional[Decimal] = None
+        rate_to_irr: Optional[Decimal] = None
         if currency == "IRR":
             total_irr = amount
+            rate_to_irr = Decimal("1")
         else:
             try:
+                rate_to_irr = await conversion_service.get_rate_to_base(currency, tx_date)
                 total_irr = await conversion_service.convert_to_base(amount, currency, tx_date)
             except ValueError as ex:
                 warnings.append(
@@ -658,8 +758,51 @@ async def _build_candidates_from_result_rows(
                 purchase_date=option.purchase_date,
             )
         )
+        if total_irr is not None:
+            optimizer_total_cost_irr += total_irr
+            for due_date, due_amount in _payment_allocations(
+                total_amount=amount,
+                payment_terms=option.payment_terms,
+                base_date=tx_date,
+            ):
+                try:
+                    due_irr = (
+                        due_amount
+                        if currency == "IRR"
+                        else await conversion_service.convert_to_base(due_amount, currency, due_date)
+                    )
+                except ValueError as ex:
+                    warnings.append(
+                        f"{row.item_code}: Missing exchange rate for {currency}: {str(ex)}"
+                    )
+                    continue
+                trace_lines.append(
+                    {
+                        "project_item_id": int(option.project_item_id or 0),
+                        "item_name": None,
+                        "item_code": row.item_code,
+                        "selected_candidate_id": int(option.id),
+                        "selected_result_row_id": int(row.id),
+                        "package_id": int(option.package_id) if option.package_id is not None else None,
+                        "supplier_id": int(option.supplier_id) if option.supplier_id is not None else None,
+                        "supplier_name": option.supplier_name,
+                        "quantity": quantity,
+                        "unit_price": (amount / Decimal(quantity)) if quantity else amount,
+                        "total_original": amount,
+                        "currency": currency,
+                        "exchange_rate_to_irr": rate_to_irr if rate_to_irr is not None else Decimal("1"),
+                        "total_irr": due_irr,
+                        "item_total_irr": total_irr,
+                        "payment_period": _period_key(due_date),
+                        "payment_amount_original": due_amount,
+                        "payment_amount_irr": due_irr,
+                        "included_in_optimizer_total": True,
+                        "included_in_financial_budget": True,
+                        "warning": None,
+                    }
+                )
 
-    return candidates, warnings
+    return candidates, warnings, trace_lines, optimizer_total_cost_irr
 
 
 def _analysis_from_candidates(
@@ -670,21 +813,43 @@ def _analysis_from_candidates(
     available_by_currency: Dict[str, Decimal],
     available_by_period_irr: Dict[str, Decimal],
     extra_warnings: Sequence[str],
+    trace_lines: Optional[Sequence[Dict[str, Any]]] = None,
+    optimizer_total_cost_irr: Optional[Decimal] = None,
+    weighted_objective_cost_irr: Optional[Decimal] = None,
+    optimization_result_id: Optional[str] = None,
 ) -> OptimizationFinancialAnalysis:
     required_by_currency: Dict[str, Decimal] = {}
     required_by_period_irr: Dict[str, Decimal] = {}
     valid_candidates = [c for c in candidates if c.total_cost_irr is not None]
     missing = len(candidates) - len(valid_candidates)
 
-    for candidate in valid_candidates:
-        for currency, amount in candidate.costs_by_currency.items():
-            required_by_currency[currency] = required_by_currency.get(currency, Decimal("0")) + _as_decimal(amount)
-        period = _period_key(candidate.purchase_date)
-        required_by_period_irr[period] = required_by_period_irr.get(period, Decimal("0")) + (
-            candidate.total_cost_irr or Decimal("0")
+    trace_payload = list(trace_lines or [])
+    if trace_payload:
+        for line in trace_payload:
+            currency = _normalize_currency(line.get("currency"))
+            original_amount = _as_decimal(
+                line.get("payment_amount_original", line.get("total_original", Decimal("0")))
+            )
+            required_by_currency[currency] = required_by_currency.get(currency, Decimal("0")) + original_amount
+            period = str(line.get("payment_period") or _period_key(None))
+            required_by_period_irr[period] = required_by_period_irr.get(period, Decimal("0")) + _as_decimal(
+                line.get("payment_amount_irr", line.get("total_irr", Decimal("0")))
+            )
+        required_irr = sum(
+            (_as_decimal(line.get("payment_amount_irr", line.get("total_irr", Decimal("0")))) for line in trace_payload),
+            Decimal("0"),
         )
+    else:
+        for candidate in valid_candidates:
+            for currency, amount in candidate.costs_by_currency.items():
+                required_by_currency[currency] = required_by_currency.get(currency, Decimal("0")) + _as_decimal(amount)
+            period = _period_key(candidate.purchase_date)
+            required_by_period_irr[period] = required_by_period_irr.get(period, Decimal("0")) + (
+                candidate.total_cost_irr or Decimal("0")
+            )
+        required_irr = sum((c.total_cost_irr or Decimal("0")) for c in valid_candidates)
+        trace_payload = _serialize_selected_candidates(valid_candidates)
 
-    required_irr = sum((c.total_cost_irr or Decimal("0")) for c in valid_candidates)
     available_irr = sum(available_by_period_irr.values()) if available_by_period_irr else Decimal("0")
     surplus_or_shortage = available_irr - required_irr
     budget_status = _derive_budget_status(required_irr, available_irr)
@@ -702,7 +867,7 @@ def _analysis_from_candidates(
         narrative = "No selected optimization result exists yet."
     else:
         narrative = (
-            f"تحلیل مالی مدل انتخابی: بودجه مورد نیاز این مدل {required_irr:,.2f} IRR است و "
+            f"تحلیل مالی مدل انتخابی: هزینه خرید قابل اجرا {required_irr:,.2f} IRR است و "
             f"بودجه موجود {available_irr:,.2f} IRR می‌باشد."
         )
 
@@ -710,7 +875,7 @@ def _analysis_from_candidates(
         scenario=scenario,
         base_currency="IRR",
         analysis_scope="optimization_result",
-        optimization_result_id=None,
+        optimization_result_id=optimization_result_id,
         budget_mode=budget_mode,
         items_analyzed=len(candidates),
         items_with_no_valid_candidate=missing,
@@ -731,6 +896,17 @@ def _analysis_from_candidates(
         critical_periods=critical_periods,
         periods=periods,
         charts=_build_chart_payload(periods),
+        trace_lines=trace_payload,
+        reconciliation=_build_reconciliation(
+            optimizer_total_cost_irr=optimizer_total_cost_irr or required_irr,
+            weighted_objective_cost_irr=weighted_objective_cost_irr,
+            required_irr=required_irr,
+            trace_lines=trace_payload,
+            periods=periods,
+            warnings=warnings,
+        ),
+        total_purchase_cost_irr=required_irr,
+        weighted_objective_cost_irr=weighted_objective_cost_irr,
         top_shortage_contributors=_serialize_top_contributors(valid_candidates),
         warnings=warnings,
         recommendations=_build_recommendations(budget_status if candidates else "WARNING"),
@@ -770,7 +946,9 @@ async def analyze_optimization_run_financial(
             )
         ).scalars().all()
 
-    candidates, candidate_warnings = await _build_candidates_from_result_rows(db, result_rows)
+    candidates, candidate_warnings, trace_lines, optimizer_total_cost_irr = await _build_candidates_from_result_rows(
+        db, result_rows
+    )
     warnings.extend(candidate_warnings)
     analysis = _analysis_from_candidates(
         scenario="selected_result",
@@ -779,8 +957,10 @@ async def analyze_optimization_run_financial(
         available_by_currency=available_by_currency,
         available_by_period_irr=available_by_period_irr,
         extra_warnings=warnings,
+        trace_lines=trace_lines,
+        optimizer_total_cost_irr=optimizer_total_cost_irr,
+        optimization_result_id=str(resolved_run_id) if resolved_run_id else None,
     )
-    analysis.optimization_result_id = str(resolved_run_id) if resolved_run_id else None
     return analysis
 
 
@@ -789,10 +969,13 @@ async def analyze_proposal_decisions_financial(
     *,
     decisions: Sequence[Dict[str, Any]],
     budget_mode: str = "analysis_only",
+    weighted_objective_cost_irr: Optional[Decimal] = None,
 ) -> OptimizationFinancialAnalysis:
     available_by_currency, available_by_period_irr, warnings, _, _ = await _load_budget_capacity(db)
     conversion_service = CurrencyConversionService(db)
     candidates: List[ScenarioCandidate] = []
+    trace_lines: List[Dict[str, Any]] = []
+    optimizer_total_cost_irr = Decimal("0")
 
     option_ids = [
         int(decision.get("procurement_option_id"))
@@ -819,14 +1002,19 @@ async def analyze_proposal_decisions_financial(
             continue
 
         quantity = int(decision.get("quantity") or 1)
-        amount = (_as_decimal(option.cost_amount) + _as_decimal(option.shipping_cost)) * Decimal(quantity)
+        amount = _as_decimal(decision.get("final_cost"))
+        if amount <= 0:
+            amount = (_as_decimal(option.cost_amount) + _as_decimal(option.shipping_cost)) * Decimal(quantity)
         currency = _normalize_currency(option.cost_currency)
         purchase_date = _safe_date(decision.get("purchase_date")) or option.purchase_date or date.today()
         total_irr: Optional[Decimal]
+        rate_to_irr: Optional[Decimal] = None
         if currency == "IRR":
             total_irr = amount
+            rate_to_irr = Decimal("1")
         else:
             try:
+                rate_to_irr = await conversion_service.get_rate_to_base(currency, purchase_date)
                 total_irr = await conversion_service.convert_to_base(amount, currency, purchase_date)
             except ValueError as ex:
                 total_irr = None
@@ -845,6 +1033,47 @@ async def analyze_proposal_decisions_financial(
                 purchase_date=purchase_date,
             )
         )
+        if total_irr is not None:
+            optimizer_total_cost_irr += total_irr
+            for due_date, due_amount in _payment_allocations(
+                total_amount=amount,
+                payment_terms=option.payment_terms,
+                base_date=purchase_date,
+            ):
+                try:
+                    due_irr = (
+                        due_amount
+                        if currency == "IRR"
+                        else await conversion_service.convert_to_base(due_amount, currency, due_date)
+                    )
+                except ValueError as ex:
+                    warnings.append(f"{item_code}: Missing exchange rate for {currency}: {str(ex)}")
+                    continue
+
+                trace_lines.append(
+                    {
+                        "project_item_id": int(decision.get("project_item_id") or option.project_item_id or 0),
+                        "item_name": decision.get("item_name"),
+                        "item_code": item_code,
+                        "selected_candidate_id": int(option.id),
+                        "package_id": int(option.package_id) if option.package_id is not None else None,
+                        "supplier_id": int(option.supplier_id) if option.supplier_id is not None else None,
+                        "supplier_name": option.supplier_name,
+                        "quantity": quantity,
+                        "unit_price": (amount / Decimal(quantity)) if quantity else amount,
+                        "total_original": amount,
+                        "currency": currency,
+                        "exchange_rate_to_irr": rate_to_irr if rate_to_irr is not None else Decimal("1"),
+                        "total_irr": due_irr,
+                        "item_total_irr": total_irr,
+                        "payment_period": _period_key(due_date),
+                        "payment_amount_original": due_amount,
+                        "payment_amount_irr": due_irr,
+                        "included_in_optimizer_total": True,
+                        "included_in_financial_budget": True,
+                        "warning": None,
+                    }
+                )
 
     analysis = _analysis_from_candidates(
         scenario="selected_result",
@@ -853,6 +1082,9 @@ async def analyze_proposal_decisions_financial(
         available_by_currency=available_by_currency,
         available_by_period_irr=available_by_period_irr,
         extra_warnings=warnings,
+        trace_lines=trace_lines,
+        optimizer_total_cost_irr=optimizer_total_cost_irr,
+        weighted_objective_cost_irr=weighted_objective_cost_irr,
     )
     return analysis
 

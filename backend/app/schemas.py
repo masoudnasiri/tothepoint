@@ -700,6 +700,10 @@ class OptimizationFinancialAnalysis(BaseModel):
     critical_periods: List[str] = Field(default_factory=list)
     periods: List[OptimizationFinancialPeriod] = Field(default_factory=list)
     charts: Dict[str, Any] = Field(default_factory=dict)
+    trace_lines: List[Dict[str, Any]] = Field(default_factory=list)
+    reconciliation: Dict[str, Any] = Field(default_factory=dict)
+    total_purchase_cost_irr: Decimal = Decimal("0")
+    weighted_objective_cost_irr: Optional[Decimal] = None
     top_shortage_contributors: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)
@@ -721,6 +725,7 @@ class OptimizationProposal(BaseModel):
     excluded_items: Optional[List[Dict[str, Any]]] = None
     budget_summary: Optional[Dict[str, Any]] = None
     financial_analysis: Optional[OptimizationFinancialAnalysis] = None
+    total_purchase_cost_irr: Optional[Decimal] = None
 
 
 # Response containing multiple proposals
