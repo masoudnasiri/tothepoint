@@ -627,7 +627,9 @@ class OptimizationRunRequest(BaseModel):
         "minimum_feasible",
         "average_candidate",
         "conservative",
+        "worst_case",
         "selected_result",
+        "selected_optimization_result",
     ] = Field(
         "minimum_feasible",
         description="Scenario used when pre-checking optimization budget exposure.",
@@ -676,12 +678,15 @@ class OptimizationFinancialPeriod(BaseModel):
 class OptimizationFinancialAnalysis(BaseModel):
     scenario: str
     base_currency: str = "IRR"
+    analysis_scope: str = "pre_optimization"
+    optimization_result_id: Optional[str] = None
     budget_mode: str = "analysis_only"
     items_analyzed: int = 0
     items_with_no_valid_candidate: int = 0
     candidate_count: int = 0
     combination_count: int = 0
     double_count_prevented: bool = True
+    selected_scenario_candidates: List[Dict[str, Any]] = Field(default_factory=list)
     budget_required_irr: Decimal
     budget_available_irr: Decimal
     surplus_or_shortage_irr: Decimal
@@ -691,7 +696,10 @@ class OptimizationFinancialAnalysis(BaseModel):
     allowed_actions: List[str] = Field(default_factory=list)
     budget_required_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
     budget_available_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    surplus_shortage_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    critical_periods: List[str] = Field(default_factory=list)
     periods: List[OptimizationFinancialPeriod] = Field(default_factory=list)
+    charts: Dict[str, Any] = Field(default_factory=dict)
     top_shortage_contributors: List[Dict[str, Any]] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     recommendations: List[str] = Field(default_factory=list)

@@ -34,6 +34,11 @@ ALLOWED_SCENARIOS = {
     "selected_result",
 }
 
+SCENARIO_ALIASES = {
+    "worst_case": "conservative",
+    "selected_optimization_result": "selected_result",
+}
+
 ALLOWED_ACTIONS = [
     "optimize_within_available_budget",
     "optimize_all_with_shortage_analysis",
@@ -89,6 +94,14 @@ def _normalize_currency(value: Optional[str]) -> str:
 def _period_key(value: Optional[date]) -> str:
     ref = value or date.today()
     return ref.strftime("%Y-%m")
+
+
+def _normalize_scenario(value: Optional[str]) -> str:
+    raw = (value or "minimum_feasible").strip().lower()
+    raw = SCENARIO_ALIASES.get(raw, raw)
+    if raw not in ALLOWED_SCENARIOS:
+        return "minimum_feasible"
+    return raw
 
 
 def _safe_date(value: Any) -> Optional[date]:
@@ -418,6 +431,52 @@ def _serialize_top_contributors(
     return output
 
 
+def _serialize_selected_candidates(
+    candidates: Sequence[ScenarioCandidate],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        rows.append(
+            {
+                "project_item_id": candidate.project_item_id,
+                "project_id": candidate.project_id,
+                "item_code": candidate.item_code,
+                "item_name": candidate.item_name,
+                "source": candidate.source,
+                "source_id": candidate.source_id,
+                "required_irr": candidate.total_cost_irr or Decimal("0"),
+                "costs_by_currency": candidate.costs_by_currency,
+                "period": _period_key(candidate.purchase_date),
+            }
+        )
+    return rows
+
+
+def _build_surplus_shortage_by_currency(
+    required: Dict[str, Decimal], available: Dict[str, Decimal]
+) -> Dict[str, Decimal]:
+    currencies = set(required.keys()) | set(available.keys())
+    return {
+        code: available.get(code, Decimal("0")) - required.get(code, Decimal("0"))
+        for code in currencies
+    }
+
+
+def _build_chart_payload(periods: Sequence[OptimizationFinancialPeriod]) -> Dict[str, Any]:
+    return {
+        "periods": [
+            {
+                "period": row.period,
+                "required_irr": row.required_irr,
+                "available_irr": row.available_irr,
+                "gap_irr": row.gap_irr,
+                "status": row.status,
+            }
+            for row in periods
+        ]
+    }
+
+
 def _build_recommendations(status: str) -> List[str]:
     if status == "OK":
         return [
@@ -440,9 +499,7 @@ async def build_optimization_budget_analysis(
     include_incomplete: bool = False,
     run_id: Optional[str] = None,
 ) -> OptimizationFinancialAnalysis:
-    scenario_normalized = (scenario or "minimum_feasible").strip().lower()
-    if scenario_normalized not in ALLOWED_SCENARIOS:
-        scenario_normalized = "minimum_feasible"
+    scenario_normalized = _normalize_scenario(scenario)
 
     if scenario_normalized == "selected_result":
         return await analyze_optimization_run_financial(
@@ -502,7 +559,11 @@ async def build_optimization_budget_analysis(
     surplus_or_shortage = available_irr - required_irr
     budget_status = _derive_budget_status(required_irr, available_irr)
     periods = _build_period_rows(required_by_period_irr, available_by_period_irr)
+    critical_periods = [row.period for row in periods if row.gap_irr < 0]
     recommendations = _build_recommendations(budget_status)
+    surplus_shortage_by_currency = _build_surplus_shortage_by_currency(
+        required_by_currency, available_by_currency
+    )
 
     shortage_abs = abs(surplus_or_shortage)
     if budget_status == "OK":
@@ -519,12 +580,15 @@ async def build_optimization_budget_analysis(
     return OptimizationFinancialAnalysis(
         scenario=scenario_normalized,
         base_currency="IRR",
+        analysis_scope="pre_optimization",
+        optimization_result_id=run_id,
         budget_mode=budget_mode,
         items_analyzed=len(eligible_items),
         items_with_no_valid_candidate=missing_candidates,
         candidate_count=candidate_count,
         combination_count=combination_count,
         double_count_prevented=True,
+        selected_scenario_candidates=_serialize_selected_candidates(selected_candidates),
         budget_required_irr=required_irr,
         budget_available_irr=available_irr,
         surplus_or_shortage_irr=surplus_or_shortage,
@@ -534,7 +598,10 @@ async def build_optimization_budget_analysis(
         allowed_actions=ALLOWED_ACTIONS,
         budget_required_by_currency=required_by_currency,
         budget_available_by_currency=available_by_currency,
+        surplus_shortage_by_currency=surplus_shortage_by_currency,
+        critical_periods=critical_periods,
         periods=periods,
+        charts=_build_chart_payload(periods),
         top_shortage_contributors=_serialize_top_contributors(selected_candidates),
         warnings=sorted(set(warnings)),
         recommendations=recommendations,
@@ -622,20 +689,35 @@ def _analysis_from_candidates(
     surplus_or_shortage = available_irr - required_irr
     budget_status = _derive_budget_status(required_irr, available_irr)
     periods = _build_period_rows(required_by_period_irr, available_by_period_irr)
+    critical_periods = [row.period for row in periods if row.gap_irr < 0]
     warnings = sorted(set(extra_warnings))
+    surplus_shortage_by_currency = _build_surplus_shortage_by_currency(
+        required_by_currency, available_by_currency
+    )
 
     if not candidates:
         warnings.append("No selected optimization result exists yet.")
 
+    if not candidates:
+        narrative = "No selected optimization result exists yet."
+    else:
+        narrative = (
+            f"تحلیل مالی مدل انتخابی: بودجه مورد نیاز این مدل {required_irr:,.2f} IRR است و "
+            f"بودجه موجود {available_irr:,.2f} IRR می‌باشد."
+        )
+
     return OptimizationFinancialAnalysis(
         scenario=scenario,
         base_currency="IRR",
+        analysis_scope="optimization_result",
+        optimization_result_id=None,
         budget_mode=budget_mode,
         items_analyzed=len(candidates),
         items_with_no_valid_candidate=missing,
         candidate_count=len(candidates),
         combination_count=0,
         double_count_prevented=True,
+        selected_scenario_candidates=_serialize_selected_candidates(valid_candidates),
         budget_required_irr=required_irr,
         budget_available_irr=available_irr,
         surplus_or_shortage_irr=surplus_or_shortage,
@@ -645,18 +727,14 @@ def _analysis_from_candidates(
         allowed_actions=ALLOWED_ACTIONS,
         budget_required_by_currency=required_by_currency,
         budget_available_by_currency=available_by_currency,
+        surplus_shortage_by_currency=surplus_shortage_by_currency,
+        critical_periods=critical_periods,
         periods=periods,
+        charts=_build_chart_payload(periods),
         top_shortage_contributors=_serialize_top_contributors(valid_candidates),
         warnings=warnings,
         recommendations=_build_recommendations(budget_status if candidates else "WARNING"),
-        narrative_report=(
-            "No selected optimization result exists yet."
-            if not candidates
-            else (
-                f"Selected result requires {required_irr:,.2f} IRR and available budget is "
-                f"{available_irr:,.2f} IRR."
-            )
-        ),
+        narrative_report=narrative,
     )
 
 
@@ -694,7 +772,7 @@ async def analyze_optimization_run_financial(
 
     candidates, candidate_warnings = await _build_candidates_from_result_rows(db, result_rows)
     warnings.extend(candidate_warnings)
-    return _analysis_from_candidates(
+    analysis = _analysis_from_candidates(
         scenario="selected_result",
         budget_mode=budget_mode,
         candidates=candidates,
@@ -702,6 +780,8 @@ async def analyze_optimization_run_financial(
         available_by_period_irr=available_by_period_irr,
         extra_warnings=warnings,
     )
+    analysis.optimization_result_id = str(resolved_run_id) if resolved_run_id else None
+    return analysis
 
 
 async def analyze_proposal_decisions_financial(
@@ -766,7 +846,7 @@ async def analyze_proposal_decisions_financial(
             )
         )
 
-    return _analysis_from_candidates(
+    analysis = _analysis_from_candidates(
         scenario="selected_result",
         budget_mode=budget_mode,
         candidates=candidates,
@@ -774,6 +854,7 @@ async def analyze_proposal_decisions_financial(
         available_by_period_irr=available_by_period_irr,
         extra_warnings=warnings,
     )
+    return analysis
 
 
 async def select_decisions_within_budget(

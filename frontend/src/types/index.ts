@@ -359,7 +359,13 @@ export interface OptimizationRunRequest {
   time_limit_seconds?: number;
   require_all_items?: boolean;
   budget_mode?: 'constrained' | 'allow_shortage';
-  budget_scenario?: 'minimum_feasible' | 'average_candidate' | 'conservative' | 'selected_result';
+  budget_scenario?:
+    | 'minimum_feasible'
+    | 'average_candidate'
+    | 'conservative'
+    | 'worst_case'
+    | 'selected_result'
+    | 'selected_optimization_result';
 }
 
 export interface OptimizationFinancialPeriod {
@@ -373,12 +379,15 @@ export interface OptimizationFinancialPeriod {
 export interface OptimizationFinancialAnalysis {
   scenario: string;
   base_currency: string;
+  analysis_scope?: string;
+  optimization_result_id?: string | null;
   budget_mode: string;
   items_analyzed: number;
   items_with_no_valid_candidate: number;
   candidate_count: number;
   combination_count: number;
   double_count_prevented: boolean;
+  selected_scenario_candidates?: Array<Record<string, any>>;
   budget_required_irr: number;
   budget_available_irr: number;
   surplus_or_shortage_irr: number;
@@ -388,7 +397,10 @@ export interface OptimizationFinancialAnalysis {
   allowed_actions: string[];
   budget_required_by_currency: Record<string, number>;
   budget_available_by_currency: Record<string, number>;
+  surplus_shortage_by_currency?: Record<string, number>;
+  critical_periods?: string[];
   periods: OptimizationFinancialPeriod[];
+  charts?: Record<string, any>;
   top_shortage_contributors: Array<Record<string, any>>;
   warnings: string[];
   recommendations: string[];

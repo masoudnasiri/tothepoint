@@ -268,7 +268,7 @@ async def run_enhanced_optimization(
 async def get_optimization_budget_analysis(
     scenario: str = Query(
         "minimum_feasible",
-        description="minimum_feasible|average_candidate|conservative|selected_result",
+        description="minimum_feasible|average_candidate|conservative|worst_case|selected_result|selected_optimization_result",
     ),
     budget_mode: str = Query(
         "analysis_only",
@@ -282,7 +282,7 @@ async def get_optimization_budget_analysis(
         False,
         description="Include incomplete package combinations as eligible candidates.",
     ),
-    run_id: Optional[str] = Query(None, description="Optimization run ID for selected_result"),
+    run_id: Optional[str] = Query(None, description="Optimization run ID for selected_result/selected_optimization_result"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):

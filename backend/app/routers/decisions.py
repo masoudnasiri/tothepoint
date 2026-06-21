@@ -654,7 +654,7 @@ async def get_budget_analysis(
     end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format"),
     scenario: str = Query(
         "minimum_feasible",
-        description="Optimization budget scenario: minimum_feasible|average_candidate|conservative|selected_result",
+        description="Optimization budget scenario: minimum_feasible|average_candidate|conservative|worst_case|selected_result|selected_optimization_result",
     ),
     include_incomplete: bool = Query(
         False,
@@ -662,7 +662,7 @@ async def get_budget_analysis(
     ),
     run_id: Optional[str] = Query(
         None,
-        description="Optimization run ID for selected_result scenario.",
+        description="Optimization run ID for selected_result/selected_optimization_result scenario.",
     ),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)

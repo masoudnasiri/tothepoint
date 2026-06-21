@@ -85,6 +85,17 @@
 - [ ] Skipped/infeasible item reasons are visible
 - [ ] Budget-filtered count is visible in constrained runs
 
+## چک‌لیست اختصاصی فاز 12E-2
+
+- [ ] Changing scenario updates all report sections, not only header text
+- [ ] `minimum_feasible` vs `average_candidate` vs `worst_case` show different totals where data supports it
+- [ ] Cards/charts/period detail/narrative are consistent with the same selected scenario
+- [ ] No legacy/default analysis leakage after scenario change
+- [ ] `selected_optimization_result` analysis uses selected candidates from that run only
+- [ ] Selected-result narrative includes `تحلیل مالی مدل انتخابی`
+- [ ] Required budget is numerically consistent across header/cards/charts/period totals
+- [ ] Persian UI keeps Jalali period labels consistently in budget-analysis visuals
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker
