@@ -81,6 +81,7 @@ interface ScenarioAnalysisData {
   trace_lines?: Array<Record<string, any>>;
   reconciliation?: {
     differences?: string[];
+    reasons?: string[];
     [key: string]: any;
   };
   total_purchase_cost_irr?: number;
@@ -174,6 +175,29 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
   const formatCurrency = (value: number, currency: string) =>
     formatCurrencyAmount(value, currency, i18n.language || 'en-US');
 
+  const formatScenarioLabel = (scenarioValue: string) => {
+    switch (scenarioValue) {
+      case 'minimum_feasible':
+        return t('optimization.minimumFeasibleBudget');
+      case 'average_candidate':
+        return t('optimization.averageCandidateBudget');
+      case 'worst_case':
+        return t('optimization.worstCaseBudget');
+      case 'selected_result':
+      case 'selected_optimization_result':
+        return t('optimization.selectedResultBudget');
+      default:
+        return scenarioValue;
+    }
+  };
+
+  const localizeRecommendation = (value: string) => {
+    if (value.includes('Run constrained optimization')) return t('optimization.recoRunConstrained');
+    if (value.includes('Run allow-shortage optimization')) return t('optimization.recoRunAllowShortage');
+    if (value.includes('Update budget allocations')) return t('optimization.recoUpdateBudgetAllocations');
+    return value;
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'OK':
@@ -252,16 +276,11 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
                 {t('optimization.scenarioCountRule')}
               </Typography>
               <Typography variant="body2" sx={{ mt: 0.5 }}>
-                {t('optimization.scenario')}: <strong>{analysisData.scenario}</strong>
+                {t('optimization.scenario')}: <strong>{formatScenarioLabel(analysisData.scenario)}</strong>
                 {analysisData.analysis_scope === 'optimization_result' && analysisData.optimization_result_id
                   ? ` | ${t('optimization.resultId')}: ${analysisData.optimization_result_id}`
                   : ''}
               </Typography>
-              {!!analysisData.narrative_report && (
-                <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
-                  {analysisData.narrative_report}
-                </Typography>
-              )}
             </Grid>
           </Grid>
         </CardContent>
@@ -293,14 +312,58 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
             {Number(analysisData.surplus_or_shortage_irr) >= 0 ? t('optimization.surplus') : t('optimization.shortage')}:{' '}
             <strong>{formatCurrency(Math.abs(analysisData.surplus_or_shortage_irr), 'IRR')}</strong>
           </Typography>
+          {analysisData.total_purchase_cost_irr !== undefined && analysisData.total_purchase_cost_irr !== null && (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              {t('optimization.totalPurchaseCost')}: <strong>{formatCurrency(Number(analysisData.total_purchase_cost_irr), 'IRR')}</strong>
+            </Typography>
+          )}
+          {analysisData.weighted_objective_cost_irr !== undefined && analysisData.weighted_objective_cost_irr !== null && (
+            <Typography variant="body2" sx={{ mt: 1 }}>
+              {t('optimization.weightedObjectiveCost')}: <strong>{formatCurrency(Number(analysisData.weighted_objective_cost_irr), 'IRR')}</strong>
+              <br />
+              <span style={{ color: 'rgba(0,0,0,0.65)' }}>{t('optimization.weightedObjectiveHint')}</span>
+            </Typography>
+          )}
+          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+            {t('optimization.requiredBudgetDifferenceExplain')}
+          </Typography>
         </CardContent>
       </Card>
 
       {(analysisData.reconciliation?.differences || []).length > 0 && (
         <Alert severity="warning" sx={{ mb: 3 }}>
           <AlertTitle>{t('optimization.financialTotalsNeedReview')}</AlertTitle>
-          {(analysisData.reconciliation?.differences || []).slice(0, 5).join(' | ')}
+          {t('optimization.financialTotalsNeedReviewExplain')}
         </Alert>
+      )}
+
+      {((analysisData.reconciliation?.differences || []).length > 0 || (analysisData.trace_lines || []).length > 0) && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Accordion>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography variant="subtitle1">{t('optimization.technicalFinancialTrace')}</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                {(analysisData.reconciliation?.reasons || []).map((reason, idx) => (
+                  <Typography key={`reason-${idx}`} variant="body2" color="text.secondary">
+                    • {reason}
+                  </Typography>
+                ))}
+                {(analysisData.reconciliation?.differences || []).slice(0, 10).map((difference, idx) => (
+                  <Typography key={`diff-${idx}`} variant="body2" color="text.secondary">
+                    • {difference}
+                  </Typography>
+                ))}
+                {(analysisData.trace_lines || []).length > 0 && (
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    {t('optimization.traceLinesCount')}: {(analysisData.trace_lines || []).length}
+                  </Typography>
+                )}
+              </AccordionDetails>
+            </Accordion>
+          </CardContent>
+        </Card>
       )}
 
       {(analysisData.critical_periods || []).length > 0 && (
@@ -401,12 +464,23 @@ export const BudgetAnalysis: React.FC<BudgetAnalysisProps> = ({
           <List>
             {(analysisData.recommendations || []).map((recommendation, index) => (
               <ListItem key={index}>
-                <ListItemText primary={recommendation} />
+                <ListItemText primary={localizeRecommendation(recommendation)} />
               </ListItem>
             ))}
           </List>
         </CardContent>
       </Card>
+
+      {!!analysisData.narrative_report && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>{t('optimization.executiveNarrative')}</Typography>
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+              {analysisData.narrative_report}
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
 
       {(analysisData.warnings || []).length > 0 && (
         <Card>

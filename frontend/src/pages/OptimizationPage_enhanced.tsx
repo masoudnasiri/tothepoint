@@ -138,6 +138,7 @@ interface OptimizationProposal {
     trace_lines?: Array<Record<string, any>>;
     reconciliation?: {
       differences?: string[];
+      reasons?: string[];
       [key: string]: any;
     };
     total_purchase_cost_irr?: number;
@@ -166,7 +167,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
   const isFa = i18n.language?.startsWith('fa');
   const formatDisplayDate = useMemo(() => (dateString: string | Date) => {
     if (!dateString || dateString === 'Invalid Date' || dateString === 'null' || dateString === 'undefined') {
-      return 'Not Set';
+      return t('optimization.notSet');
     }
     try {
       const dateStr = typeof dateString === 'string' ? dateString : dateString.toISOString();
@@ -284,7 +285,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
           timestamp: new Date().toISOString(),
         });
         
-        setSuccess(`Loaded ${proposals.length} existing proposal(s) with ${proposedDecisions.length} items. You can edit, finalize, or delete them.`);
+        setSuccess(
+          t('optimization.loadedExistingProposals', {
+            proposals: proposals.length,
+            items: proposedDecisions.length,
+          })
+        );
       }
     } catch (err: any) {
       console.error('Failed to load existing proposals:', err);
@@ -296,7 +302,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
       const response = await financeAPI.getSolverInfo();
       setSolverInfo(response.data);
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to load solver information'));
+      setError(formatApiError(err, t('optimization.failedToLoadSolverInfo')));
     } finally {
       setLoading(false);
     }
@@ -355,11 +361,11 @@ export const OptimizationPageEnhanced: React.FC = () => {
         const shortage = precheckData?.surplus_or_shortage_irr ?? 0;
         const shortageNote =
           shortage < 0
-            ? ` | shortage detected before run: ${formatCurrencyAmount(Math.abs(shortage), 'IRR', i18n.language || 'en-US')}`
+            ? ` | ${t('optimization.shortageDetectedBeforeRun')}: ${formatCurrencyAmount(Math.abs(shortage), 'IRR', i18n.language || 'en-US')}`
             : '';
         setSuccess(
-          `Optimization completed! Generated ${response.data.proposals.length} proposal(s). ` +
-          `Best cost: ${formatCurrencyAmount(response.data.total_cost, 'IRR', i18n.language || 'en-US')}` +
+          `${t('optimization.optimizationCompleted')} ${t('optimization.generatedProposalCount', { count: response.data.proposals.length })}. ` +
+          `${t('optimization.bestCostLabel')}: ${formatCurrencyAmount(response.data.total_cost, 'IRR', i18n.language || 'en-US')}` +
           shortageNote
         );
       } else {
@@ -376,15 +382,15 @@ export const OptimizationPageEnhanced: React.FC = () => {
         const baseMessage = response.data?.message || 'No feasible solution was generated.';
         const modeNote =
           budgetMode === 'allow_shortage'
-            ? ' Budget shortage was not used as a blocker in this mode.'
+            ? ` ${t('optimization.allowShortageNotBlockedNote')}`
             : '';
         const reasonText = reasonParts.length > 0 ? ` Diagnostics: ${reasonParts.join(' | ')}.` : '';
-        setError(`Optimization failed: ${baseMessage}${modeNote}${reasonText}`);
+        setError(`${t('optimization.optimizationFailedPrefix')}: ${baseMessage}${modeNote}${reasonText}`);
       }
     } catch (err: any) {
       console.error('[ENHANCED OPTIMIZATION] ERROR:', err);
       console.error('[ENHANCED OPTIMIZATION] Error response:', err.response?.data);
-      setError(formatApiError(err, 'Optimization failed'));
+      setError(formatApiError(err, t('optimization.optimizationFailedPrefix')));
     } finally {
       setOptimizing(false);
     }
@@ -408,7 +414,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
       await executeOptimizationWithBudgetMode('constrained', precheck);
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to run optimization budget pre-check'));
+      setError(formatApiError(err, t('optimization.failedToRunBudgetPrecheck')));
     }
   };
 
@@ -445,7 +451,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
       });
       setEditDialogOpen(false);
       setSelectedDecision(null);
-      setSuccess('Decision updated locally. Save the proposal to persist changes.');
+      setSuccess(t('optimization.decisionUpdatedLocally'));
     }
   };
 
@@ -453,7 +459,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
     if (window.confirm(`Remove ${decision.item_code} from this proposal?`)) {
       const key = `${decision.project_id}_${decision.item_code}`;
       setRemovedDecisions(new Set([...removedDecisions, key]));
-      setSuccess('Decision removed locally. Save the proposal to persist changes.');
+      setSuccess(t('optimization.decisionRemovedLocally'));
     }
   };
 
@@ -487,7 +493,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
       setAddedDecisions([...addedDecisions, selectedDecision]);
       setEditDialogOpen(false);
       setSelectedDecision(null);
-      setSuccess('Decision added locally. Save the proposal to persist changes.');
+      setSuccess(t('optimization.decisionAddedLocally'));
     } else {
       handleSaveEdit();
     }
@@ -504,9 +510,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
       
       setDeleteDialogOpen(false);
       setLastRun(null);
-      setSuccess('Optimization results deleted successfully.');
+      setSuccess(t('optimization.resultsDeletedSuccessfully'));
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to delete optimization results'));
+      setError(formatApiError(err, t('optimization.failedToDeleteResults')));
     } finally {
       setSaving(false);
     }
@@ -577,19 +583,21 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
       // Validate data before sending
       if (!lastRun?.run_id) {
-        throw new Error('No optimization run ID available. Please run optimization first.');
+        throw new Error(t('optimization.noOptimizationRunId'));
       }
       
       if (decisions.length === 0) {
-        throw new Error('No decisions to save. Please ensure optimization has generated results.');
+        throw new Error(t('optimization.noDecisionsToSave'));
       }
 
       // Call the save-proposal endpoint
       const response = await decisionsAPI.saveProposal(proposalData);
       
       setSuccess(
-        `✅ Proposal "${proposal.proposal_name}" saved with ${decisions.length} decisions! ` +
-        `They are now in "PROPOSED" status and can be finalized.`
+        t('optimization.proposalSavedWithCount', {
+          proposalName: proposal.proposal_name,
+          count: decisions.length,
+        })
       );
       
       setSavedProposalRunId(lastRun?.run_id || null);
@@ -611,7 +619,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
         setSavedDecisionIds(savedIds);
       }
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to save proposal'));
+      setError(formatApiError(err, t('optimization.failedToSaveProposal')));
     } finally {
       setSaving(false);
     }
@@ -619,7 +627,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
   const handleFinalizeProposal = async () => {
     if (savedDecisionIds.length === 0) {
-      setError('No decisions to finalize. Please save a proposal first.');
+      setError(t('optimization.noDecisionsToFinalize'));
       return;
     }
 
@@ -632,7 +640,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
         finalize_all: false
       });
       
-      setSuccess(`✅ Successfully locked ${response.data.finalized_count} decisions! They will not be re-optimized.`);
+      setSuccess(t('optimization.successfullyLockedDecisions', { count: response.data.finalized_count }));
       setFinalizeDialogOpen(false);
       setSavedDecisionIds([]);
       
@@ -640,7 +648,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
       await fetchExistingProposals();
       
     } catch (err: any) {
-      setError(formatApiError(err, 'Failed to finalize decisions'));
+      setError(formatApiError(err, t('optimization.failedToFinalizeDecisions')));
     } finally {
       setSaving(false);
     }
@@ -682,13 +690,22 @@ export const OptimizationPageEnhanced: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const getStrategyLabel = (strategyType: string) => {
+    switch (strategyType) {
+      case 'LOWEST_COST':
+        return t('optimization.strategyLowestCost');
+      case 'BALANCED':
+        return t('optimization.strategyBalanced');
+      case 'SMOOTH_CASHFLOW':
+        return t('optimization.strategySmoothCashflow');
+      case 'PRIORITY_WEIGHTED':
+        return t('optimization.strategyPriorityWeighted');
+      case 'FAST_DELIVERY':
+        return t('optimization.strategyFastDelivery');
+      default:
+        return strategyType;
+    }
+  };
 
   const selectedProposal = lastRun?.proposals[selectedProposalIndex];
   const hasLocalChanges =
@@ -705,7 +722,58 @@ export const OptimizationPageEnhanced: React.FC = () => {
     0
   );
   const getDisplayProposalCost = (proposal: OptimizationProposal, index: number) =>
-    index === selectedProposalIndex && selectedProposal ? effectiveSelectedTotalCost : proposal.total_cost;
+    index === selectedProposalIndex && selectedProposal
+      ? Number(
+          selectedProposal.financial_analysis?.total_purchase_cost_irr ??
+          selectedProposal.total_purchase_cost_irr ??
+          effectiveSelectedTotalCost
+        )
+      : Number(
+          proposal.financial_analysis?.total_purchase_cost_irr ??
+          proposal.total_purchase_cost_irr ??
+          proposal.total_cost
+        );
+
+  const traceByOption = useMemo(() => {
+    const map = new Map<number, any>();
+    const lines = selectedProposal?.financial_analysis?.trace_lines || [];
+    for (const line of lines) {
+      const optionId = Number(line?.selected_candidate_id || 0);
+      if (!optionId) continue;
+      const existing = map.get(optionId) || {
+        currency: line.currency || 'IRR',
+        exchange_rate_to_irr: Number(line.exchange_rate_to_irr || 1),
+        quantity: Number(line.quantity || 0),
+        unit_price_original: Number(line.unit_price || 0),
+        total_original: 0,
+        irr_equivalent: 0,
+        payment_periods: new Set<string>(),
+      };
+      existing.total_original += Number(line.payment_amount_original ?? line.total_original ?? 0);
+      existing.irr_equivalent += Number(line.payment_amount_irr ?? line.total_irr ?? 0);
+      if (line.payment_period) {
+        existing.payment_periods.add(String(line.payment_period));
+      }
+      map.set(optionId, existing);
+    }
+    return map;
+  }, [selectedProposal?.financial_analysis?.trace_lines]);
+
+  const selectedIrrEquivalentSum = useMemo(() => {
+    let total = 0;
+    traceByOption.forEach((value) => {
+      total += Number(value.irr_equivalent || 0);
+    });
+    return total;
+  }, [traceByOption]);
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   return (
     <Box>
@@ -721,7 +789,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               onClick={() => setPreviousRunsDialogOpen(true)}
               disabled={optimizing}
             >
-              Previous Runs ({previousRuns.length})
+              {t('optimization.previousRuns')} ({previousRuns.length})
             </Button>
           )}
           {lastRun && (user?.role === 'finance' || user?.role === 'admin') && (
@@ -732,7 +800,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               onClick={() => setDeleteDialogOpen(true)}
               disabled={saving || optimizing}
             >
-              Delete Results
+              {t('optimization.deleteResults')}
             </Button>
           )}
           {(user?.role === 'finance' || user?.role === 'admin') && (
@@ -743,7 +811,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               disabled={optimizing}
               size="large"
             >
-              {optimizing ? 'Running...' : 'Run Optimization'}
+              {optimizing ? t('optimization.running') : t('optimization.runOptimization')}
             </Button>
           )}
         </Box>
@@ -782,11 +850,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
             </Box>
             <LinearProgress sx={{ mb: 1 }} />
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
-              Using {optimizationConfig.solver_type} solver with {
-                optimizationConfig.generate_multiple_proposals 
-                  ? 'multiple strategies' 
-                  : 'single strategy'
-              }. This may take several minutes.
+              {t('optimization.runningWithSolver', {
+                solver: optimizationConfig.solver_type,
+                mode: optimizationConfig.generate_multiple_proposals
+                  ? t('optimization.multipleStrategies')
+                  : t('optimization.singleStrategy'),
+              })}
             </Typography>
           </CardContent>
         </Card>
@@ -807,7 +876,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
       {lastRun && (lastRun.status === 'INFEASIBLE' || lastRun.status === 'ERROR') && lastRun.diagnostics && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Optimization Diagnostics
+            {t('optimization.optimizationDiagnostics')}
           </Typography>
           <Typography variant="body2">
             Mode: {String(lastRun.diagnostics.budget_mode || '-')} | Solver status: {String(lastRun.diagnostics.solver_status || '-')}
@@ -825,7 +894,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12}>
           <Typography variant="h6" gutterBottom>
-            Available Solvers
+              {t('optimization.availableSolvers')}
           </Typography>
         </Grid>
         {solverInfo?.available_solvers.map((solver) => (
@@ -869,15 +938,15 @@ export const OptimizationPageEnhanced: React.FC = () => {
         <Card sx={{ mb: 3 }}>
           <CardContent>
             <Typography variant="h6" gutterBottom>
-              Optimization Results
+              {t('optimization.optimizationResults')}
             </Typography>
             
             {/* Summary Statistics */}
             <Grid container spacing={2} sx={{ mb: 3 }}>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Paper sx={{ p: 2, bgcolor: 'success.light' }}>
                   <Typography variant="body2" color="text.secondary">
-                    Status
+                    {t('optimization.status')}
                   </Typography>
                   <Chip 
                     label={t(`optimization.${lastRun.status.toLowerCase()}`)} 
@@ -887,30 +956,69 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   />
                 </Paper>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Paper sx={{ p: 2, bgcolor: 'info.light' }}>
+              <Grid item xs={12} sm={6} md={2}>
+                <Paper sx={{ p: 2, bgcolor: 'primary.light' }}>
                   <Typography variant="body2" color="text.secondary">
-                    {t('optimization.bestTotalPurchaseCost')}
+                    {t('optimization.selectedItemsCount')}
                   </Typography>
                   <Typography variant="h6">
-                    {formatCurrency(lastRun.total_cost)}
+                    {selectedProposal?.items_count ?? selectedProposal?.decisions?.length ?? 0}
                   </Typography>
                 </Paper>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={2}>
+                <Paper sx={{ p: 2, bgcolor: 'info.light' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {t('optimization.totalPurchaseCost')}
+                  </Typography>
+                  <Typography variant="h6">
+                    {formatCurrencyAmount(
+                      Number(
+                        selectedProposal?.financial_analysis?.total_purchase_cost_irr ??
+                        selectedProposal?.total_purchase_cost_irr ??
+                        lastRun.total_cost
+                      ),
+                      'IRR',
+                      i18n.language || 'en-US'
+                    )}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={2}>
                 <Paper sx={{ p: 2, bgcolor: 'warning.light' }}>
                   <Typography variant="body2" color="text.secondary">
-                    Proposals Generated
+                    {t('optimization.weightedObjectiveCost')}
+                  </Typography>
+                  <Typography variant="h6">
+                    {formatCurrencyAmount(
+                      Number(
+                        selectedProposal?.financial_analysis?.weighted_objective_cost_irr ??
+                        selectedProposal?.weighted_cost ??
+                        0
+                      ),
+                      'IRR',
+                      i18n.language || 'en-US'
+                    )}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {t('optimization.weightedObjectiveHint')}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={6} md={2}>
+                <Paper sx={{ p: 2, bgcolor: 'warning.light' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    {t('optimization.proposalsGenerated')}
                   </Typography>
                   <Typography variant="h6">
                     {lastRun.proposals.length}
                   </Typography>
                 </Paper>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={2}>
                 <Paper sx={{ p: 2, bgcolor: 'secondary.light' }}>
                   <Typography variant="body2" color="text.secondary">
-                    Execution Time
+                    {t('optimization.executionTime')}
                   </Typography>
                   <Typography variant="h6">
                     {lastRun.execution_time_seconds ? lastRun.execution_time_seconds.toFixed(2) : '0.00'}s
@@ -935,6 +1043,9 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         {getProposalIcon(proposal.strategy_type)}
                         <Box>
                           <Typography variant="body2">{proposal.proposal_name}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {getStrategyLabel(proposal.strategy_type)}
+                          </Typography>
                           <Typography variant="caption" color="text.secondary">
                             {formatCurrency(getDisplayProposalCost(proposal, index))}
                           </Typography>
@@ -985,7 +1096,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                           setAddDialogOpen(true);
                         }}
                       >
-                        Add Item
+                        {t('optimization.addItem')}
                       </Button>
                     )}
                   </Box>
@@ -1023,7 +1134,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                       <Box display="flex" justifyContent="space-between" alignItems="center" width="100%">
                         <Typography variant="subtitle1" fontWeight="bold">
-                          View financial analysis
+                          {t('optimization.viewFinancialAnalysis')}
                         </Typography>
                         <Chip
                           label={selectedProposal.financial_analysis.budget_status}
@@ -1041,7 +1152,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                     <AccordionDetails>
                       {hasLocalChanges && (
                         <Alert severity="info" sx={{ mb: 2 }}>
-                          Proposal totals now reflect local edits/removals. Financial analysis updates after saving the edited proposal.
+                          {t('optimization.localChangesFinancialNote')}
                         </Alert>
                       )}
                       <Grid container spacing={2}>
@@ -1137,7 +1248,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         {(selectedProposal.financial_analysis.reconciliation?.differences || []).length > 0 && (
                           <Grid item xs={12}>
                             <Alert severity="warning">
-                              {t('optimization.financialTotalsNeedReview')}: {(selectedProposal.financial_analysis.reconciliation?.differences || []).slice(0, 5).join(' | ')}
+                              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                                {t('optimization.financialTotalsNeedReview')}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                                {t('optimization.financialTotalsNeedReviewExplain')}
+                              </Typography>
                             </Alert>
                           </Grid>
                         )}
@@ -1157,22 +1273,89 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         {selectedProposal.budget_summary && (
                           <Grid item xs={12}>
                             <Alert severity="info">
-                              Used budget:{' '}
+                              {t('optimization.usedBudget')}:{' '}
                               {formatCurrencyAmount(
                                 selectedProposal.budget_summary.used_budget_irr || 0,
                                 'IRR',
                                 i18n.language || 'en-US'
                               )}{' '}
-                              | Remaining budget:{' '}
+                              | {t('optimization.remainingBudget')}:{' '}
                               {formatCurrencyAmount(
                                 selectedProposal.budget_summary.remaining_budget_irr || 0,
                                 'IRR',
                                 i18n.language || 'en-US'
                               )}{' '}
-                              | Excluded items: {selectedProposal.budget_summary.excluded_items_count || 0}
+                              | {t('optimization.excludedItems')}: {selectedProposal.budget_summary.excluded_items_count || 0}
                             </Alert>
                           </Grid>
                         )}
+                        <Grid item xs={12}>
+                          <Accordion>
+                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                              <Typography variant="subtitle2">
+                                {t('optimization.technicalFinancialTrace')}
+                              </Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              {(selectedProposal.financial_analysis.reconciliation?.reasons || []).length > 0 && (
+                                <Box sx={{ mb: 2 }}>
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {t('optimization.reconciliationReasons')}
+                                  </Typography>
+                                  {(selectedProposal.financial_analysis.reconciliation?.reasons || []).map((reason, idx) => (
+                                    <Typography key={`reason-${idx}`} variant="body2" color="text.secondary">
+                                      • {reason}
+                                    </Typography>
+                                  ))}
+                                </Box>
+                              )}
+                              {(selectedProposal.financial_analysis.reconciliation?.differences || []).length > 0 && (
+                                <Box sx={{ mb: 2 }}>
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {t('optimization.rawReconciliationDifferences')}
+                                  </Typography>
+                                  {(selectedProposal.financial_analysis.reconciliation?.differences || []).slice(0, 10).map((diff, idx) => (
+                                    <Typography key={`diff-${idx}`} variant="body2" color="text.secondary">
+                                      • {diff}
+                                    </Typography>
+                                  ))}
+                                </Box>
+                              )}
+                              {(selectedProposal.financial_analysis.trace_lines || []).length > 0 && (
+                                <TableContainer component={Paper} variant="outlined">
+                                  <Table size="small">
+                                    <TableHead>
+                                      <TableRow>
+                                        <TableCell>{t('optimization.itemCode')}</TableCell>
+                                        <TableCell>{t('optimization.currency')}</TableCell>
+                                        <TableCell align="right">{t('optimization.totalOriginal')}</TableCell>
+                                        <TableCell align="right">{t('optimization.exchangeRate')}</TableCell>
+                                        <TableCell align="right">{t('optimization.irrEquivalent')}</TableCell>
+                                        <TableCell>{t('optimization.paymentPeriod')}</TableCell>
+                                      </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                      {(selectedProposal.financial_analysis.trace_lines || []).slice(0, 20).map((line, idx) => (
+                                        <TableRow key={`trace-${idx}`}>
+                                          <TableCell>{String(line.item_code || '-')}</TableCell>
+                                          <TableCell>{String(line.currency || 'IRR')}</TableCell>
+                                          <TableCell align="right">
+                                            {formatCurrencyAmount(Number(line.payment_amount_original ?? line.total_original ?? 0), String(line.currency || 'IRR'), i18n.language || 'en-US')}
+                                          </TableCell>
+                                          <TableCell align="right">{Number(line.exchange_rate_to_irr || 1).toLocaleString()}</TableCell>
+                                          <TableCell align="right">
+                                            {formatCurrencyAmount(Number(line.payment_amount_irr ?? line.total_irr ?? 0), 'IRR', i18n.language || 'en-US')}
+                                          </TableCell>
+                                          <TableCell>{String(line.payment_period || '-')}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </TableContainer>
+                              )}
+                            </AccordionDetails>
+                          </Accordion>
+                        </Grid>
                       </Grid>
                     </AccordionDetails>
                   </Accordion>
@@ -1183,16 +1366,19 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Project</TableCell>
-                        <TableCell>Item</TableCell>
-                        <TableCell>Supplier</TableCell>
-                        <TableCell>Purchase Date</TableCell>
-                        <TableCell>Delivery Date</TableCell>
-                        <TableCell align="right">Quantity</TableCell>
-                        <TableCell align="right">Unit Cost</TableCell>
-                        <TableCell align="right">Total Cost</TableCell>
-                        <TableCell>Payment</TableCell>
-                        <TableCell align="center">Actions</TableCell>
+                        <TableCell>{t('optimization.project')}</TableCell>
+                        <TableCell>{t('optimization.item')}</TableCell>
+                        <TableCell>{t('optimization.supplier')}</TableCell>
+                        <TableCell>{t('optimization.purchaseDate')}</TableCell>
+                        <TableCell>{t('optimization.deliveryDate')}</TableCell>
+                        <TableCell align="right">{t('optimization.quantity')}</TableCell>
+                        <TableCell align="center">{t('optimization.currency')}</TableCell>
+                        <TableCell align="right">{t('optimization.unitCostOriginal')}</TableCell>
+                        <TableCell align="right">{t('optimization.totalCostOriginal')}</TableCell>
+                        <TableCell align="right">{t('optimization.exchangeRate')}</TableCell>
+                        <TableCell align="right">{t('optimization.irrEquivalent')}</TableCell>
+                        <TableCell>{t('optimization.payment')}</TableCell>
+                        <TableCell align="center">{t('optimization.actions')}</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1206,6 +1392,15 @@ export const OptimizationPageEnhanced: React.FC = () => {
                           const editedDecision = editedDecisions[key];
                           const isEdited = !!editedDecision;
                           const displayDecision = editedDecision || decision;
+                          const traceSummary = traceByOption.get(Number(displayDecision.procurement_option_id || 0));
+                          const currency = String(traceSummary?.currency || 'IRR');
+                          const unitCostOriginal = Number(traceSummary?.unit_price_original ?? displayDecision.unit_cost ?? 0);
+                          const totalCostOriginal = Number(traceSummary?.total_original ?? displayDecision.final_cost ?? 0);
+                          const exchangeRate = Number(traceSummary?.exchange_rate_to_irr ?? (currency === 'IRR' ? 1 : 0));
+                          const irrEquivalent = Number(traceSummary?.irr_equivalent ?? displayDecision.final_cost ?? 0);
+                          const paymentPeriods = traceSummary?.payment_periods
+                            ? Array.from(traceSummary.payment_periods).sort().join(', ')
+                            : '';
                           
                           return (
                             <TableRow 
@@ -1231,20 +1426,34 @@ export const OptimizationPageEnhanced: React.FC = () => {
                               <TableCell>{formatDate(displayDecision.purchase_date)}</TableCell>
                               <TableCell>{formatDate(displayDecision.delivery_date)}</TableCell>
                               <TableCell align="right">{displayDecision.quantity}</TableCell>
-                              <TableCell align="right">{formatCurrency(displayDecision.unit_cost)}</TableCell>
+                              <TableCell align="center">{currency}</TableCell>
+                              <TableCell align="right">{formatCurrencyAmount(unitCostOriginal, currency, i18n.language || 'en-US')}</TableCell>
                               <TableCell align="right">
                                 <Typography variant="body2" fontWeight="medium">
-                                  {formatCurrency(displayDecision.final_cost)}
+                                  {formatCurrencyAmount(totalCostOriginal, currency, i18n.language || 'en-US')}
                                 </Typography>
                               </TableCell>
+                              <TableCell align="right">
+                                {currency === 'IRR' ? '-' : exchangeRate.toLocaleString()}
+                              </TableCell>
+                              <TableCell align="right">
+                                {formatCurrencyAmount(irrEquivalent, 'IRR', i18n.language || 'en-US')}
+                              </TableCell>
                               <TableCell>
-                                <Chip label={typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : t('optimization.paymentTerms')} size="small" />
+                                <Chip
+                                  label={
+                                    paymentPeriods
+                                      ? `${typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : t('optimization.paymentTerms')} | ${paymentPeriods}`
+                                      : (typeof displayDecision.payment_terms === 'string' ? displayDecision.payment_terms : t('optimization.paymentTerms'))
+                                  }
+                                  size="small"
+                                />
                               </TableCell>
                               <TableCell align="center">
                                 <IconButton
                                   size="small"
                                   onClick={() => handleEditDecision(displayDecision)}
-                                  title="Edit Decision"
+                                  title={t('optimization.editDecision')}
                                 >
                                   <EditIcon fontSize="small" />
                                 </IconButton>
@@ -1252,7 +1461,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                                   size="small"
                                   color="error"
                                   onClick={() => handleRemoveDecision(displayDecision)}
-                                  title="Remove from Proposal"
+                                  title={t('optimization.removeFromProposal')}
                                 >
                                   <DeleteIcon fontSize="small" />
                                 </IconButton>
@@ -1265,6 +1474,10 @@ export const OptimizationPageEnhanced: React.FC = () => {
                           key={`added-${idx}`}
                           sx={{ bgcolor: 'success.light', opacity: 0.9 }}
                         >
+                          {(() => {
+                            const currency = 'IRR';
+                            return (
+                              <>
                           <TableCell>
                             <Typography variant="body2" fontWeight="medium">
                               {decision.project_code}
@@ -1281,11 +1494,16 @@ export const OptimizationPageEnhanced: React.FC = () => {
                           <TableCell>{formatDate(decision.purchase_date)}</TableCell>
                           <TableCell>{formatDate(decision.delivery_date)}</TableCell>
                           <TableCell align="right">{decision.quantity}</TableCell>
-                          <TableCell align="right">{formatCurrency(decision.unit_cost)}</TableCell>
+                          <TableCell align="center">{currency}</TableCell>
+                          <TableCell align="right">{formatCurrencyAmount(decision.unit_cost, currency, i18n.language || 'en-US')}</TableCell>
                           <TableCell align="right">
                             <Typography variant="body2" fontWeight="medium">
-                              {formatCurrency(decision.final_cost)}
+                              {formatCurrencyAmount(decision.final_cost, currency, i18n.language || 'en-US')}
                             </Typography>
+                          </TableCell>
+                          <TableCell align="right">-</TableCell>
+                          <TableCell align="right">
+                            {formatCurrencyAmount(decision.final_cost, 'IRR', i18n.language || 'en-US')}
                           </TableCell>
                           <TableCell>
                             <Chip label={typeof decision.payment_terms === 'string' ? decision.payment_terms : t('optimization.paymentTerms')} size="small" />
@@ -1294,7 +1512,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                             <IconButton
                               size="small"
                               onClick={() => handleEditDecision(decision)}
-                              title="Edit Decision"
+                              title={t('optimization.editDecision')}
                             >
                               <EditIcon fontSize="small" />
                             </IconButton>
@@ -1304,16 +1522,42 @@ export const OptimizationPageEnhanced: React.FC = () => {
                               onClick={() => {
                                 setAddedDecisions(addedDecisions.filter((_, i) => i !== idx));
                               }}
-                              title="Remove"
+                              title={t('optimization.remove')}
                             >
                               <DeleteIcon fontSize="small" />
                             </IconButton>
                           </TableCell>
+                              </>
+                            );
+                          })()}
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </TableContainer>
+                <Alert severity="info" sx={{ mt: 1.5 }}>
+                  <Typography variant="body2">
+                    {t('optimization.itemsIrrEquivalentSum')}:{' '}
+                    <strong>{formatCurrencyAmount(selectedIrrEquivalentSum, 'IRR', i18n.language || 'en-US')}</strong>
+                  </Typography>
+                  <Typography variant="body2">
+                    {t('optimization.totalPurchaseCost')}:{' '}
+                    <strong>
+                      {formatCurrencyAmount(
+                        Number(
+                          selectedProposal.financial_analysis?.total_purchase_cost_irr ??
+                          selectedProposal.total_purchase_cost_irr ??
+                          effectiveSelectedTotalCost
+                        ),
+                        'IRR',
+                        i18n.language || 'en-US'
+                      )}
+                    </strong>
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    {t('optimization.requiredBudgetDifferenceExplain')}
+                  </Typography>
+                </Alert>
 
                 {/* Save Proposal Button - Finance/Admin ONLY (PM cannot save or finalize) */}
                 {(user?.role === 'finance' || user?.role === 'admin') && (
@@ -1326,7 +1570,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         onClick={() => setFinalizeDialogOpen(true)}
                         disabled={saving}
                       >
-                        Finalize & Lock Decisions
+                        {t('optimization.finalizeLockDecisions')}
                       </Button>
                     )}
                     <Button
@@ -1336,7 +1580,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                       onClick={() => handleSaveProposal(selectedProposal)}
                       disabled={saving}
                     >
-                      {saving ? 'Saving...' : 'Save Proposal as Decisions'}
+                      {saving ? t('optimization.saving') : t('optimization.saveProposalAsDecisions')}
                     </Button>
                   </Box>
                 )}
@@ -1345,8 +1589,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                 {user?.role === 'pm' && (
                   <Alert severity="info" sx={{ mt: 2 }}>
                     <Typography variant="body2">
-                      <strong>PM Access:</strong> You can view optimization results but cannot save or finalize decisions. 
-                      Contact Finance or Admin users to save proposals.
+                      <strong>{t('optimization.pmAccessTitle')}</strong> {t('optimization.pmAccessMessage')}
                     </Typography>
                   </Alert>
                 )}
@@ -1374,7 +1617,17 @@ export const OptimizationPageEnhanced: React.FC = () => {
                 <Typography variant="body2" color="text.secondary">
                   {t('optimization.scenario')}
                 </Typography>
-                <Typography variant="body1">{budgetPrecheck.scenario || 'minimum_feasible'}</Typography>
+                <Typography variant="body1">
+                  {budgetPrecheck.scenario === 'minimum_feasible'
+                    ? t('optimization.minimumFeasibleBudget')
+                    : budgetPrecheck.scenario === 'average_candidate'
+                    ? t('optimization.averageCandidateBudget')
+                    : budgetPrecheck.scenario === 'worst_case'
+                    ? t('optimization.worstCaseBudget')
+                    : budgetPrecheck.scenario === 'selected_result' || budgetPrecheck.scenario === 'selected_optimization_result'
+                    ? t('optimization.selectedResultBudget')
+                    : (budgetPrecheck.scenario || 'minimum_feasible')}
+                </Typography>
               </Grid>
               <Grid item xs={12} md={6}>
                 <Typography variant="body2" color="text.secondary">
@@ -1423,7 +1676,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
             color="inherit"
             onClick={() => {
               setBudgetDecisionDialogOpen(false);
-              setSuccess('Optimization cancelled. You can update budget and try again.');
+              setSuccess(t('optimization.optimizationCancelled'));
             }}
           >
             {t('optimization.cancelAndUpdateBudget')}
@@ -1456,14 +1709,14 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
       {/* Run Optimization Dialog */}
       <Dialog open={runDialogOpen} onClose={() => setRunDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Configure Advanced Optimization</DialogTitle>
+        <DialogTitle>{t('optimization.configureAdvancedOptimization')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 2 }}>
-            Configure optimization parameters and select solver type and strategies.
+            {t('optimization.configureOptimizationHelp')}
           </Typography>
 
           <FormControl fullWidth sx={{ mb: 2 }}>
-            <InputLabel>Solver Type</InputLabel>
+            <InputLabel>{t('optimization.solverType')}</InputLabel>
             <Select
               value={optimizationConfig.solver_type}
               label={t('optimization.solverType')}
@@ -1489,7 +1742,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               max_time_slots: parseInt(e.target.value) || 12
             })}
             sx={{ mb: 2 }}
-            helperText="Number of time periods to consider"
+            helperText={t('optimization.maxTimeSlotsHelp')}
           />
 
           <TextField
@@ -1504,7 +1757,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               time_limit_seconds: parseInt(e.target.value) || 300
             })}
             sx={{ mb: 2 }}
-            helperText="Maximum optimization time"
+            helperText={t('optimization.timeLimitHelp')}
           />
 
           <FormControlLabel
@@ -1523,7 +1776,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
           {optimizationConfig.generate_multiple_proposals && (
             <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Strategies (leave empty for all)</InputLabel>
+              <InputLabel>{t('optimization.strategies')}</InputLabel>
               <Select
                 multiple
                 value={optimizationConfig.strategies}
@@ -1551,15 +1804,14 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography variant="body2">
-              <strong>Tip:</strong> For the first run, use CP_SAT solver with multiple proposals enabled 
-              to compare different strategies. You can then refine with specific solvers for production use.
+              <strong>{t('optimization.tip')}</strong> {t('optimization.firstRunTip')}
             </Typography>
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRunDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setRunDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button onClick={handleRunOptimization} variant="contained" disabled={optimizing}>
-            {optimizing ? 'Running...' : 'Run Optimization'}
+            {optimizing ? t('optimization.running') : t('optimization.runOptimization')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1577,14 +1829,14 @@ export const OptimizationPageEnhanced: React.FC = () => {
               </Typography>
               
               <Typography variant="subtitle2" color="primary" gutterBottom>
-                Best For:
+                {t('optimization.bestFor')}
               </Typography>
               <Typography variant="body2" paragraph>
                 {selectedSolver.best_for}
               </Typography>
               
               <Typography variant="subtitle2" color="primary" gutterBottom>
-                Performance:
+                {t('optimization.performance')}
               </Typography>
               <Typography variant="body2" paragraph>
                 {selectedSolver.performance}
@@ -1593,7 +1845,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
               {selectedSolver.note && (
                 <>
                   <Typography variant="subtitle2" color="warning.main" gutterBottom>
-                    Note:
+                    {t('common.note')}:
                   </Typography>
                   <Typography variant="body2" paragraph>
                     {selectedSolver.note}
@@ -1604,22 +1856,22 @@ export const OptimizationPageEnhanced: React.FC = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setInfoDialogOpen(false)}>Close</Button>
+          <Button onClick={() => setInfoDialogOpen(false)}>{t('common.close')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Add Item Dialog */}
       <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add Item to Proposal</DialogTitle>
+        <DialogTitle>{t('optimization.addItemToProposal')}</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 2, mt: 1 }}>
-            Add a new item to this proposal. You'll configure the details in the next step.
+            {t('optimization.addItemHelp')}
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setAddDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button onClick={handleAddDecision} variant="contained" color="primary">
-            Continue
+            {t('optimization.continue')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1627,13 +1879,13 @@ export const OptimizationPageEnhanced: React.FC = () => {
       {/* Edit Decision Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
-          {selectedDecision && !selectedDecision.item_code ? 'Add New Item' : 'Edit Decision'}
+          {selectedDecision && !selectedDecision.item_code ? t('optimization.addNewItem') : t('optimization.editDecision')}
         </DialogTitle>
         <DialogContent>
           {selectedDecision && (
             <>
               <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 2 }}>
-                {selectedDecision.item_code ? 'Modify the decision details below.' : 'Configure the new item details.'}
+                {selectedDecision.item_code ? t('optimization.modifyDecisionDetails') : t('optimization.configureNewItemDetails')}
               </Typography>
               
               <TextField
@@ -1651,7 +1903,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
               <TextField
                 margin="dense"
-                label="Item Name"
+                label={t('optimization.itemName')}
                 fullWidth
                 variant="outlined"
                 value={selectedDecision.item_name}
@@ -1663,10 +1915,10 @@ export const OptimizationPageEnhanced: React.FC = () => {
               />
               
               <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-                <InputLabel>Procurement Option</InputLabel>
+                <InputLabel>{t('optimization.procurementOption')}</InputLabel>
                 <Select
                   value={selectedDecision.procurement_option_id}
-                  label="Procurement Option"
+                  label={t('optimization.procurementOption')}
                   onChange={(e) => {
                     const option = currentItemOptions.find(o => o.id === Number(e.target.value));
                     if (option) {
@@ -1683,7 +1935,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                   {/* Show procurement options for the current project item */}
                   {currentItemOptions.map(option => (
                     <MenuItem key={option.id} value={option.id}>
-                      {option.supplier_name} - {formatCurrency(option.base_cost)} (Lead: {option.lomc_lead_time} periods)
+                      {option.supplier_name} - {formatCurrency(option.base_cost)} ({t('optimization.leadPeriods', { periods: option.lomc_lead_time })})
                     </MenuItem>
                   ))}
                 </Select>
@@ -1691,7 +1943,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
               <TextField
                 margin="dense"
-                label="Quantity"
+                label={t('optimization.quantity')}
                 type="number"
                 fullWidth
                 variant="outlined"
@@ -1709,7 +1961,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
               <TextField
                 margin="dense"
-                label="Purchase Date"
+                label={t('optimization.purchaseDate')}
                 type="date"
                 fullWidth
                 variant="outlined"
@@ -1724,7 +1976,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
               <TextField
                 margin="dense"
-                label="Delivery Date"
+                label={t('optimization.deliveryDate')}
                 type="date"
                 fullWidth
                 variant="outlined"
@@ -1739,76 +1991,76 @@ export const OptimizationPageEnhanced: React.FC = () => {
 
               <Alert severity="info" sx={{ mt: 2 }}>
                 <Typography variant="body2" fontWeight="medium">
-                  Total Cost: {formatCurrency(selectedDecision.final_cost)}
+                  {t('optimization.totalCost')}: {formatCurrency(selectedDecision.final_cost)}
                 </Typography>
               </Alert>
             </>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setEditDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleSaveAddedDecision} 
             variant="contained" 
             color={selectedDecision && !selectedDecision.item_code ? "success" : "warning"}
           >
-            {selectedDecision && !selectedDecision.item_code ? 'Add Item' : 'Save Changes'}
+            {selectedDecision && !selectedDecision.item_code ? t('optimization.addItem') : t('optimization.saveChanges')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Delete Optimization Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete Optimization Results</DialogTitle>
+        <DialogTitle>{t('optimization.deleteOptimizationResults')}</DialogTitle>
         <DialogContent>
           <Typography variant="body1" paragraph>
-            Are you sure you want to delete these optimization results?
+            {t('optimization.confirmDeleteResults')}
           </Typography>
           <Alert severity="warning">
             <Typography variant="body2">
-              This will delete all proposals and associated data. Any unsaved changes will be lost.
+              {t('optimization.deleteResultsWarning')}
             </Typography>
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleDeleteOptimization} 
             variant="contained" 
             color="error"
             disabled={saving}
           >
-            {saving ? 'Deleting...' : 'Delete Results'}
+            {saving ? t('optimization.deleting') : t('optimization.deleteResults')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Finalize Decisions Dialog */}
       <Dialog open={finalizeDialogOpen} onClose={() => setFinalizeDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Finalize & Lock Decisions</DialogTitle>
+        <DialogTitle>{t('optimization.finalizeLockDecisions')}</DialogTitle>
         <DialogContent>
           <Typography variant="body1" paragraph>
-            Finalize and lock {savedDecisionIds.length} decisions from this proposal?
+            {t('optimization.finalizeCountQuestion', { count: savedDecisionIds.length })}
           </Typography>
           <Alert severity="info" sx={{ mb: 2 }}>
             <Typography variant="body2">
-              <strong>What happens when you finalize:</strong>
+              <strong>{t('optimization.whatHappensWhenFinalize')}</strong>
             </Typography>
             <ul style={{ marginTop: 8, marginBottom: 0 }}>
-              <li>Decisions are marked as "LOCKED"</li>
-              <li>They will NOT be included in future optimization runs</li>
-              <li>Cash flow events are confirmed</li>
-              <li>Can only be unlocked by authorized users</li>
+              <li>{t('optimization.finalizeEffectLocked')}</li>
+              <li>{t('optimization.finalizeEffectNoFutureRuns')}</li>
+              <li>{t('optimization.finalizeEffectCashflow')}</li>
+              <li>{t('optimization.finalizeEffectAuthorizedUnlock')}</li>
             </ul>
           </Alert>
           <Alert severity="warning">
             <Typography variant="body2">
-              <strong>Important:</strong> Only finalize decisions you're committed to executing.
+              <strong>{t('optimization.important')}:</strong> {t('optimization.finalizeImportantNote')}
             </Typography>
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFinalizeDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setFinalizeDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleFinalizeProposal} 
             variant="contained" 
@@ -1816,32 +2068,32 @@ export const OptimizationPageEnhanced: React.FC = () => {
             disabled={saving}
             startIcon={<LockIcon />}
           >
-            {saving ? 'Finalizing...' : 'Finalize & Lock'}
+            {saving ? t('optimization.finalizing') : t('optimization.finalizeLock')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Previous Runs Dialog */}
       <Dialog open={previousRunsDialogOpen} onClose={() => setPreviousRunsDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Previous Optimization Runs</DialogTitle>
+        <DialogTitle>{t('optimization.previousOptimizationRuns')}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" paragraph sx={{ mt: 1 }}>
-            View and analyze previous optimization runs
+            {t('optimization.viewAnalyzePreviousRuns')}
           </Typography>
           
           {previousRuns.length === 0 ? (
-            <Alert severity="info">No previous optimization runs found</Alert>
+            <Alert severity="info">{t('optimization.noPreviousRuns')}</Alert>
           ) : (
             <TableContainer component={Paper}>
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    <TableCell>Run Date</TableCell>
-                    <TableCell>Solver</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell align="right">Items</TableCell>
-                    <TableCell align="right">Total Cost</TableCell>
-                    <TableCell>Proposals</TableCell>
+                    <TableCell>{t('optimization.runDate')}</TableCell>
+                    <TableCell>{t('optimization.solver')}</TableCell>
+                    <TableCell>{t('optimization.status')}</TableCell>
+                    <TableCell align="right">{t('optimization.items')}</TableCell>
+                    <TableCell align="right">{t('optimization.totalCost')}</TableCell>
+                    <TableCell>{t('optimization.proposals')}</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1852,7 +2104,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                           {formatDisplayDateTime(run.run_timestamp)}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          ID: {run.run_id.slice(0, 8)}...
+                          {t('optimization.resultId')}: {run.run_id.slice(0, 8)}...
                         </Typography>
                       </TableCell>
                       <TableCell>
@@ -1873,7 +2125,7 @@ export const OptimizationPageEnhanced: React.FC = () => {
                         {formatCurrency(run.total_cost)}
                       </TableCell>
                       <TableCell>
-                        {run.request_parameters?.proposals_count || 1} proposal(s)
+                        {t('optimization.generatedProposalCount', { count: run.request_parameters?.proposals_count || 1 })}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1884,13 +2136,12 @@ export const OptimizationPageEnhanced: React.FC = () => {
           
           <Alert severity="info" sx={{ mt: 2 }}>
             <Typography variant="body2">
-              <strong>Note:</strong> Each optimization run is automatically saved to the database.
-              You can view decisions from these runs in the "Finalized Decisions" page.
+              <strong>{t('common.note')}:</strong> {t('optimization.previousRunsNote')}
             </Typography>
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPreviousRunsDialogOpen(false)}>Close</Button>
+          <Button onClick={() => setPreviousRunsDialogOpen(false)}>{t('common.close')}</Button>
         </DialogActions>
       </Dialog>
       </>

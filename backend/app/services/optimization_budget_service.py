@@ -532,20 +532,35 @@ def _build_reconciliation(
     )
     period_total = sum((row.required_irr for row in periods), Decimal("0"))
     differences: List[str] = []
+    reasons: List[str] = []
     if abs(trace_total - required_irr) > epsilon:
         differences.append(
             f"trace_total_irr ({trace_total}) != financial_required_budget_irr ({required_irr})"
         )
+        reasons.append("Trace totals differ from financial required budget and need technical review.")
     if abs(period_total - required_irr) > epsilon:
         differences.append(
             f"period_total_irr ({period_total}) != financial_required_budget_irr ({required_irr})"
         )
+        reasons.append("Period allocation totals differ from financial required budget.")
     if optimizer_total_cost_irr and abs(optimizer_total_cost_irr - required_irr) > epsilon:
         differences.append(
             f"optimizer_total_cost_irr ({optimizer_total_cost_irr}) != financial_required_budget_irr ({required_irr})"
         )
+        reasons.append(
+            "Optimizer raw total and financial required budget use different bases "
+            "(raw solver objective vs schedule/currency-adjusted budget)."
+        )
+    if (
+        weighted_objective_cost_irr is not None
+        and abs(_as_decimal(weighted_objective_cost_irr) - required_irr) > epsilon
+    ):
+        reasons.append(
+            "Weighted objective cost is an internal optimization score and is not the same as real purchase cost."
+        )
     if warnings:
         differences.extend([f"warning: {w}" for w in warnings])
+        reasons.append("One or more data/conversion warnings exist and can affect financial reconciliation.")
 
     return {
         "optimizer_total_cost_irr": optimizer_total_cost_irr,
@@ -555,6 +570,7 @@ def _build_reconciliation(
         "currency_card_total_irr_equivalent": required_irr,
         "period_total_irr": period_total,
         "differences": differences,
+        "reasons": reasons,
     }
 
 
@@ -569,6 +585,62 @@ def _build_recommendations(status: str) -> List[str]:
         "Run allow-shortage optimization to view full operational result with financial deficit details.",
         "Update budget allocations for shortage periods and currencies.",
     ]
+
+
+def _build_selected_result_narrative(
+    *,
+    optimization_result_id: Optional[str],
+    item_count: int,
+    total_purchase_cost_irr: Decimal,
+    required_irr: Decimal,
+    available_irr: Decimal,
+    surplus_or_shortage: Decimal,
+    required_by_currency: Dict[str, Decimal],
+    available_by_currency: Dict[str, Decimal],
+    critical_periods: Sequence[str],
+    recommendations: Sequence[str],
+) -> str:
+    shortage_abs = abs(surplus_or_shortage)
+    status_text = "کسری بودجه" if surplus_or_shortage < 0 else "مازاد بودجه"
+    lines = [
+        "📊 تحلیل مالی مدل انتخابی",
+        "",
+        f"شناسه نتیجه: {optimization_result_id or '-'}",
+        f"تعداد اقلام انتخاب‌شده: {item_count}",
+        f"هزینه کل خرید قابل اجرا: {total_purchase_cost_irr:,.2f} IRR",
+        f"بودجه مورد نیاز: {required_irr:,.2f} IRR",
+        f"بودجه موجود: {available_irr:,.2f} IRR",
+        f"{status_text}: {shortage_abs:,.2f} IRR",
+        "",
+        "خلاصه ارزی:",
+    ]
+
+    for currency in sorted(set(required_by_currency.keys()) | set(available_by_currency.keys())):
+        req = required_by_currency.get(currency, Decimal("0"))
+        avl = available_by_currency.get(currency, Decimal("0"))
+        gap = avl - req
+        lines.extend(
+            [
+                f"• ارز {currency}:",
+                f"  - بودجه مورد نیاز: {req:,.2f} {currency}",
+                f"  - بودجه موجود: {avl:,.2f} {currency}",
+                f"  - کسری/مازاد: {gap:,.2f} {currency}",
+            ]
+        )
+
+    lines.append("")
+    if critical_periods:
+        lines.append("⚠️ دوره‌های بحرانی:")
+        lines.extend([f"• {period}" for period in critical_periods])
+    else:
+        lines.append("✅ دوره بحرانی شناسایی نشد.")
+
+    lines.append("")
+    lines.append("📋 اقدامات پیشنهادی:")
+    for idx, recommendation in enumerate(recommendations, start=1):
+        lines.append(f"{idx}. {recommendation}")
+
+    return "\n".join(lines)
 
 
 async def build_optimization_budget_analysis(
@@ -864,11 +936,25 @@ def _analysis_from_candidates(
         warnings.append("No selected optimization result exists yet.")
 
     if not candidates:
-        narrative = "No selected optimization result exists yet."
+        narrative = "نتیجه‌ای برای تحلیل مالی مدل انتخابی یافت نشد."
     else:
-        narrative = (
-            f"تحلیل مالی مدل انتخابی: هزینه خرید قابل اجرا {required_irr:,.2f} IRR است و "
-            f"بودجه موجود {available_irr:,.2f} IRR می‌باشد."
+        persian_recommendations = [
+            "بررسی افزایش بودجه در دوره‌های بحرانی",
+            "بررسی گزینه‌های جایگزین کم‌هزینه‌تر",
+            "مذاکره شرایط پرداخت با تامین‌کنندگان",
+            "بررسی اثر اجرای مدل در حالت کسری بودجه",
+        ]
+        narrative = _build_selected_result_narrative(
+            optimization_result_id=optimization_result_id,
+            item_count=len(candidates),
+            total_purchase_cost_irr=required_irr,
+            required_irr=required_irr,
+            available_irr=available_irr,
+            surplus_or_shortage=surplus_or_shortage,
+            required_by_currency=required_by_currency,
+            available_by_currency=available_by_currency,
+            critical_periods=critical_periods,
+            recommendations=persian_recommendations,
         )
 
     return OptimizationFinancialAnalysis(

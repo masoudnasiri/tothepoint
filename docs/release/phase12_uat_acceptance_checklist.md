@@ -116,6 +116,19 @@
 - [ ] Selected-result response includes trace/reconciliation details for auditability
 - [ ] `minimum_feasible` scenario remains single-candidate-per-item (no alternative double counting)
 
+## چک‌لیست اختصاصی فاز 12E-4C
+
+- [ ] Persian Optimization UI has no mixed English business labels/messages (except solver names)
+- [ ] Main summary shows canonical `Total Purchase Cost` as business cost
+- [ ] `Weighted Objective Cost` is shown separately with explanatory note (not real purchase cost)
+- [ ] `Required Budget` explanation clarifies payment schedule / FX / rounding differences
+- [ ] Selected items table shows original currency + original totals + exchange rate + IRR equivalent
+- [ ] Sum of table IRR equivalent aligns with selected-result total purchase cost (rounding tolerance)
+- [ ] Reconciliation warning is business-readable; raw diffs only in collapsible technical section
+- [ ] Selected-result narrative starts with `📊 تحلیل مالی مدل انتخابی`
+- [ ] Narrative includes item count, purchase cost, required/available budget, shortage/surplus, currency summary, critical periods, and actions
+- [ ] Budget Analysis selected-result and Optimization selected financial panel remain numerically consistent
+
 ## وضعیت نهایی پذیرش
 
 - [ ] No blocker
