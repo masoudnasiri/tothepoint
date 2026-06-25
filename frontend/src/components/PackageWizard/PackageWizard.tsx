@@ -1,38 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
-  DialogTitle,
   DialogContent,
-  DialogActions,
   Button,
-  Stepper,
-  Step,
-  StepLabel,
   Box,
   Typography,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Paper,
   Alert,
   CircularProgress,
-  Chip,
-  Slider,
-  Grid,
 } from '@mui/material';
 import {
   CheckCircle as CheckCircleIcon,
   Inventory as PackageIcon,
-  ShoppingCart as ShoppingCartIcon,
-  LocalShipping as LocalShippingIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
-import { packagesAPI, suppliersAPI, itemsAPI, procurementAPI } from '../../services/api.ts';
+import { packagesAPI, suppliersAPI, procurementAPI, procurementFinancialsAPI } from '../../services/api.ts';
 import { ProcurementPackage } from '../../types/packages.ts';
+import type {
+  DeliveryDateSource,
+  ForecastDateSource,
+  ProcurementCostComponentType,
+} from '../../types/index.ts';
 import { calculateCoverageSummary, SubItemRequirement } from '../../utils/coverageCalculator.ts';
 import { formatApiError } from '../../utils/errorUtils.ts';
+import {
+  getCostComponentValidationMessage,
+  validateCostComponentsForSave,
+  type ValidatedCostComponentDraft,
+} from './costComponentValidation.ts';
 import { PackageWizardStep1 } from './PackageWizardStep1.tsx';
 import { PackageWizardStep2 } from './PackageWizardStep2.tsx';
 import { PackageWizardStep3 } from './PackageWizardStep3.tsx';
@@ -78,6 +72,33 @@ interface PackageWizardData {
   discount_bundle_threshold?: number;
   discount_bundle_percent?: number;
   is_finalized: boolean;
+  option_id: number | null;
+  payment_method_id: number | null;
+  payment_date: string;
+  planned_supplier_payment_date?: string;
+  supplier_effective_receipt_date?: string;
+  cost_components: CostComponentDraft[];
+  project_requested_delivery_date?: string;
+  supplier_actual_delivery_date?: string;
+  selected_delivery_date?: string;
+  delivery_date_source?: DeliveryDateSource | null;
+  delivery_date_variance_days?: number | null;
+  forecast_customer_invoice_date?: string;
+  forecast_customer_invoice_date_source?: ForecastDateSource | null;
+  forecast_customer_receipt_date?: string;
+  forecast_customer_receipt_date_source?: ForecastDateSource | null;
+  forecast_customer_receipt_delay_days?: number | null;
+  date_calculation_trace?: string[];
+}
+
+interface CostComponentDraft {
+  id?: number;
+  component_type: ProcurementCostComponentType | '';
+  description?: string;
+  amount_value: number | '';
+  amount_currency: string;
+  amount_irr?: number;
+  exchange_rate_date?: string;
 }
 
 const steps = ['Metadata', 'Quantities', 'Pricing & Delivery'];
@@ -120,6 +141,21 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
       discount_percent: 0,
     },
     is_finalized: false,
+    option_id: null,
+    payment_method_id: null,
+    payment_date: new Date().toISOString().split('T')[0],
+    cost_components: [],
+    project_requested_delivery_date: '',
+    supplier_actual_delivery_date: '',
+    selected_delivery_date: '',
+    delivery_date_source: null,
+    delivery_date_variance_days: null,
+    forecast_customer_invoice_date: '',
+    forecast_customer_invoice_date_source: null,
+    forecast_customer_receipt_date: '',
+    forecast_customer_receipt_date_source: null,
+    forecast_customer_receipt_delay_days: null,
+    date_calculation_trace: [],
   });
 
   // Initialize wizard data when opening (for create) or when initialData changes (for edit)
@@ -148,6 +184,27 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
           discount_bundle_threshold: initialData.discount_bundle_threshold,
           discount_bundle_percent: initialData.discount_bundle_percent,
           is_finalized: initialData.is_finalized || false,
+          option_id: initialData.option_id || null,
+          payment_method_id: initialData.payment_method_id || null,
+          payment_date:
+            initialData.planned_supplier_payment_date ||
+            initialData.payment_date ||
+            new Date().toISOString().split('T')[0],
+          cost_components: initialData.cost_components || [],
+          project_requested_delivery_date: initialData.project_requested_delivery_date || '',
+          supplier_actual_delivery_date: initialData.supplier_actual_delivery_date || '',
+          selected_delivery_date: initialData.selected_delivery_date || '',
+          delivery_date_source: initialData.delivery_date_source || null,
+          delivery_date_variance_days: initialData.delivery_date_variance_days ?? null,
+          forecast_customer_invoice_date: initialData.forecast_customer_invoice_date || '',
+          forecast_customer_invoice_date_source:
+            initialData.forecast_customer_invoice_date_source || null,
+          forecast_customer_receipt_date: initialData.forecast_customer_receipt_date || '',
+          forecast_customer_receipt_date_source:
+            initialData.forecast_customer_receipt_date_source || null,
+          forecast_customer_receipt_delay_days:
+            initialData.forecast_customer_receipt_delay_days ?? null,
+          date_calculation_trace: initialData.date_calculation_trace || [],
         });
         setActiveStep(0); // Reset to first step when editing
       } else if (subItemRequirements.length > 0) {
@@ -270,10 +327,101 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
   };
 
   const handleSave = async () => {
-    setLoading(true);
     setError(null);
 
+    const costComponentValidation = validateCostComponentsForSave(wizardData.cost_components || []);
+    if (!costComponentValidation.valid) {
+      const invalidRows = costComponentValidation.invalidIndexes.map((index) => index + 1);
+      const firstIssue = costComponentValidation.issues[0];
+      const firstIssueMessage = firstIssue
+        ? getCostComponentValidationMessage(firstIssue.code, t)
+        : '';
+
+      setError(
+        t('procurement.costComponentValidation.invalidRows', {
+          rows: invalidRows.join(', '),
+          message: firstIssueMessage,
+        })
+      );
+      return;
+    }
+
+    const basePriceComponents = costComponentValidation.validComponents.filter(
+      (component) => component.component_type === 'BASE_PRICE'
+    );
+    if (basePriceComponents.length === 0) {
+      setError(t('procurement.basePriceRequired'));
+      return;
+    }
+    if (basePriceComponents.length > 1) {
+      setError(t('procurement.singleBasePriceOnly'));
+      return;
+    }
+
+    const shippingComponents = costComponentValidation.validComponents.filter(
+      (component) => component.component_type === 'SHIPPING'
+    );
+    if (shippingComponents.length > 1) {
+      setError(t('procurement.singleShippingOnly'));
+      return;
+    }
+
+    const derivedBaseCost = Number(basePriceComponents[0].amount_value);
+    const derivedShippingCost = shippingComponents[0]
+      ? Number(shippingComponents[0].amount_value)
+      : 0;
+
+    setLoading(true);
+
     try {
+      const syncCostComponents = async (
+        optionId: number,
+        nextComponents: ValidatedCostComponentDraft[]
+      ) => {
+        const response = await procurementFinancialsAPI.listCostComponents(optionId, false);
+        const existingComponents = response.data || [];
+        const nextIds = new Set(
+          nextComponents
+            .map((component) => component.id)
+            .filter((id): id is number => typeof id === 'number')
+        );
+
+        const toDeactivate = existingComponents.filter(
+          (component) => component.is_active && !nextIds.has(component.id)
+        );
+
+        for (const component of toDeactivate) {
+          await procurementFinancialsAPI.deactivateCostComponent(component.id);
+        }
+
+        const orderedComponents = [...nextComponents].sort((left, right) => {
+          const rank = (type: string) =>
+            type === 'BASE_PRICE' ? 0 : type === 'SHIPPING' ? 1 : 2;
+          return rank(left.component_type) - rank(right.component_type);
+        });
+
+        for (const component of orderedComponents) {
+          const payload = {
+            component_type: component.component_type,
+            description: component.description?.trim() || undefined,
+            amount_value: Number(component.amount_value),
+            amount_currency: (component.amount_currency || '').trim().toUpperCase(),
+            amount_irr:
+              component.amount_irr !== undefined && component.amount_irr !== null
+                ? Number(component.amount_irr)
+                : undefined,
+            exchange_rate_date: component.exchange_rate_date || undefined,
+            is_active: true,
+          };
+
+          if (component.id) {
+            await procurementFinancialsAPI.updateCostComponent(component.id, payload);
+          } else {
+            await procurementFinancialsAPI.createCostComponent(optionId, payload);
+          }
+        }
+      };
+
       // Determine package type based on coverage
       let finalPackageType: 'FULL' | 'PARTIAL' | 'CUSTOM' = 'CUSTOM';
       if (coverageSummary?.is_fully_covered) {
@@ -323,7 +471,9 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
       // Create or update procurement option linked to package.
       // A package can still exist without an option, but finalized state for optimization
       // is stored on procurement options, so we persist is_finalized whenever possible.
-      if (wizardData.base_cost > 0 && wizardData.currency_id) {
+      let persistedOptionId: number | null = wizardData.option_id || null;
+      let costComponentPersistenceError: any = null;
+      if (derivedBaseCost > 0 && wizardData.currency_id) {
         try {
           const existingOptionsResponse = await procurementAPI.listByProjectItem(projectItemId);
           const existingOption = (existingOptionsResponse.data || []).find(
@@ -336,28 +486,66 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
             item_code: itemCode, // Use item code from props
             supplier_id: wizardData.supplier_id,
             supplier_name: supplierName, // Required legacy field
-            base_cost: wizardData.base_cost,
+            base_cost: derivedBaseCost,
             currency_id: wizardData.currency_id,
-            shipping_cost: wizardData.shipping_cost || 0,
+            shipping_cost: derivedShippingCost,
             delivery_option_id: wizardData.delivery_option_id,
             lomc_lead_time: wizardData.lomc_lead_time || 0,
             purchase_date: wizardData.purchase_date,
             expected_delivery_date: wizardData.expected_delivery_date,
             payment_terms: wizardData.payment_terms,
+            payment_method_id: wizardData.payment_method_id || undefined,
+            planned_supplier_payment_date: wizardData.payment_date || undefined,
             discount_bundle_threshold: wizardData.discount_bundle_threshold,
             discount_bundle_percent: wizardData.discount_bundle_percent,
             is_finalized: wizardData.is_finalized || false,
+            project_requested_delivery_date:
+              wizardData.project_requested_delivery_date || undefined,
+            supplier_actual_delivery_date:
+              wizardData.supplier_actual_delivery_date || undefined,
+            selected_delivery_date: wizardData.selected_delivery_date || undefined,
+            delivery_date_source: wizardData.delivery_date_source || undefined,
+            delivery_date_variance_days:
+              wizardData.delivery_date_variance_days !== null &&
+              wizardData.delivery_date_variance_days !== undefined
+                ? Number(wizardData.delivery_date_variance_days)
+                : undefined,
+            forecast_customer_invoice_date:
+              wizardData.forecast_customer_invoice_date || undefined,
+            forecast_customer_invoice_date_source:
+              wizardData.forecast_customer_invoice_date_source || undefined,
+            forecast_customer_receipt_date:
+              wizardData.forecast_customer_receipt_date || undefined,
+            forecast_customer_receipt_date_source:
+              wizardData.forecast_customer_receipt_date_source || undefined,
+            forecast_customer_receipt_delay_days:
+              wizardData.forecast_customer_receipt_delay_days !== null &&
+              wizardData.forecast_customer_receipt_delay_days !== undefined
+                ? Number(wizardData.forecast_customer_receipt_delay_days)
+                : undefined,
+            date_calculation_trace:
+              wizardData.date_calculation_trace && wizardData.date_calculation_trace.length > 0
+                ? wizardData.date_calculation_trace
+                : undefined,
           };
 
           if (existingOption?.id) {
             await procurementAPI.update(existingOption.id, optionPayload);
+            persistedOptionId = existingOption.id;
           } else {
-            await procurementAPI.create(optionPayload);
+            const createdOptionResponse = await procurementAPI.create(optionPayload);
+            persistedOptionId = createdOptionResponse?.data?.id || null;
           }
         } catch (optionErr: any) {
-          // Log error but don't fail package creation - package can exist without procurement option
-          console.warn('Failed to create procurement option for package:', optionErr);
-          // Optionally show a warning but don't block success
+          throw optionErr;
+        }
+      }
+
+      if (persistedOptionId) {
+        try {
+          await syncCostComponents(persistedOptionId, costComponentValidation.validComponents);
+        } catch (costComponentErr: any) {
+          costComponentPersistenceError = costComponentErr;
         }
       }
 
@@ -406,6 +594,21 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
         await Promise.all(subitemPayloads.map(payload => packagesAPI.createSubItem(payload)));
       }
 
+      if (costComponentPersistenceError) {
+        if (persistedOptionId && persistedOptionId !== wizardData.option_id) {
+          setWizardData((prev) => ({ ...prev, option_id: persistedOptionId }));
+        }
+
+        const componentSaveError = formatApiError(
+          costComponentPersistenceError,
+          t('procurement.costComponentSaveFailed')
+        );
+        setError(
+          `${t('procurement.costComponentPartialSaveWarning')} ${componentSaveError}`.trim()
+        );
+        return;
+      }
+
       onClose();
       // Reset wizard
       setActiveStep(0);
@@ -428,6 +631,21 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
           discount_percent: 0,
         },
         is_finalized: false,
+        option_id: null,
+        payment_method_id: null,
+        payment_date: new Date().toISOString().split('T')[0],
+        cost_components: [],
+        project_requested_delivery_date: '',
+        supplier_actual_delivery_date: '',
+        selected_delivery_date: '',
+        delivery_date_source: null,
+        delivery_date_variance_days: null,
+        forecast_customer_invoice_date: '',
+        forecast_customer_invoice_date_source: null,
+        forecast_customer_receipt_date: '',
+        forecast_customer_receipt_date_source: null,
+        forecast_customer_receipt_delay_days: null,
+        date_calculation_trace: [],
       });
 
       if (onPackageCreated) {

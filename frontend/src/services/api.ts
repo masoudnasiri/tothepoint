@@ -1,5 +1,18 @@
 import axios from 'axios';
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import type {
+  DeliveryFinancialPreview,
+  DeliveryFinancialPreviewRequest,
+  LandedCostPreview,
+  PaymentMethod,
+  PaymentMethodCreate,
+  PaymentMethodUpdate,
+  ProcurementCostComponent,
+  ProcurementCostComponentCreate,
+  ProcurementCostComponentUpdate,
+  ProcurementOptionReadinessSummary,
+  ProjectItemProcurementEligibility,
+} from '../types/index.ts';
 // Minimal shim to satisfy type checking in environments without @types/node
 declare const process: any;
 
@@ -126,6 +139,10 @@ export const itemsAPI = {
     api.get('/items/finalized', { params }),
   listProjectItemSubItems: (projectItemId: number) =>
     api.get(`/items/${projectItemId}/subitems`),
+  getProcurementEligibility: (projectItemId: number) =>
+    api.get<ProjectItemProcurementEligibility>(
+      `/items/${projectItemId}/procurement-eligibility`
+    ),
 };
 
 // Project Phases API
@@ -238,6 +255,53 @@ export const procurementAPI = {
   create: (option: any) => api.post('/procurement/options', option),
   update: (id: number, option: any) => api.put(`/procurement/option/${id}`, option),
   delete: (id: number) => api.delete(`/procurement/option/${id}`),
+};
+
+// Procurement Financials API (Payment Methods + Cost Components)
+export const procurementFinancialsAPI = {
+  listPaymentMethods: (activeOnly: boolean = true) =>
+    api.get<PaymentMethod[]>('/payment-methods', { params: { active_only: activeOnly } }),
+  getPaymentMethod: (paymentMethodId: number) =>
+    api.get<PaymentMethod>(`/payment-methods/${paymentMethodId}`),
+  createPaymentMethod: (payload: PaymentMethodCreate) =>
+    api.post<PaymentMethod>('/payment-methods', payload),
+  updatePaymentMethod: (paymentMethodId: number, payload: PaymentMethodUpdate) =>
+    api.put<PaymentMethod>(`/payment-methods/${paymentMethodId}`, payload),
+  deactivatePaymentMethod: (paymentMethodId: number) =>
+    api.delete(`/payment-methods/${paymentMethodId}`),
+  deletePaymentMethod: (paymentMethodId: number) =>
+    api.delete(`/payment-methods/${paymentMethodId}`),
+
+  listCostComponents: (optionId: number, activeOnly: boolean = true) =>
+    api.get<ProcurementCostComponent[]>(
+      `/procurement-options/${optionId}/cost-components`,
+      { params: { active_only: activeOnly } }
+    ),
+  createCostComponent: (optionId: number, payload: ProcurementCostComponentCreate) =>
+    api.post<ProcurementCostComponent>(
+      `/procurement-options/${optionId}/cost-components`,
+      payload
+    ),
+  updateCostComponent: (componentId: number, payload: ProcurementCostComponentUpdate) =>
+    api.put<ProcurementCostComponent>(`/procurement-cost-components/${componentId}`, payload),
+  deactivateCostComponent: (componentId: number) =>
+    api.delete(`/procurement-cost-components/${componentId}`),
+  deleteCostComponent: (componentId: number) =>
+    api.delete(`/procurement-cost-components/${componentId}`),
+  getLandedCostPreview: (optionId: number) =>
+    api.get<LandedCostPreview>(`/procurement-options/${optionId}/landed-cost-preview`),
+  getDeliveryFinancialPreview: (
+    optionId: number,
+    payload: DeliveryFinancialPreviewRequest
+  ) =>
+    api.post<DeliveryFinancialPreview>(
+      `/procurement-options/${optionId}/delivery-financial-preview`,
+      payload
+    ),
+  getReadiness: (optionId: number) =>
+    api.get<ProcurementOptionReadinessSummary>(
+      `/procurement-options/${optionId}/readiness`
+    ),
 };
 
 // Finance API
@@ -679,7 +743,7 @@ export const auditLogsAPI = {
     action?: string;
     entity_type?: string;
     entity_id?: number;
-  } = {}) => axios.get('/audit-logs/', { params }),
+  } = {}) => api.get('/audit-logs/', { params }),
 };
 
 export default api;

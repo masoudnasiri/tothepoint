@@ -196,6 +196,37 @@ export type ProjectItemStatus =
   | 'PAID'
   | 'CASH_RECEIVED';
 
+export interface ProcurementEligibilityIssue {
+  code: string;
+  message: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ProcurementEligibilityDeliveryOptionInspection {
+  delivery_option_id?: number | null;
+  source: string;
+  delivery_date?: string | null;
+  has_delivery_date: boolean;
+  delivery_price_amount?: number | null;
+  has_delivery_price: boolean;
+  is_positive_delivery_price: boolean;
+  delivery_price_currency?: string | null;
+  has_delivery_currency: boolean;
+  is_valid: boolean;
+}
+
+export interface ProjectItemProcurementEligibility {
+  project_item_id: number;
+  is_eligible: boolean;
+  blockers: ProcurementEligibilityIssue[];
+  warnings: ProcurementEligibilityIssue[];
+  messages: string[];
+  delivery_option_count: number;
+  valid_delivery_option_count: number;
+  has_delivery_schedule_dates: boolean;
+  inspected_delivery_options: ProcurementEligibilityDeliveryOptionInspection[];
+}
+
 export interface ProjectItem {
   id: number;
   project_id: number;
@@ -222,6 +253,7 @@ export interface ProjectItem {
   // Procurement workflow fields (computed from backend)
   procurement_options_count?: number;
   has_finalized_decision?: boolean;
+  procurement_eligibility?: ProjectItemProcurementEligibility;
   // Sub-items breakdown returned from backend
   sub_items?: Array<{ sub_item_id: number; name?: string; part_number?: string; quantity: number }>;
 }
@@ -270,6 +302,9 @@ export interface PaymentTermsInstallments {
 
 export type PaymentTerms = PaymentTermsCash | PaymentTermsInstallments;
 
+export type DeliveryDateSource = 'PROJECT_OPTION' | 'SUPPLIER_ACTUAL' | 'MANUAL';
+export type ForecastDateSource = 'SYSTEM_DEFAULT' | 'MANUAL_OVERRIDE';
+
 export interface ProcurementOption {
   id: number;
   item_code: string;
@@ -283,6 +318,9 @@ export interface ProcurementOption {
   discount_bundle_threshold: number | null;
   discount_bundle_percent: number | null;
   payment_terms: PaymentTerms;
+  payment_method_id?: number | null;
+  planned_supplier_payment_date?: string | null;
+  supplier_effective_receipt_date?: string | null;
   created_at: string;
   updated_at: string | null;
   is_active: boolean;
@@ -291,6 +329,17 @@ export interface ProcurementOption {
   package_id?: number | null;
   package_name?: string | null;
   package_type?: string | null; // 'FULL' | 'PARTIAL' | 'CUSTOM'
+  project_requested_delivery_date?: string | null;
+  supplier_actual_delivery_date?: string | null;
+  selected_delivery_date?: string | null;
+  delivery_date_source?: DeliveryDateSource | null;
+  delivery_date_variance_days?: number | null;
+  forecast_customer_invoice_date?: string | null;
+  forecast_customer_invoice_date_source?: ForecastDateSource | null;
+  forecast_customer_receipt_date?: string | null;
+  forecast_customer_receipt_date_source?: ForecastDateSource | null;
+  forecast_customer_receipt_delay_days?: number | null;
+  date_calculation_trace?: string[] | null;
 }
 
 export interface ProcurementOptionCreate {
@@ -302,10 +351,24 @@ export interface ProcurementOptionCreate {
   discount_bundle_threshold?: number;
   discount_bundle_percent?: number;
   payment_terms: PaymentTerms;
+  payment_method_id?: number;
+  planned_supplier_payment_date?: string;
+  supplier_effective_receipt_date?: string;
   is_finalized?: boolean;
   // Phase 3: Package support
   package_id?: number | null;
   project_item_id?: number | null;
+  project_requested_delivery_date?: string;
+  supplier_actual_delivery_date?: string;
+  selected_delivery_date?: string;
+  delivery_date_source?: DeliveryDateSource;
+  delivery_date_variance_days?: number;
+  forecast_customer_invoice_date?: string;
+  forecast_customer_invoice_date_source?: ForecastDateSource;
+  forecast_customer_receipt_date?: string;
+  forecast_customer_receipt_date_source?: ForecastDateSource;
+  forecast_customer_receipt_delay_days?: number;
+  date_calculation_trace?: string[];
 }
 
 export interface ProcurementOptionUpdate {
@@ -316,8 +379,164 @@ export interface ProcurementOptionUpdate {
   discount_bundle_threshold?: number;
   discount_bundle_percent?: number;
   payment_terms?: PaymentTerms;
+  payment_method_id?: number;
+  planned_supplier_payment_date?: string;
+  supplier_effective_receipt_date?: string;
   is_active?: boolean;
   is_finalized?: boolean;
+  project_requested_delivery_date?: string;
+  supplier_actual_delivery_date?: string;
+  selected_delivery_date?: string;
+  delivery_date_source?: DeliveryDateSource;
+  delivery_date_variance_days?: number;
+  forecast_customer_invoice_date?: string;
+  forecast_customer_invoice_date_source?: ForecastDateSource;
+  forecast_customer_receipt_date?: string;
+  forecast_customer_receipt_date_source?: ForecastDateSource;
+  forecast_customer_receipt_delay_days?: number;
+  date_calculation_trace?: string[];
+}
+
+export interface PaymentMethod {
+  id: number;
+  code: string;
+  name_en: string;
+  name_fa: string;
+  description?: string | null;
+  settlement_delay_days: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface PaymentMethodCreate {
+  code: string;
+  name_en: string;
+  name_fa: string;
+  description?: string;
+  settlement_delay_days: number;
+  is_active?: boolean;
+}
+
+export interface PaymentMethodUpdate {
+  code?: string;
+  name_en?: string;
+  name_fa?: string;
+  description?: string;
+  settlement_delay_days?: number;
+  is_active?: boolean;
+}
+
+export type ProcurementCostComponentType =
+  | 'BASE_PRICE'
+  | 'SHIPPING'
+  | 'VAT'
+  | 'CUSTOMS'
+  | 'CLEARANCE'
+  | 'INSURANCE'
+  | 'BANK_FEE'
+  | 'OTHER';
+
+export interface ProcurementCostComponent {
+  id: number;
+  procurement_option_id: number;
+  component_type: ProcurementCostComponentType;
+  description?: string | null;
+  amount_value: number;
+  amount_currency: string;
+  amount_irr?: number | null;
+  exchange_rate_date?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface ProcurementCostComponentCreate {
+  component_type: ProcurementCostComponentType;
+  description?: string;
+  amount_value: number;
+  amount_currency: string;
+  amount_irr?: number;
+  exchange_rate_date?: string;
+  is_active?: boolean;
+}
+
+export interface ProcurementCostComponentUpdate {
+  component_type?: ProcurementCostComponentType;
+  description?: string;
+  amount_value?: number;
+  amount_currency?: string;
+  amount_irr?: number;
+  exchange_rate_date?: string;
+  is_active?: boolean;
+}
+
+export interface LandedCostBaseAmount {
+  amount_value: number;
+  amount_currency: string;
+  source: string;
+}
+
+export interface LandedCostComponentLine {
+  component_id?: number | null;
+  component_type: string;
+  amount_value: number;
+  amount_currency: string;
+  amount_irr?: number | null;
+  source: string;
+  description?: string | null;
+}
+
+export interface MissingExchangeRate {
+  component_type: string;
+  currency: string;
+  rate_date: string;
+  reason: string;
+}
+
+export interface LandedCostPreview {
+  option_id: number;
+  base_amount: LandedCostBaseAmount;
+  component_lines: LandedCostComponentLine[];
+  totals_by_currency: Record<string, number>;
+  total_irr?: number | null;
+  missing_exchange_rates: MissingExchangeRate[];
+  trace_lines: string[];
+}
+
+export interface DeliveryFinancialPreviewRequest {
+  delivery_date_source?: DeliveryDateSource;
+  supplier_actual_delivery_date?: string;
+  selected_delivery_date?: string;
+  manual_invoice_date?: string;
+  manual_receipt_date?: string;
+}
+
+export interface DeliveryFinancialPreview {
+  project_requested_delivery_date?: string | null;
+  supplier_actual_delivery_date?: string | null;
+  selected_delivery_date?: string | null;
+  delivery_date_source?: DeliveryDateSource | null;
+  delivery_date_variance_days?: number | null;
+  forecast_customer_invoice_date?: string | null;
+  forecast_customer_invoice_date_source?: ForecastDateSource | null;
+  forecast_customer_receipt_date?: string | null;
+  forecast_customer_receipt_date_source?: ForecastDateSource | null;
+  forecast_customer_receipt_delay_days?: number | null;
+  missing_inputs: string[];
+  trace_lines: string[];
+}
+
+export interface ProcurementOptionReadinessSummary {
+  option_id: number;
+  is_ready_for_candidate_builder: boolean;
+  missing_required_fields: string[];
+  warnings: string[];
+  cost_summary: Record<string, any>;
+  delivery_summary: Record<string, any>;
+  payment_summary: Record<string, any>;
+  derived_customer_schedule_summary: Record<string, any>;
+  trace_lines: string[];
 }
 
 export interface BudgetData {

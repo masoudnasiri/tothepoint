@@ -27,6 +27,7 @@ import {
   Grid,
   InputAdornment,
 } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { formatApiError } from '../utils/errorUtils.ts';
 import {
   Add as AddIcon,
@@ -60,6 +61,7 @@ import { RivarPanel } from '../components/ui/RivarPanel.tsx';
 import { RivarToolbar } from '../components/ui/RivarToolbar.tsx';
 import { RivarEmptyState } from '../components/ui/RivarEmptyState.tsx';
 import { RivarStatusPill } from '../components/ui/RivarStatusPill.tsx';
+import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 import { rivarTokens } from '../theme/rivarTheme.ts';
 
 interface DeliveryOption {
@@ -228,6 +230,19 @@ export const ProcurementPage: React.FC = () => {
   const [bulkRollbackPreview, setBulkRollbackPreview] = useState<BulkRollbackPreviewResponse | null>(null);
   const [bulkRollbackSelectedIds, setBulkRollbackSelectedIds] = useState<number[]>([]);
 
+  const hasAnyRollbackChecklistFilterSelected = useMemo(() => (
+    bulkRollbackFilters.include_full_package_items ||
+    bulkRollbackFilters.include_partial_package_items ||
+    bulkRollbackFilters.include_complete_coverage_items ||
+    bulkRollbackFilters.include_incomplete_coverage_items ||
+    bulkRollbackFilters.include_over_covered_items ||
+    bulkRollbackFilters.include_domestic_suppliers ||
+    bulkRollbackFilters.include_foreign_suppliers ||
+    bulkRollbackFilters.include_single_supplier_items ||
+    bulkRollbackFilters.include_multiple_supplier_items ||
+    bulkRollbackFilters.include_warning_incomplete_submissions
+  ), [bulkRollbackFilters]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -369,6 +384,13 @@ export const ProcurementPage: React.FC = () => {
   };
 
   const runBulkRollbackPreview = async () => {
+    if (!hasAnyRollbackChecklistFilterSelected) {
+      setError(
+        t('procurement.rollbackSelectAtLeastOneFilter') ||
+        'Select at least one rollback filter before preview.'
+      );
+      return;
+    }
     try {
       setBulkRollbackLoading(true);
       const response = await packagesAPI.previewBulkRollback(buildBulkRollbackPayload());
@@ -385,6 +407,13 @@ export const ProcurementPage: React.FC = () => {
   };
 
   const executeBulkRollback = async () => {
+    if (!hasAnyRollbackChecklistFilterSelected) {
+      setError(
+        t('procurement.rollbackSelectAtLeastOneFilter') ||
+        'Select at least one rollback filter before confirmation.'
+      );
+      return;
+    }
     if (bulkRollbackSelectedIds.length === 0) {
       setError(t('procurement.noRollbackSelection') || 'Select at least one rollbackable item.');
       return;
@@ -430,6 +459,50 @@ export const ProcurementPage: React.FC = () => {
         ? prev.filter((id) => id !== projectItemId)
         : [...prev, projectItemId]
     ));
+  };
+
+  const selectAllRollbackChecklistFilters = () => {
+    setBulkRollbackFilters((prev) => ({
+      ...prev,
+      include_full_package_items: true,
+      include_partial_package_items: true,
+      include_complete_coverage_items: true,
+      include_incomplete_coverage_items: true,
+      include_over_covered_items: true,
+      include_domestic_suppliers: true,
+      include_foreign_suppliers: true,
+      include_single_supplier_items: true,
+      include_multiple_supplier_items: true,
+      include_warning_incomplete_submissions: true,
+    }));
+  };
+
+  const deselectAllRollbackChecklistFilters = () => {
+    setBulkRollbackFilters((prev) => ({
+      ...prev,
+      include_full_package_items: false,
+      include_partial_package_items: false,
+      include_complete_coverage_items: false,
+      include_incomplete_coverage_items: false,
+      include_over_covered_items: false,
+      include_domestic_suppliers: false,
+      include_foreign_suppliers: false,
+      include_single_supplier_items: false,
+      include_multiple_supplier_items: false,
+      include_warning_incomplete_submissions: false,
+    }));
+    setBulkRollbackPreview(null);
+    setBulkRollbackSelectedIds([]);
+  };
+
+  const selectAllRollbackableItems = () => {
+    setBulkRollbackSelectedIds(
+      (bulkRollbackPreview?.rollbackable_items || []).map((item) => Number(item.project_item_id))
+    );
+  };
+
+  const deselectAllRollbackableItems = () => {
+    setBulkRollbackSelectedIds([]);
   };
 
   const calculateSummaryStats = async (items?: ItemWithDetails[]) => {
@@ -552,6 +625,29 @@ export const ProcurementPage: React.FC = () => {
         payment_terms: packageOption?.payment_terms || { type: 'cash', discount_percent: 0 },
         discount_bundle_threshold: packageOption?.discount_bundle_threshold,
         discount_bundle_percent: packageOption?.discount_bundle_percent,
+        option_id: packageOption?.id || null,
+        payment_method_id: packageOption?.payment_method_id || null,
+        payment_date:
+          packageOption?.planned_supplier_payment_date ||
+          packageOption?.purchase_date ||
+          new Date().toISOString().split('T')[0],
+        planned_supplier_payment_date: packageOption?.planned_supplier_payment_date || '',
+        supplier_effective_receipt_date: packageOption?.supplier_effective_receipt_date || '',
+        cost_components: [],
+        project_requested_delivery_date: packageOption?.project_requested_delivery_date || '',
+        supplier_actual_delivery_date: packageOption?.supplier_actual_delivery_date || '',
+        selected_delivery_date: packageOption?.selected_delivery_date || '',
+        delivery_date_source: packageOption?.delivery_date_source || null,
+        delivery_date_variance_days: packageOption?.delivery_date_variance_days ?? null,
+        forecast_customer_invoice_date: packageOption?.forecast_customer_invoice_date || '',
+        forecast_customer_invoice_date_source:
+          packageOption?.forecast_customer_invoice_date_source || null,
+        forecast_customer_receipt_date: packageOption?.forecast_customer_receipt_date || '',
+        forecast_customer_receipt_date_source:
+          packageOption?.forecast_customer_receipt_date_source || null,
+        forecast_customer_receipt_delay_days:
+          packageOption?.forecast_customer_receipt_delay_days ?? null,
+        date_calculation_trace: packageOption?.date_calculation_trace || [],
       });
       setEditingPackageId(packageId);
       setPackageWizardOpen(true);
@@ -963,6 +1059,15 @@ export const ProcurementPage: React.FC = () => {
             {t('procurement.bulkRollbackHint') || 'Preview safe rollbackable sent items, then confirm to unlock package editing.'}
           </Typography>
 
+          <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+            <Button size="small" variant="outlined" onClick={selectAllRollbackChecklistFilters}>
+              {t('procurement.selectAllFilters') || 'Select all filters'}
+            </Button>
+            <Button size="small" variant="outlined" color="inherit" onClick={deselectAllRollbackChecklistFilters}>
+              {t('procurement.deselectAllFilters') || 'Deselect all filters'}
+            </Button>
+          </Box>
+
           <FormGroup row sx={{ mb: 1 }}>
             <FormControlLabel
               control={
@@ -1106,33 +1211,49 @@ export const ProcurementPage: React.FC = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                label={t('procurement.fromDate') || 'From Date'}
-                type="date"
-                value={bulkRollbackFilters.date_from || ''}
-                onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, date_from: e.target.value || undefined }))}
-                size="small"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-              />
+              <LocalizedDateProvider>
+                <DatePicker
+                  label={t('procurement.fromDate') || 'From Date'}
+                  value={bulkRollbackFilters.date_from ? new Date(`${bulkRollbackFilters.date_from}T00:00:00`) : null}
+                  onChange={(newValue) => {
+                    if (newValue && !Number.isNaN(newValue.getTime())) {
+                      setBulkRollbackFilters((prev) => ({
+                        ...prev,
+                        date_from: gregorianFormat(newValue, 'yyyy-MM-dd'),
+                      }));
+                    } else {
+                      setBulkRollbackFilters((prev) => ({ ...prev, date_from: undefined }));
+                    }
+                  }}
+                  slotProps={{ textField: { size: 'small', fullWidth: true } }}
+                />
+              </LocalizedDateProvider>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                label={t('procurement.toDate') || 'To Date'}
-                type="date"
-                value={bulkRollbackFilters.date_to || ''}
-                onChange={(e) => setBulkRollbackFilters((prev) => ({ ...prev, date_to: e.target.value || undefined }))}
-                size="small"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-              />
+              <LocalizedDateProvider>
+                <DatePicker
+                  label={t('procurement.toDate') || 'To Date'}
+                  value={bulkRollbackFilters.date_to ? new Date(`${bulkRollbackFilters.date_to}T00:00:00`) : null}
+                  onChange={(newValue) => {
+                    if (newValue && !Number.isNaN(newValue.getTime())) {
+                      setBulkRollbackFilters((prev) => ({
+                        ...prev,
+                        date_to: gregorianFormat(newValue, 'yyyy-MM-dd'),
+                      }));
+                    } else {
+                      setBulkRollbackFilters((prev) => ({ ...prev, date_to: undefined }));
+                    }
+                  }}
+                  slotProps={{ textField: { size: 'small', fullWidth: true } }}
+                />
+              </LocalizedDateProvider>
             </Grid>
           </Grid>
 
           <Button
             variant="outlined"
             onClick={runBulkRollbackPreview}
-            disabled={bulkRollbackLoading}
+            disabled={bulkRollbackLoading || !hasAnyRollbackChecklistFilterSelected}
             sx={{ mb: 2 }}
           >
             {bulkRollbackLoading
@@ -1157,6 +1278,14 @@ export const ProcurementPage: React.FC = () => {
               <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
                 {t('procurement.rollbackableSelection') || 'Rollbackable item selection'}
               </Typography>
+              <Box sx={{ display: 'flex', gap: 1, mb: 0.75 }}>
+                <Button size="small" variant="outlined" onClick={selectAllRollbackableItems}>
+                  {t('procurement.selectAllItems') || 'Select all'}
+                </Button>
+                <Button size="small" variant="outlined" color="inherit" onClick={deselectAllRollbackableItems}>
+                  {t('procurement.deselectAllItems') || 'Deselect all'}
+                </Button>
+              </Box>
               <Box sx={{ maxHeight: 180, overflowY: 'auto', border: `1px solid ${rivarTokens.line}`, borderRadius: rivarTokens.radiusSm, p: 1 }}>
                 {(bulkRollbackPreview.rollbackable_items || []).map((item) => (
                   <FormControlLabel
@@ -1207,7 +1336,11 @@ export const ProcurementPage: React.FC = () => {
             variant="contained"
             color="warning"
             onClick={executeBulkRollback}
-            disabled={bulkRollbackExecuting || bulkRollbackSelectedIds.length === 0}
+            disabled={
+              bulkRollbackExecuting ||
+              bulkRollbackSelectedIds.length === 0 ||
+              !hasAnyRollbackChecklistFilterSelected
+            }
           >
             {bulkRollbackExecuting
               ? (t('procurement.rollbackExecuting') || 'Rolling back...')

@@ -1,28 +1,44 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Box,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Typography,
-  Paper,
-  Grid,
-  Checkbox,
-  FormControlLabel,
   Button,
+  Chip,
+  FormControl,
+  FormControlLabel,
+  Grid,
   IconButton,
+  InputLabel,
+  MenuItem,
+  Paper,
+  Select,
+  TextField,
+  Typography,
+  Checkbox,
 } from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
+import { Add as AddIcon, Delete as DeleteIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
+import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { LocalizedDateProvider } from '../LocalizedDateProvider.tsx';
-import { CurrencySelector } from '../CurrencySelector.tsx';
-import { deliveryOptionsAPI } from '../../services/api.ts';
+import { currencyAPI, deliveryOptionsAPI, procurementFinancialsAPI } from '../../services/api.ts';
+import type {
+  Currency,
+  DeliveryDateSource,
+  PaymentMethod,
+  ProcurementCostComponentType,
+} from '../../types/index.ts';
+import { formatApiError } from '../../utils/errorUtils.ts';
+import {
+  ALLOWED_COST_COMPONENT_TYPES,
+  getCostComponentValidationMessage,
+  validateCostComponentDraft,
+} from './costComponentValidation.ts';
 
 interface PackageWizardStep3Props {
   data: {
+    option_id: number | null;
     base_cost: number;
     currency_id: number | null;
     shipping_cost: number;
@@ -38,449 +54,832 @@ interface PackageWizardStep3Props {
     discount_bundle_threshold?: number;
     discount_bundle_percent?: number;
     is_finalized: boolean;
-    main_item_quantity: number; // Add this to know if it's sub-item only
+    main_item_quantity: number;
+    payment_method_id: number | null;
+    payment_date: string;
+    description?: string;
+    cost_components: CostComponentDraft[];
+    project_requested_delivery_date?: string;
+    supplier_actual_delivery_date?: string;
+    selected_delivery_date?: string;
+    delivery_date_source?: DeliveryDateSource | null;
+    delivery_date_variance_days?: number | null;
+    forecast_customer_invoice_date?: string;
+    forecast_customer_invoice_date_source?: 'SYSTEM_DEFAULT' | 'MANUAL_OVERRIDE' | null;
+    forecast_customer_receipt_date?: string;
+    forecast_customer_receipt_date_source?: 'SYSTEM_DEFAULT' | 'MANUAL_OVERRIDE' | null;
+    forecast_customer_receipt_delay_days?: number | null;
+    date_calculation_trace?: string[];
   };
   projectItemId: number;
   onChange: (updates: Partial<PackageWizardStep3Props['data']>) => void;
 }
 
+interface CostComponentDraft {
+  id?: number;
+  component_type: ProcurementCostComponentType | '';
+  description?: string;
+  amount_value: number | '';
+  amount_currency: string;
+  amount_irr?: number;
+  exchange_rate_date?: string;
+}
+
 interface DeliveryOption {
   id: number;
   delivery_date: string;
-  delivery_slot: number | null;
-  invoice_amount_per_unit: number;
 }
+
+export const calculateSupplierEffectiveReceiptDate = (
+  paymentDate: string,
+  settlementDelayDays: number
+): string | null => {
+  if (!paymentDate) return null;
+  const parsedDate = new Date(`${paymentDate}T00:00:00`);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+  const result = new Date(parsedDate);
+  result.setDate(result.getDate() + Math.max(0, settlementDelayDays || 0));
+  return gregorianFormat(result, 'yyyy-MM-dd');
+};
+
+const toDatePickerValue = (value?: string): Date | null => {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const toIsoDate = (value: Date | null): string => {
+  if (!value || Number.isNaN(value.getTime())) return '';
+  return gregorianFormat(value, 'yyyy-MM-dd');
+};
+
+const diffDays = (fromDate?: string, toDate?: string): number | null => {
+  if (!fromDate || !toDate) return null;
+  try {
+    const from = new Date(`${fromDate}T00:00:00`);
+    const to = new Date(`${toDate}T00:00:00`);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+    return Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
+  } catch {
+    return null;
+  }
+};
 
 export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
   data,
   projectItemId,
   onChange,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [deliveryOptions, setDeliveryOptions] = useState<DeliveryOption[]>([]);
-  const [loadingDeliveryOptions, setLoadingDeliveryOptions] = useState(false);
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [loadedCostComponentsOptionId, setLoadedCostComponentsOptionId] = useState<number | null>(null);
+  const [loadingFinancialData, setLoadingFinancialData] = useState(false);
+  const [financialDataError, setFinancialDataError] = useState('');
+  const [landedCostPreview, setLandedCostPreview] = useState<any>(null);
+  const [loadingLandedCostPreview, setLoadingLandedCostPreview] = useState(false);
+  const [landedCostPreviewError, setLandedCostPreviewError] = useState('');
+  const [deliveryFinancialPreviewError, setDeliveryFinancialPreviewError] = useState('');
+
+  const isFa = i18n.language?.startsWith('fa');
+  const formatDisplayDate = useMemo(
+    () => (dateString: string | null) => {
+      if (!dateString) return '-';
+      try {
+        const parsedDate = isFa ? jalaliParseISO(dateString) : gregorianParseISO(dateString);
+        return isFa
+          ? jalaliFormat(parsedDate, 'yyyy/MM/dd')
+          : gregorianFormat(parsedDate, 'yyyy-MM-dd');
+      } catch {
+        return dateString;
+      }
+    },
+    [isFa]
+  );
 
   useEffect(() => {
     const fetchDeliveryOptions = async () => {
-      setLoadingDeliveryOptions(true);
       try {
         const response = await deliveryOptionsAPI.listByItem(projectItemId);
         setDeliveryOptions(response.data || []);
-      } catch (err) {
-        console.error('Failed to load delivery options', err);
+      } catch {
         setDeliveryOptions([]);
-      } finally {
-        setLoadingDeliveryOptions(false);
       }
     };
-    if (projectItemId) {
-      fetchDeliveryOptions();
-    }
+    fetchDeliveryOptions();
   }, [projectItemId]);
 
-  // Check if this is a sub-item only package (main_item_quantity = 0)
-  const isSubItemOnly = data.main_item_quantity === 0;
-  
-  // Calculate min and max dates for delivery date selection
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  const latestDeliveryDate = deliveryOptions.length > 0
-    ? new Date(Math.max(...deliveryOptions.map(opt => new Date(opt.delivery_date).getTime())))
-    : null;
-  
-  const minDate = today;
-  const maxDate = latestDeliveryDate;
+  useEffect(() => {
+    const fetchFinancialData = async () => {
+      setLoadingFinancialData(true);
+      setFinancialDataError('');
+      try {
+        const [paymentMethodsResponse, currenciesResponse] = await Promise.all([
+          procurementFinancialsAPI.listPaymentMethods(true),
+          currencyAPI.list(),
+        ]);
+        setPaymentMethods(paymentMethodsResponse.data || []);
+        setCurrencies((currenciesResponse.data || []).filter((currency: Currency) => currency.is_active));
+      } catch (err: any) {
+        setFinancialDataError(formatApiError(err, t('procurement.paymentMethodsLoadFailed')));
+        setPaymentMethods([]);
+        setCurrencies([]);
+      } finally {
+        setLoadingFinancialData(false);
+      }
+    };
+    fetchFinancialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const calculateLeadTime = (deliveryDate: string): number => {
-    if (!deliveryDate) return 0;
-    const today = new Date();
-    const delivery = new Date(deliveryDate);
-    const diffTime = delivery.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return Math.max(0, diffDays);
+  useEffect(() => {
+    const fetchCostComponents = async () => {
+      if (!data.option_id) {
+        setLoadedCostComponentsOptionId(null);
+        return;
+      }
+      if (loadedCostComponentsOptionId === data.option_id) return;
+      try {
+        const response = await procurementFinancialsAPI.listCostComponents(data.option_id, true);
+        const mappedComponents: CostComponentDraft[] = (response.data || []).map((component) => ({
+          id: component.id,
+          component_type: component.component_type,
+          description: component.description || '',
+          amount_value: Number(component.amount_value || 0),
+          amount_currency: component.amount_currency,
+          amount_irr:
+            component.amount_irr !== null && component.amount_irr !== undefined
+              ? Number(component.amount_irr)
+              : undefined,
+          exchange_rate_date: component.exchange_rate_date || undefined,
+        }));
+        onChange({ cost_components: mappedComponents });
+        setLoadedCostComponentsOptionId(data.option_id);
+      } catch {
+        // Best effort: keep editing flow usable even when components fail to load.
+      }
+    };
+    fetchCostComponents();
+  }, [data.option_id, loadedCostComponentsOptionId, onChange]);
+
+  const earliestProjectRequestedDeliveryDate = useMemo(() => {
+    if ((data.project_requested_delivery_date || '').trim()) {
+      return data.project_requested_delivery_date || '';
+    }
+    if (!deliveryOptions.length) return '';
+    const sorted = [...deliveryOptions]
+      .map((option) => option.delivery_date)
+      .filter(Boolean)
+      .sort();
+    return sorted[0] || '';
+  }, [data.project_requested_delivery_date, deliveryOptions]);
+
+  const selectedDeliveryDate = useMemo(
+    () =>
+      (data.supplier_actual_delivery_date || '').trim() ||
+      (earliestProjectRequestedDeliveryDate || '').trim() ||
+      '',
+    [data.supplier_actual_delivery_date, earliestProjectRequestedDeliveryDate]
+  );
+
+  const derivedDeliverySource: DeliveryDateSource = useMemo(
+    () => ((data.supplier_actual_delivery_date || '').trim() ? 'SUPPLIER_ACTUAL' : 'PROJECT_OPTION'),
+    [data.supplier_actual_delivery_date]
+  );
+
+  const derivedVarianceDays = useMemo(
+    () => diffDays(earliestProjectRequestedDeliveryDate, data.supplier_actual_delivery_date || ''),
+    [earliestProjectRequestedDeliveryDate, data.supplier_actual_delivery_date]
+  );
+
+  useEffect(() => {
+    const updates: Partial<PackageWizardStep3Props['data']> = {};
+    if ((data.project_requested_delivery_date || '') !== earliestProjectRequestedDeliveryDate) {
+      updates.project_requested_delivery_date = earliestProjectRequestedDeliveryDate;
+    }
+    if ((data.selected_delivery_date || '') !== selectedDeliveryDate) {
+      updates.selected_delivery_date = selectedDeliveryDate;
+    }
+    if ((data.expected_delivery_date || '') !== selectedDeliveryDate) {
+      updates.expected_delivery_date = selectedDeliveryDate;
+    }
+    if ((data.delivery_date_source || 'PROJECT_OPTION') !== derivedDeliverySource) {
+      updates.delivery_date_source = derivedDeliverySource;
+    }
+    if ((data.delivery_date_variance_days ?? null) !== (derivedVarianceDays ?? null)) {
+      updates.delivery_date_variance_days = derivedVarianceDays;
+    }
+    if (Object.keys(updates).length > 0) {
+      onChange(updates);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    earliestProjectRequestedDeliveryDate,
+    selectedDeliveryDate,
+    derivedDeliverySource,
+    derivedVarianceDays,
+  ]);
+
+  const normalizedCostComponents = useMemo(
+    () =>
+      (data.cost_components || []).map((component) => ({
+        ...component,
+        component_type: String(component.component_type || '').trim().toUpperCase() as
+          | ProcurementCostComponentType
+          | '',
+        amount_currency: String(component.amount_currency || '').trim().toUpperCase(),
+        amount_value:
+          component.amount_value === '' || component.amount_value === null
+            ? ''
+            : Number(component.amount_value),
+      })),
+    [data.cost_components]
+  );
+
+  const validCostComponents = useMemo(
+    () =>
+      normalizedCostComponents.filter((component) => {
+        const amount = Number(component.amount_value);
+        return (
+          ALLOWED_COST_COMPONENT_TYPES.includes(component.component_type as ProcurementCostComponentType) &&
+          Number.isFinite(amount) &&
+          amount > 0 &&
+          !!component.amount_currency
+        );
+      }),
+    [normalizedCostComponents]
+  );
+
+  const mappedBaseComponent = useMemo(
+    () => validCostComponents.find((component) => component.component_type === 'BASE_PRICE') || null,
+    [validCostComponents]
+  );
+
+  const mappedShippingComponent = useMemo(
+    () => validCostComponents.find((component) => component.component_type === 'SHIPPING') || null,
+    [validCostComponents]
+  );
+
+  const mappedCurrencyCode = useMemo(
+    () => mappedBaseComponent?.amount_currency || validCostComponents[0]?.amount_currency || '',
+    [mappedBaseComponent, validCostComponents]
+  );
+
+  useEffect(() => {
+    const updates: Partial<PackageWizardStep3Props['data']> = {};
+    const nextBaseCost = mappedBaseComponent ? Number(mappedBaseComponent.amount_value) : 0;
+    const nextShippingCost = mappedShippingComponent ? Number(mappedShippingComponent.amount_value) : 0;
+    if (data.base_cost !== nextBaseCost) {
+      updates.base_cost = nextBaseCost;
+    }
+    if (data.shipping_cost !== nextShippingCost) {
+      updates.shipping_cost = nextShippingCost;
+    }
+
+    if (mappedCurrencyCode) {
+      const mappedCurrency = currencies.find((currency) => currency.code === mappedCurrencyCode);
+      if (mappedCurrency && data.currency_id !== mappedCurrency.id) {
+        updates.currency_id = mappedCurrency.id;
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      onChange(updates);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mappedBaseComponent, mappedShippingComponent, mappedCurrencyCode, currencies]);
+
+  const totalsByCurrency = useMemo(() => {
+    const totals: Record<string, number> = {};
+    validCostComponents.forEach((component) => {
+      const amount = Number(component.amount_value);
+      if (!Number.isFinite(amount) || amount <= 0) return;
+      const currency = component.amount_currency || 'IRR';
+      totals[currency] = (totals[currency] || 0) + amount;
+    });
+    return totals;
+  }, [validCostComponents]);
+
+  const loadLandedCostPreview = async () => {
+    if (!data.option_id) {
+      setLandedCostPreview(null);
+      setLandedCostPreviewError('');
+      return;
+    }
+    setLoadingLandedCostPreview(true);
+    try {
+      const response = await procurementFinancialsAPI.getLandedCostPreview(data.option_id);
+      setLandedCostPreview(response.data);
+      setLandedCostPreviewError('');
+    } catch (err: any) {
+      setLandedCostPreview(null);
+      setLandedCostPreviewError(formatApiError(err, t('procurement.failedToLoadLandedCostPreview')));
+    } finally {
+      setLoadingLandedCostPreview(false);
+    }
   };
 
-  // Helper function to add commas while typing (supports large numbers like IRR)
-  const addCommasWhileTyping = (value: string): string => {
-    // Remove all non-digit characters except decimal point
-    const cleanValue = value.replace(/[^\d.]/g, '');
-    
-    // Split by decimal point
-    const parts = cleanValue.split('.');
-    const integerPart = parts[0];
-    const decimalPart = parts[1];
-    
-    // Add commas to integer part
-    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-    
-    // Combine with decimal part if exists
-    return decimalPart ? `${formattedInteger}.${decimalPart}` : formattedInteger;
+  useEffect(() => {
+    loadLandedCostPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.option_id]);
+
+  useEffect(() => {
+    const loadDeliveryFinancialPreview = async () => {
+      if (!data.option_id) {
+        setDeliveryFinancialPreviewError('');
+        return;
+      }
+      try {
+        const response = await procurementFinancialsAPI.getDeliveryFinancialPreview(data.option_id, {
+          delivery_date_source: derivedDeliverySource,
+          supplier_actual_delivery_date: data.supplier_actual_delivery_date || undefined,
+          selected_delivery_date: selectedDeliveryDate || undefined,
+        });
+        const preview = response.data;
+        const updates: Partial<PackageWizardStep3Props['data']> = {};
+
+        if ((data.project_requested_delivery_date || '') !== (preview.project_requested_delivery_date || '')) {
+          updates.project_requested_delivery_date = preview.project_requested_delivery_date || '';
+        }
+        if ((data.selected_delivery_date || '') !== (preview.selected_delivery_date || '')) {
+          updates.selected_delivery_date = preview.selected_delivery_date || '';
+        }
+        if ((data.delivery_date_source || 'PROJECT_OPTION') !== (preview.delivery_date_source || 'PROJECT_OPTION')) {
+          updates.delivery_date_source = (preview.delivery_date_source || 'PROJECT_OPTION') as DeliveryDateSource;
+        }
+        if ((data.delivery_date_variance_days ?? null) !== (preview.delivery_date_variance_days ?? null)) {
+          updates.delivery_date_variance_days = preview.delivery_date_variance_days ?? null;
+        }
+        if ((data.forecast_customer_invoice_date || '') !== (preview.forecast_customer_invoice_date || '')) {
+          updates.forecast_customer_invoice_date = preview.forecast_customer_invoice_date || '';
+        }
+        if (
+          (data.forecast_customer_invoice_date_source || null) !==
+          (preview.forecast_customer_invoice_date_source || null)
+        ) {
+          updates.forecast_customer_invoice_date_source =
+            preview.forecast_customer_invoice_date_source || null;
+        }
+        if ((data.forecast_customer_receipt_date || '') !== (preview.forecast_customer_receipt_date || '')) {
+          updates.forecast_customer_receipt_date = preview.forecast_customer_receipt_date || '';
+        }
+        if (
+          (data.forecast_customer_receipt_date_source || null) !==
+          (preview.forecast_customer_receipt_date_source || null)
+        ) {
+          updates.forecast_customer_receipt_date_source =
+            preview.forecast_customer_receipt_date_source || null;
+        }
+        if (
+          (data.forecast_customer_receipt_delay_days ?? null) !==
+          (preview.forecast_customer_receipt_delay_days ?? null)
+        ) {
+          updates.forecast_customer_receipt_delay_days =
+            preview.forecast_customer_receipt_delay_days ?? null;
+        }
+        if (
+          JSON.stringify(data.date_calculation_trace || []) !==
+          JSON.stringify(preview.trace_lines || [])
+        ) {
+          updates.date_calculation_trace = preview.trace_lines || [];
+        }
+        if (Object.keys(updates).length > 0) {
+          onChange(updates);
+        }
+        setDeliveryFinancialPreviewError('');
+      } catch (err: any) {
+        setDeliveryFinancialPreviewError(
+          formatApiError(err, t('procurement.failedToLoadDeliveryFinancialPreview'))
+        );
+      }
+    };
+    loadDeliveryFinancialPreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.option_id, data.supplier_actual_delivery_date, selectedDeliveryDate, derivedDeliverySource]);
+
+  const selectedPaymentMethod = useMemo(
+    () => paymentMethods.find((paymentMethod) => paymentMethod.id === data.payment_method_id) || null,
+    [paymentMethods, data.payment_method_id]
+  );
+
+  const supplierEffectiveReceiptDate = useMemo(
+    () =>
+      selectedPaymentMethod
+        ? calculateSupplierEffectiveReceiptDate(
+            data.payment_date,
+            selectedPaymentMethod.settlement_delay_days || 0
+          )
+        : null,
+    [data.payment_date, selectedPaymentMethod]
+  );
+
+  const defaultCostComponentCurrency = useMemo(() => {
+    if (currencies.length === 0) return 'IRR';
+    const selectedById = currencies.find((currency) => currency.id === data.currency_id);
+    return selectedById?.code || currencies[0].code || 'IRR';
+  }, [currencies, data.currency_id]);
+
+  const updateCostComponentAt = (index: number, updates: Partial<CostComponentDraft>) => {
+    const nextComponents = [...(data.cost_components || [])];
+    nextComponents[index] = { ...nextComponents[index], ...updates };
+    onChange({ cost_components: nextComponents });
   };
 
-  const parseFormattedNumber = (formattedValue: string): string => {
-    return formattedValue.replace(/,/g, '');
+  const removeCostComponentAt = (index: number) => {
+    const nextComponents = [...(data.cost_components || [])];
+    nextComponents.splice(index, 1);
+    onChange({ cost_components: nextComponents });
   };
+
+  const addCostComponent = () => {
+    const nextComponents = [
+      ...(data.cost_components || []),
+      {
+        component_type: '' as ProcurementCostComponentType | '',
+        description: '',
+        amount_value: '',
+        amount_currency: defaultCostComponentCurrency,
+      },
+    ];
+    onChange({ cost_components: nextComponents });
+  };
+
+  const getComponentTypeLabel = (componentType: ProcurementCostComponentType) => {
+    const labels: Record<ProcurementCostComponentType, string> = {
+      BASE_PRICE: t('procurement.basePrice'),
+      SHIPPING: t('procurement.shipping'),
+      VAT: t('procurement.vat'),
+      CUSTOMS: t('procurement.customs'),
+      CLEARANCE: t('procurement.clearance'),
+      INSURANCE: t('procurement.insurance'),
+      BANK_FEE: t('procurement.bankFee'),
+      OTHER: t('procurement.other'),
+    };
+    return labels[componentType];
+  };
+
+  const varianceSummary = useMemo(() => {
+    if (data.delivery_date_variance_days === null || data.delivery_date_variance_days === undefined) {
+      return t('procurement.deliveryVarianceUnavailable');
+    }
+    if (data.delivery_date_variance_days < 0) {
+      return `${t('procurement.early')} ${Math.abs(data.delivery_date_variance_days)} ${t('procurement.days')}`;
+    }
+    if (data.delivery_date_variance_days > 0) {
+      return `${t('procurement.delayed')} ${data.delivery_date_variance_days} ${t('procurement.days')}`;
+    }
+    return `${t('procurement.onTime')} (0 ${t('procurement.days')})`;
+  }, [data.delivery_date_variance_days, t]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Typography variant="h6" gutterBottom>
-        {t('procurement.pricingDelivery') || 'Pricing & Delivery'}
-      </Typography>
+      {financialDataError && <Alert severity="warning">{financialDataError}</Alert>}
+      {deliveryFinancialPreviewError && <Alert severity="warning">{deliveryFinancialPreviewError}</Alert>}
 
-      {/* Cost Fields */}
       <Paper elevation={1} sx={{ p: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          {t('procurement.costInformation') || 'Cost Information'}
-        </Typography>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label={t('procurement.baseCost') || 'Base Cost'}
-              type="text"
-              value={data.base_cost ? addCommasWhileTyping(data.base_cost.toString()) : ''}
-              onChange={(e) => {
-                const rawValue = parseFormattedNumber(e.target.value);
-                const numericValue = parseFloat(rawValue) || 0;
-                onChange({ base_cost: numericValue });
-              }}
-              inputProps={{
-                step: 0.01,
-                min: 0,
-                placeholder: '0.00'
-              }}
-              helperText={t('procurement.baseCostHelper') || 'Enter amount (commas added automatically)'}
-              required
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label={t('procurement.shippingCost') || 'Shipping Cost'}
-              type="text"
-              value={data.shipping_cost ? addCommasWhileTyping(data.shipping_cost.toString()) : ''}
-              onChange={(e) => {
-                const rawValue = parseFormattedNumber(e.target.value);
-                const numericValue = parseFloat(rawValue) || 0;
-                onChange({ shipping_cost: numericValue });
-              }}
-              inputProps={{
-                step: 0.01,
-                min: 0,
-                placeholder: '0.00'
-              }}
-              helperText={t('procurement.shippingCostHelper') || 'Optional shipping cost (commas added automatically)'}
-            />
-          </Grid>
-          <Grid item xs={12}>
-            <CurrencySelector
-              value={data.currency_id}
-              onChange={(currencyId) => onChange({ currency_id: currencyId as number })}
-              label={t('procurement.currency') || 'Currency'}
-              required
-              showRate
-            />
-          </Grid>
-        </Grid>
-      </Paper>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5}>
+          <Typography variant="h6">
+            {t('procurement.pricingAndCosts')}
+          </Typography>
+          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addCostComponent}>
+            {t('procurement.addCostComponent')}
+          </Button>
+        </Box>
 
-      {/* Delivery Options */}
-      <Paper elevation={1} sx={{ p: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          {t('procurement.deliveryInformation') || 'Delivery Information'}
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {t('procurement.costComponents')}
         </Typography>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>{t('procurement.deliveryOption') || 'Delivery Option'}</InputLabel>
-              <Select
-                value={data.delivery_option_id || ''}
-                onChange={(e) => {
-                  const optionId = e.target.value as number;
-                  const selectedOption = deliveryOptions.find((opt) => opt.id === optionId);
-                  const leadTime = selectedOption ? calculateLeadTime(selectedOption.delivery_date) : 0;
-                  // Only auto-fill delivery date if not a sub-item-only package
-                  if (!isSubItemOnly && selectedOption) {
-                    onChange({
-                      delivery_option_id: optionId,
-                      expected_delivery_date: selectedOption.delivery_date,
-                      lomc_lead_time: leadTime,
-                    });
-                  } else {
-                    // For sub-item-only packages, just set the option ID, user will select date manually
-                    onChange({
-                      delivery_option_id: optionId,
-                      lomc_lead_time: leadTime,
-                    });
-                  }
-                }}
-                disabled={deliveryOptions.length === 0 || loadingDeliveryOptions}
-              >
-                {deliveryOptions.length === 0 ? (
-                  <MenuItem disabled>
-                    {t('procurement.noDeliveryOptionsAvailable') || 'No delivery options available'}
-                  </MenuItem>
-                ) : (
-                  deliveryOptions.map((option) => (
-                    <MenuItem key={option.id} value={option.id}>
-                      {new Date(option.delivery_date).toLocaleDateString()} - Slot {option.delivery_slot || 'N/A'}
-                    </MenuItem>
-                  ))
-                )}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <LocalizedDateProvider>
-              <DatePicker
-                label={t('procurement.purchaseDate') || 'Purchase Date'}
-                value={data.purchase_date ? new Date(data.purchase_date) : null}
-                onChange={(newValue) => {
-                  if (newValue) {
-                    onChange({ purchase_date: newValue.toISOString().split('T')[0] });
-                  }
-                }}
-                slotProps={{
-                  textField: {
-                    fullWidth: true,
-                    helperText: t('procurement.purchaseDateHelper') || 'When to place the order',
-                  },
-                }}
-              />
-            </LocalizedDateProvider>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <LocalizedDateProvider>
-              <DatePicker
-                label={t('procurement.expectedDeliveryDate') || 'Expected Delivery Date'}
-                value={data.expected_delivery_date ? new Date(data.expected_delivery_date) : null}
-                disabled={!isSubItemOnly}
-                minDate={minDate}
-                maxDate={maxDate || undefined}
-                onChange={(newValue) => {
-                  if (newValue) {
-                    const selectedDate = newValue.toISOString().split('T')[0];
-                    const leadTime = calculateLeadTime(selectedDate);
-                    onChange({
-                      expected_delivery_date: selectedDate,
-                      lomc_lead_time: leadTime,
-                    });
-                  }
-                }}
-                slotProps={{
-                  textField: {
-                    fullWidth: true,
-                    helperText: isSubItemOnly
-                      ? (t('procurement.selectDeliveryDateRange') || `Select date between ${minDate.toLocaleDateString()} and ${maxDate ? maxDate.toLocaleDateString() : 'latest slot'}`)
-                      : (t('procurement.autoFilledFromDeliveryOption') || 'Auto-filled from delivery option'),
-                  },
-                }}
-              />
-            </LocalizedDateProvider>
-          </Grid>
-        </Grid>
-      </Paper>
 
-      {/* Discounts */}
-      <Paper elevation={1} sx={{ p: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          {t('procurement.discounts') || 'Discounts'}
-        </Typography>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label={t('procurement.bundleDiscountThreshold') || 'Bundle Discount Threshold'}
-              type="number"
-              value={data.discount_bundle_threshold || ''}
-              onChange={(e) =>
-                onChange({
-                  discount_bundle_threshold: e.target.value ? parseInt(e.target.value) : undefined,
-                })
-              }
-              helperText={t('procurement.bundleDiscountThresholdHelper') || 'Minimum quantity for bundle discount'}
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label={t('procurement.bundleDiscountPercentage') || 'Bundle Discount %'}
-              type="number"
-              value={data.discount_bundle_percent || ''}
-              onChange={(e) =>
-                onChange({
-                  discount_bundle_percent: e.target.value ? parseFloat(e.target.value) : undefined,
-                })
-              }
-              helperText={t('procurement.bundleDiscountPercentageHelper') || 'Discount percentage'}
-              InputProps={{ endAdornment: '%' }}
-            />
-          </Grid>
-        </Grid>
-      </Paper>
+        {(data.cost_components || []).length === 0 && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            {t('procurement.noCostComponents')}
+          </Alert>
+        )}
 
-      {/* Payment Terms */}
-      <Paper elevation={1} sx={{ p: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          {t('procurement.paymentTerms') || 'Payment Terms'}
-        </Typography>
-        <Grid container spacing={2} sx={{ mt: 1 }}>
-          <Grid item xs={12}>
-            <FormControl fullWidth>
-              <InputLabel>{t('procurement.paymentType') || 'Payment Type'}</InputLabel>
-              <Select
-                value={data.payment_terms.type}
-                onChange={(e) => {
-                  const type = e.target.value as 'cash' | 'installments';
-                  onChange({
-                    payment_terms:
-                      type === 'cash'
-                        ? { type: 'cash', discount_percent: 0 }
-                        : {
-                            type: 'installments',
-                            installments: [{ days_after_purchase: 0, percentage: 100 }],
-                          },
-                  });
-                }}
-              >
-                <MenuItem value="cash">{t('procurement.cash') || 'Cash'}</MenuItem>
-                <MenuItem value="installments">{t('procurement.installments') || 'Installments'}</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          {data.payment_terms.type === 'cash' && (
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label={t('procurement.cashDiscountPercentage') || 'Cash Discount %'}
-                type="number"
-                value={data.payment_terms.discount_percent || 0}
-                onChange={(e) =>
-                  onChange({
-                    payment_terms: {
-                      ...data.payment_terms,
-                      discount_percent: parseFloat(e.target.value) || 0,
-                    },
-                  })
-                }
-                InputProps={{ endAdornment: '%' }}
-              />
-            </Grid>
-          )}
-          {data.payment_terms.type === 'installments' && data.payment_terms.installments && (
-            <Grid item xs={12}>
-              <Typography variant="body2" gutterBottom>
-                {t('procurement.installmentSchedule') || 'Installment Schedule (must total 100%)'}
-              </Typography>
-              {data.payment_terms.installments.map((installment, index) => (
-                <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-                  <TextField
-                    label={t('procurement.daysAfterPurchase') || 'Days After Purchase'}
+        {(data.cost_components || []).map((component, index) => {
+          const validationCode = validateCostComponentDraft(component);
+          const validationError = validationCode
+            ? getCostComponentValidationMessage(validationCode, t)
+            : null;
+          return (
+            <Paper key={`${component.id || 'new'}-${index}`} variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+              <Grid container spacing={1.5}>
+                <Grid item xs={12} sm={3}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>{t('procurement.componentType')}</InputLabel>
+                    <Select
+                      value={component.component_type}
+                      label={t('procurement.componentType')}
+                      onChange={(e) =>
+                        updateCostComponentAt(index, {
+                          component_type: e.target.value as ProcurementCostComponentType | '',
+                        })
+                      }
+                    >
+                      <MenuItem value="">
+                        {t('common.select')}
+                      </MenuItem>
+                      {ALLOWED_COST_COMPONENT_TYPES.map((componentType) => (
+                        <MenuItem key={componentType} value={componentType}>
+                          {getComponentTypeLabel(componentType)}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={3}>
+            <TextField
+                    size="small"
+              fullWidth
                     type="number"
+                    label={t('procurement.amount')}
+                    value={component.amount_value}
+                    onChange={(e) =>
+                      updateCostComponentAt(index, {
+                        amount_value: e.target.value === '' ? '' : Number(e.target.value),
+                      })
+                    }
+                    inputProps={{ min: 0.01, step: 0.01 }}
+            />
+          </Grid>
+                <Grid item xs={12} sm={2}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>{t('procurement.currency')}</InputLabel>
+                    <Select
+                      value={component.amount_currency}
+                      label={t('procurement.currency')}
+                      onChange={(e) =>
+                        updateCostComponentAt(index, {
+                          amount_currency: String(e.target.value || '').toUpperCase(),
+                        })
+                      }
+                    >
+                      <MenuItem value="">
+                        {t('common.select')}
+                      </MenuItem>
+                      {currencies.map((currency) => (
+                        <MenuItem key={currency.code} value={currency.code}>
+                          {currency.code}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid item xs={12} sm={3}>
+            <TextField
                     size="small"
-                    value={installment.days_after_purchase}
-                    onChange={(e) => {
-                      const newInstallments = [...(data.payment_terms.installments || [])];
-                      newInstallments[index].days_after_purchase = parseInt(e.target.value) || 0;
-                      onChange({
-                        payment_terms: {
-                          ...data.payment_terms,
-                          installments: newInstallments,
-                        },
-                      });
-                    }}
-                    sx={{ flex: 1 }}
-                  />
-                  <TextField
-                    label={t('procurement.percentage') || 'Percentage'}
-                    type="number"
-                    size="small"
-                    value={installment.percentage}
-                    onChange={(e) => {
-                      const newInstallments = [...(data.payment_terms.installments || [])];
-                      newInstallments[index].percentage = parseFloat(e.target.value) || 0;
-                      onChange({
-                        payment_terms: {
-                          ...data.payment_terms,
-                          installments: newInstallments,
-                        },
-                      });
-                    }}
-                    sx={{ flex: 1 }}
-                    InputProps={{ endAdornment: '%' }}
-                  />
-                  <IconButton
-                    size="small"
-                    color="error"
-                    onClick={() => {
-                      const newInstallments = (data.payment_terms.installments || []).filter(
-                        (_, i) => i !== index
-                      );
-                      onChange({
-                        payment_terms: {
-                          ...data.payment_terms,
-                          installments:
-                            newInstallments.length > 0
-                              ? newInstallments
-                              : [{ days_after_purchase: 0, percentage: 100 }],
-                        },
-                      });
-                    }}
-                    disabled={(data.payment_terms.installments || []).length === 1}
-                  >
-                    <DeleteIcon />
+              fullWidth
+                    label={t('procurement.description')}
+                    value={component.description || ''}
+                    onChange={(e) => updateCostComponentAt(index, { description: e.target.value })}
+                    required={component.component_type === 'OTHER'}
+            />
+          </Grid>
+                <Grid item xs={12} sm={1} display="flex" alignItems="center" justifyContent="flex-end">
+                  <IconButton color="error" onClick={() => removeCostComponentAt(index)}>
+                    <DeleteIcon fontSize="small" />
                   </IconButton>
-                </Box>
-              ))}
-              <Button
-                size="small"
-                startIcon={<AddIcon />}
-                onClick={() => {
-                  const newInstallments = [
-                    ...(data.payment_terms.installments || []),
-                    { days_after_purchase: 30, percentage: 0 },
-                  ];
-                  onChange({
-                    payment_terms: {
-                      ...data.payment_terms,
-                      installments: newInstallments,
-                    },
-                  });
-                }}
-                sx={{ mt: 1 }}
-              >
-                {t('procurement.addInstallment') || 'Add Installment'}
-              </Button>
-              <Typography
-                variant="caption"
-                color={
-                  (data.payment_terms.installments || []).reduce(
-                    (sum, inst) => sum + inst.percentage,
-                    0
-                  ) === 100
-                    ? 'success.main'
-                    : 'error.main'
-                }
-                sx={{ display: 'block', mt: 1 }}
-              >
-                Total:{' '}
-                {(data.payment_terms.installments || []).reduce(
-                  (sum, inst) => sum + inst.percentage,
-                  0
+                </Grid>
+                {validationError && (
+          <Grid item xs={12}>
+                    <Typography variant="caption" color="error">
+                      {validationError}
+                    </Typography>
+          </Grid>
                 )}
-                %
-                {(data.payment_terms.installments || []).reduce(
-                  (sum, inst) => sum + inst.percentage,
-                  0
-                ) !== 100 && ' (Must equal 100%)'}
-              </Typography>
-            </Grid>
+        </Grid>
+            </Paper>
+          );
+        })}
+
+        {!mappedBaseComponent && (
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            {t('procurement.basePriceRequired')}
+          </Alert>
+        )}
+
+        <Typography variant="body2" sx={{ mb: 1 }}>
+          {t('procurement.totalsByCurrency')}
+        </Typography>
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+          {Object.entries(totalsByCurrency).length === 0 ? (
+            <Chip label={`-`} size="small" />
+          ) : (
+            Object.entries(totalsByCurrency).map(([currencyCode, total]) => (
+              <Chip key={currencyCode} label={`${currencyCode}: ${total.toLocaleString()}`} size="small" />
+            ))
           )}
+        </Box>
+
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+          <Typography variant="body2" fontWeight={600}>
+            {t('procurement.landedCostPreview')}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={loadLandedCostPreview}
+            disabled={!data.option_id || loadingLandedCostPreview}
+          >
+            {loadingLandedCostPreview ? t('procurement.loading') : t('procurement.refresh')}
+          </Button>
+        </Box>
+        {!data.option_id && (
+          <Alert severity="info">
+            {t('procurement.previewAvailableAfterSaving')}
+          </Alert>
+        )}
+        {data.option_id && landedCostPreviewError && (
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            {landedCostPreviewError}
+          </Alert>
+        )}
+        {data.option_id && landedCostPreview && (
+          <Box>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              {t('procurement.totalsByCurrency')}
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+              {Object.keys(landedCostPreview.totals_by_currency || {}).length === 0 ? (
+                <Chip label="-" size="small" />
+              ) : (
+                Object.entries(landedCostPreview.totals_by_currency || {}).map(
+                  ([currencyCode, total]) => (
+                    <Chip
+                      key={currencyCode}
+                      label={`${currencyCode}: ${Number(total || 0).toLocaleString()}`}
+                      size="small"
+                    />
+                  )
+                )
+              )}
+            </Box>
+            <Typography variant="body2">
+              {t('procurement.totalIrr')}: {' '}
+              {landedCostPreview.total_irr !== null && landedCostPreview.total_irr !== undefined
+                ? Number(landedCostPreview.total_irr).toLocaleString()
+                : t('procurement.unavailableDueToMissingExchangeRates')}
+            </Typography>
+            {(landedCostPreview.missing_exchange_rates || []).length > 0 && (
+              <Alert severity="warning" sx={{ mt: 1 }}>
+                <Typography variant="body2" fontWeight={600}>
+                  {t('procurement.missingExchangeRates')}
+                </Typography>
+                {(landedCostPreview.missing_exchange_rates || []).slice(0, 3).map((item: any, index: number) => (
+                  <Typography key={`${item?.currency || 'currency'}-${index}`} variant="caption" display="block">
+                    {(item?.currency || '').toString()} {item?.exchange_rate_date ? `(${item.exchange_rate_date})` : ''}
+                  </Typography>
+                ))}
+              </Alert>
+            )}
+            {(landedCostPreview.trace_lines || []).length > 0 && (
+              <Box sx={{ mt: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {t('procurement.calculationTrace')}
+                </Typography>
+                {(landedCostPreview.trace_lines || []).slice(0, 3).map((line: string, index: number) => (
+                  <Typography key={`trace-line-${index}`} variant="caption" display="block" color="text.secondary">
+                    • {line}
+                  </Typography>
+                ))}
+              </Box>
+            )}
+          </Box>
+        )}
+      </Paper>
+
+      <Paper elevation={1} sx={{ p: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1.5 }}>
+          {t('procurement.delivery')}
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={4}>
+            <TextField
+              fullWidth
+              disabled
+              label={t('procurement.projectRequestedDeliveryDate')}
+              value={formatDisplayDate(earliestProjectRequestedDeliveryDate || null)}
+            />
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('procurement.supplierActualAvailableDeliveryDate')}
+                value={toDatePickerValue(data.supplier_actual_delivery_date)}
+                onChange={(newValue) =>
+                  onChange({ supplier_actual_delivery_date: toIsoDate(newValue) })
+                }
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </LocalizedDateProvider>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <TextField
+              fullWidth
+              disabled
+              label={t('procurement.selectedDeliveryDate')}
+              value={formatDisplayDate(selectedDeliveryDate || null)}
+            />
+          </Grid>
+          <Grid item xs={12}>
+            <Alert
+              severity={
+                data.delivery_date_variance_days === null || data.delivery_date_variance_days === undefined
+                  ? 'info'
+                  : data.delivery_date_variance_days > 0
+                    ? 'warning'
+                    : 'success'
+              }
+            >
+              <Typography variant="body2" component="span" fontWeight={600}>
+                {t('procurement.deliveryVariance')}: {' '}
+              </Typography>
+              <Typography variant="body2" component="span">
+                {varianceSummary}
+              </Typography>
+            </Alert>
+          </Grid>
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              multiline
+              minRows={2}
+              label={t('procurement.supplierDeliveryNotes')}
+              value={data.description || ''}
+              onChange={(e) => onChange({ description: e.target.value })}
+            />
+          </Grid>
         </Grid>
       </Paper>
 
-      {/* Finalized Checkbox */}
+      <Paper elevation={1} sx={{ p: 2 }}>
+        <Typography variant="h6" sx={{ mb: 1.5 }}>
+          {t('procurement.payment')}
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth>
+              <InputLabel>{t('procurement.paymentMethod')}</InputLabel>
+              <Select
+                value={data.payment_method_id || ''}
+                label={t('procurement.paymentMethod')}
+                onChange={(e) => onChange({ payment_method_id: Number(e.target.value) || null })}
+                disabled={loadingFinancialData || paymentMethods.length === 0}
+              >
+                {paymentMethods.map((paymentMethod) => (
+                  <MenuItem key={paymentMethod.id} value={paymentMethod.id}>
+                    {isFa ? paymentMethod.name_fa : paymentMethod.name_en}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            {paymentMethods.length === 0 ? (
+              <Alert severity="warning" sx={{ mt: 1 }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  {t('procurement.noActivePaymentMethodsMasterData')}
+                </Typography>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  href="/items-master#payment-methods-master-data"
+                >
+                  {t('navigation.baseInformation')}
+                </Button>
+              </Alert>
+            ) : (
+              <Typography variant="caption" color="text.secondary">
+                {selectedPaymentMethod
+                  ? `${t('procurement.settlementDelay')}: ${selectedPaymentMethod.settlement_delay_days} ${t('procurement.days')}`
+                  : t('procurement.selectPaymentMethodToSeeDelay')}
+              </Typography>
+            )}
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <LocalizedDateProvider>
+              <DatePicker
+                label={t('procurement.paymentDate')}
+                value={toDatePickerValue(data.payment_date)}
+                onChange={(newValue) => onChange({ payment_date: toIsoDate(newValue) })}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </LocalizedDateProvider>
+            </Grid>
+            <Grid item xs={12}>
+            <Alert severity="info">
+              <Typography variant="body2" component="span" fontWeight={600}>
+                {t('procurement.supplierEffectiveReceiptDate')}: {' '}
+              </Typography>
+              <Typography variant="body2" component="span">
+                {supplierEffectiveReceiptDate
+                  ? formatDisplayDate(supplierEffectiveReceiptDate)
+                  : t('procurement.notAvailableYet')}
+              </Typography>
+            </Alert>
+            </Grid>
+          <Grid item xs={12}>
       <FormControlLabel
         control={
           <Checkbox
@@ -492,15 +891,17 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
         label={
           <Box>
             <Typography variant="body2" fontWeight="medium">
-              ✅ {t('procurement.markAsFinalized') || 'Mark as Finalized'}
+                    ✅ {t('procurement.markAsFinalized')}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {t('procurement.onlyFinalizedOptions') ||
-                'Only finalized options will be used in procurement optimization'}
+                    {t('procurement.onlyFinalizedOptions')}
             </Typography>
           </Box>
         }
       />
+          </Grid>
+        </Grid>
+      </Paper>
     </Box>
   );
 };
