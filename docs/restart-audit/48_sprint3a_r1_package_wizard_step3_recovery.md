@@ -19,6 +19,7 @@ Sprint 3A-R1 — Recover, Commit, and Deploy Package Wizard Step 3 Simplificatio
   1. Pricing and Costs
   2. Delivery
   3. Payment
+- Removed legacy Step 3 header markers (`Metadata`, `Quantities`, `Pricing & Delivery`) from the active Step 3 view to align runtime UX with recovery acceptance criteria.
 - Ensured recovery artifact manifest explicitly includes `PackageWizardStep3.tsx` and related scoped frontend files.
 
 ## QA Evidence Required Before Acceptance

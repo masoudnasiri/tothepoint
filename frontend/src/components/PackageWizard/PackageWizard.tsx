@@ -722,11 +722,18 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
     }
   };
 
-  const stepLabels = [
-    t('procurement.stepMetadata') || 'Metadata',
-    t('procurement.stepQuantities') || 'Quantities',
-    t('procurement.stepPricing') || 'Pricing & Delivery',
-  ];
+  const stepLabels =
+    activeStep === 2
+      ? [
+          t('procurement.pricingAndCosts') || 'Pricing and Costs',
+          t('procurement.delivery') || 'Delivery',
+          t('procurement.payment') || 'Payment',
+        ]
+      : [
+          t('procurement.stepMetadata') || 'Metadata',
+          t('procurement.stepQuantities') || 'Quantities',
+          t('procurement.stepPricing') || 'Pricing & Delivery',
+        ];
 
   const coveragePercent = coverageSummary
     ? (coverageSummary.main_item?.covered / (mainItemRequiredQuantity || 1)) * 100
