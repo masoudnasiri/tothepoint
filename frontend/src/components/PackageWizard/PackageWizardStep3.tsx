@@ -27,6 +27,7 @@ import type {
   Currency,
   DeliveryDateSource,
   PaymentMethod,
+  PaymentTerms,
   ProcurementCostComponentType,
 } from '../../types/index.ts';
 import { formatApiError } from '../../utils/errorUtils.ts';
@@ -46,11 +47,7 @@ interface PackageWizardStep3Props {
     lomc_lead_time: number;
     purchase_date: string;
     expected_delivery_date: string;
-    payment_terms: {
-      type: 'cash' | 'installments';
-      discount_percent: number;
-      installments?: Array<{ days_after_purchase: number; percentage: number }>;
-    };
+    payment_terms: PaymentTerms;
     discount_bundle_threshold?: number;
     discount_bundle_percent?: number;
     is_finalized: boolean;
@@ -90,6 +87,11 @@ interface DeliveryOption {
   delivery_date: string;
 }
 
+interface PaymentScheduleRow {
+  due_offset: number;
+  percent: number;
+}
+
 export const calculateSupplierEffectiveReceiptDate = (
   paymentDate: string,
   settlementDelayDays: number
@@ -123,6 +125,34 @@ const diffDays = (fromDate?: string, toDate?: string): number | null => {
   } catch {
     return null;
   }
+};
+
+const normalizePaymentTerms = (paymentTerms: unknown): PaymentTerms => {
+  const payload = (paymentTerms || {}) as Record<string, any>;
+  if (payload.type !== 'installments') {
+    return {
+      type: 'cash',
+      discount_percent: Number(payload.discount_percent || 0) || 0,
+    };
+  }
+
+  const scheduleInput = Array.isArray(payload.schedule)
+    ? payload.schedule
+    : Array.isArray(payload.installments)
+      ? payload.installments
+      : [];
+
+  const schedule: PaymentScheduleRow[] = scheduleInput
+    .map((row: any) => ({
+      due_offset: Math.max(0, Number(row?.due_offset ?? row?.days_after_purchase ?? 0) || 0),
+      percent: Number(row?.percent ?? row?.percentage ?? 0) || 0,
+    }))
+    .filter((row: PaymentScheduleRow) => Number.isFinite(row.due_offset) && Number.isFinite(row.percent));
+
+  return {
+    type: 'installments',
+    schedule: schedule.length > 0 ? schedule : [{ due_offset: 0, percent: 100 }],
+  };
 };
 
 export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
@@ -464,6 +494,24 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
     [paymentMethods, data.payment_method_id]
   );
 
+  const normalizedPaymentTerms = useMemo(
+    () => normalizePaymentTerms(data.payment_terms),
+    [data.payment_terms]
+  );
+
+  const installmentSchedule = useMemo(
+    () =>
+      normalizedPaymentTerms.type === 'installments'
+        ? normalizedPaymentTerms.schedule || []
+        : [],
+    [normalizedPaymentTerms]
+  );
+
+  const installmentTotalPercent = useMemo(
+    () => installmentSchedule.reduce((sum, row) => sum + Number(row.percent || 0), 0),
+    [installmentSchedule]
+  );
+
   const supplierEffectiveReceiptDate = useMemo(
     () =>
       selectedPaymentMethod
@@ -480,6 +528,32 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
     const selectedById = currencies.find((currency) => currency.id === data.currency_id);
     return selectedById?.code || currencies[0].code || 'IRR';
   }, [currencies, data.currency_id]);
+
+  useEffect(() => {
+    const nextPaymentTerms = normalizePaymentTerms(data.payment_terms);
+    if (JSON.stringify(nextPaymentTerms) !== JSON.stringify(data.payment_terms || {})) {
+      onChange({ payment_terms: nextPaymentTerms });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.payment_terms]);
+
+  useEffect(() => {
+    const current = data.cost_components || [];
+    const hasBasePrice = current.some((component) => component.component_type === 'BASE_PRICE');
+    if (hasBasePrice) return;
+    onChange({
+      cost_components: [
+        {
+          component_type: 'BASE_PRICE',
+          description: '',
+          amount_value: '',
+          amount_currency: defaultCostComponentCurrency,
+        },
+        ...current,
+      ],
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.cost_components, defaultCostComponentCurrency]);
 
   const updateCostComponentAt = (index: number, updates: Partial<CostComponentDraft>) => {
     const nextComponents = [...(data.cost_components || [])];
@@ -504,6 +578,31 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
       },
     ];
     onChange({ cost_components: nextComponents });
+  };
+
+  const setPaymentTerms = (nextPaymentTerms: PaymentTerms) => {
+    onChange({ payment_terms: normalizePaymentTerms(nextPaymentTerms) });
+  };
+
+  const updateInstallmentAt = (index: number, updates: Partial<PaymentScheduleRow>) => {
+    const nextSchedule = [...installmentSchedule];
+    nextSchedule[index] = { ...nextSchedule[index], ...updates };
+    setPaymentTerms({ type: 'installments', schedule: nextSchedule });
+  };
+
+  const removeInstallmentAt = (index: number) => {
+    const nextSchedule = installmentSchedule.filter((_, scheduleIndex) => scheduleIndex !== index);
+    setPaymentTerms({
+      type: 'installments',
+      schedule: nextSchedule.length > 0 ? nextSchedule : [{ due_offset: 0, percent: 100 }],
+    });
+  };
+
+  const addInstallment = () => {
+    setPaymentTerms({
+      type: 'installments',
+      schedule: [...installmentSchedule, { due_offset: 30, percent: 0 }],
+    });
   };
 
   const getComponentTypeLabel = (componentType: ProcurementCostComponentType) => {
@@ -559,6 +658,14 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
         )}
 
         {(data.cost_components || []).map((component, index) => {
+          const primaryBaseIndex = (data.cost_components || []).findIndex(
+            (row) => row.component_type === 'BASE_PRICE'
+          );
+          const basePriceCount = (data.cost_components || []).filter(
+            (row) => row.component_type === 'BASE_PRICE'
+          ).length;
+          const isPrimaryBaseRow =
+            component.component_type === 'BASE_PRICE' && index === primaryBaseIndex;
           const validationCode = validateCostComponentDraft(component);
           const validationError = validationCode
             ? getCostComponentValidationMessage(validationCode, t)
@@ -572,6 +679,7 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
                     <Select
                       value={component.component_type}
                       label={t('procurement.componentType')}
+                      disabled={isPrimaryBaseRow}
                       onChange={(e) =>
                         updateCostComponentAt(index, {
                           component_type: e.target.value as ProcurementCostComponentType | '',
@@ -638,7 +746,11 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
             />
           </Grid>
                 <Grid item xs={12} sm={1} display="flex" alignItems="center" justifyContent="flex-end">
-                  <IconButton color="error" onClick={() => removeCostComponentAt(index)}>
+                  <IconButton
+                    color="error"
+                    onClick={() => removeCostComponentAt(index)}
+                    disabled={isPrimaryBaseRow && basePriceCount <= 1}
+                  >
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Grid>
@@ -653,6 +765,41 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
             </Paper>
           );
         })}
+
+        <Grid container spacing={2} sx={{ mt: 0.5, mb: 1 }}>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              type="number"
+              label={t('procurement.bundleDiscountThreshold')}
+              value={data.discount_bundle_threshold ?? ''}
+              onChange={(e) =>
+                onChange({
+                  discount_bundle_threshold:
+                    e.target.value === '' ? undefined : Number(e.target.value),
+                })
+              }
+              inputProps={{ min: 1, step: 1 }}
+              helperText={t('procurement.bundleDiscountThresholdHelper')}
+            />
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              type="number"
+              label={t('procurement.bundleDiscountPercentage')}
+              value={data.discount_bundle_percent ?? ''}
+              onChange={(e) =>
+                onChange({
+                  discount_bundle_percent:
+                    e.target.value === '' ? undefined : Number(e.target.value),
+                })
+              }
+              inputProps={{ min: 0, max: 100, step: 0.01 }}
+              helperText={t('procurement.bundleDiscountPercentageHelper')}
+            />
+          </Grid>
+        </Grid>
 
         {!mappedBaseComponent && (
           <Alert severity="warning" sx={{ mb: 2 }}>
@@ -822,6 +969,122 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth>
+              <InputLabel>{t('procurement.paymentType')}</InputLabel>
+              <Select
+                value={normalizedPaymentTerms.type}
+                label={t('procurement.paymentType')}
+                onChange={(e) => {
+                  const nextType = e.target.value as 'cash' | 'installments';
+                  if (nextType === 'cash') {
+                    setPaymentTerms({
+                      type: 'cash',
+                      discount_percent:
+                        normalizedPaymentTerms.type === 'cash'
+                          ? normalizedPaymentTerms.discount_percent || 0
+                          : 0,
+                    });
+                    return;
+                  }
+                  const existingSchedule =
+                    normalizedPaymentTerms.type === 'installments'
+                      ? normalizedPaymentTerms.schedule || []
+                      : [];
+                  setPaymentTerms({
+                    type: 'installments',
+                    schedule:
+                      existingSchedule.length > 0
+                        ? existingSchedule
+                        : [{ due_offset: 0, percent: 100 }],
+                  });
+                }}
+              >
+                <MenuItem value="cash">{t('procurement.cash')}</MenuItem>
+                <MenuItem value="installments">{t('procurement.installments')}</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          {normalizedPaymentTerms.type === 'cash' && (
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                type="number"
+                label={t('procurement.cashDiscountPercentage')}
+                value={normalizedPaymentTerms.discount_percent || 0}
+                onChange={(e) =>
+                  setPaymentTerms({
+                    type: 'cash',
+                    discount_percent: Number(e.target.value || 0),
+                  })
+                }
+                inputProps={{ min: 0, max: 100, step: 0.01 }}
+              />
+            </Grid>
+          )}
+          {normalizedPaymentTerms.type === 'installments' && (
+            <Grid item xs={12}>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {t('procurement.installmentSchedule')}
+              </Typography>
+              {installmentSchedule.map((row, index) => (
+                <Grid container spacing={1} alignItems="center" sx={{ mb: 1 }} key={`installment-${index}`}>
+                  <Grid item xs={12} sm={5}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      size="small"
+                      label={t('procurement.daysAfterPurchase')}
+                      value={row.due_offset}
+                      onChange={(e) =>
+                        updateInstallmentAt(index, {
+                          due_offset: Math.max(0, Number(e.target.value || 0)),
+                        })
+                      }
+                      inputProps={{ min: 0, step: 1 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={5}>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      size="small"
+                      label={t('procurement.percentage')}
+                      value={row.percent}
+                      onChange={(e) =>
+                        updateInstallmentAt(index, {
+                          percent: Number(e.target.value || 0),
+                        })
+                      }
+                      inputProps={{ min: 0, max: 100, step: 0.01 }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={2}>
+                    <IconButton
+                      color="error"
+                      onClick={() => removeInstallmentAt(index)}
+                      disabled={installmentSchedule.length <= 1}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Grid>
+                </Grid>
+              ))}
+              <Button size="small" startIcon={<AddIcon />} onClick={addInstallment}>
+                {t('procurement.addInstallment')}
+              </Button>
+              <Typography
+                variant="caption"
+                sx={{ display: 'block', mt: 1 }}
+                color={Math.abs(installmentTotalPercent - 100) <= 0.01 ? 'success.main' : 'error.main'}
+              >
+                {t('procurement.percentage')}: {installmentTotalPercent.toFixed(2)}%
+              </Typography>
+              <Alert severity="info" sx={{ mt: 1 }}>
+                {t('procurement.installmentScheduleUsesSinglePlannedPaymentDate')}
+              </Alert>
+            </Grid>
+          )}
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth>
               <InputLabel>{t('procurement.paymentMethod')}</InputLabel>
               <Select
                 value={data.payment_method_id || ''}
@@ -860,7 +1123,7 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
           <Grid item xs={12} sm={6}>
             <LocalizedDateProvider>
               <DatePicker
-                label={t('procurement.paymentDate')}
+                label={t('procurement.plannedSupplierPaymentDate')}
                 value={toDatePickerValue(data.payment_date)}
                 onChange={(newValue) => onChange({ payment_date: toIsoDate(newValue) })}
                 slotProps={{ textField: { fullWidth: true } }}

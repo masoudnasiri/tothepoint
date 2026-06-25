@@ -27,6 +27,9 @@ const enTranslations: Record<string, string> = {
   'procurement.basePriceRequired': 'Base Price component is required.',
   'procurement.singleBasePriceOnly': 'Only one Base Price component is allowed.',
   'procurement.singleShippingOnly': 'Only one Shipping component is allowed.',
+  'procurement.installmentScheduleRequired': 'At least one installment schedule row is required.',
+  'procurement.installmentScheduleTotalMustBe100':
+    'Installment schedule percentages must total 100%.',
   'procurement.failedToCreatePackage': 'Failed to create package',
 };
 
@@ -126,7 +129,7 @@ const flush = async () => {
   });
 };
 
-const buildInitialData = (costComponents: any[]) => ({
+const buildInitialData = (costComponents: any[], overrides: Record<string, any> = {}) => ({
   package_name: 'PKG-01',
   supplier_id: 1,
   package_type: 'FULL',
@@ -141,12 +144,15 @@ const buildInitialData = (costComponents: any[]) => ({
   purchase_date: '2026-06-22',
   expected_delivery_date: '2026-06-30',
   payment_terms: { type: 'cash', discount_percent: 0 },
+  discount_bundle_threshold: undefined,
+  discount_bundle_percent: undefined,
   is_finalized: false,
   option_id: 10,
   payment_method_id: 7,
   payment_date: '2026-06-22',
   planned_supplier_payment_date: '2026-06-22',
   cost_components: costComponents,
+  ...overrides,
 });
 
 describe('PackageWizard save-boundary behavior', () => {
@@ -331,6 +337,62 @@ describe('PackageWizard save-boundary behavior', () => {
     expect(payload.shipping_cost).toBe(45);
     expect(payload.payment_method_id).toBe(7);
     expect(payload.planned_supplier_payment_date).toBe('2026-06-22');
+  });
+
+  it('persists installment payment terms and bundle discounts in procurement save payload', async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <PackageWizard
+          open={true}
+          onClose={() => {}}
+          projectItemId={1}
+          itemCode="ITM-1"
+          mainItemRequiredQuantity={1}
+          subItemRequirements={[]}
+          existingPackages={[]}
+          editingPackageId={99}
+          initialData={buildInitialData(
+            [
+              {
+                component_type: 'BASE_PRICE',
+                description: '',
+                amount_value: 1000,
+                amount_currency: 'IRR',
+              },
+            ],
+            {
+              payment_terms: {
+                type: 'installments',
+                schedule: [
+                  { due_offset: 0, percent: 60 },
+                  { due_offset: 30, percent: 40 },
+                ],
+              },
+              discount_bundle_threshold: 10,
+              discount_bundle_percent: 5,
+            }
+          )}
+        />
+      );
+    });
+
+    await clickButton('Next');
+    await clickButton('Next');
+    await clickButton('Update');
+    await flush();
+
+    expect(mockProcurementUpdate).toHaveBeenCalled();
+    const payload = mockProcurementUpdate.mock.calls[0][1];
+    expect(payload.payment_terms).toEqual({
+      type: 'installments',
+      schedule: [
+        { due_offset: 0, percent: 60 },
+        { due_offset: 30, percent: 40 },
+      ],
+    });
+    expect(payload.discount_bundle_threshold).toBe(10);
+    expect(payload.discount_bundle_percent).toBe(5);
   });
 
   it('blocks save when amount is present but currency is missing', async () => {

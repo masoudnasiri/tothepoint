@@ -18,6 +18,7 @@ import { ProcurementPackage } from '../../types/packages.ts';
 import type {
   DeliveryDateSource,
   ForecastDateSource,
+  PaymentTerms,
   ProcurementCostComponentType,
 } from '../../types/index.ts';
 import { calculateCoverageSummary, SubItemRequirement } from '../../utils/coverageCalculator.ts';
@@ -64,11 +65,7 @@ interface PackageWizardData {
   lomc_lead_time: number;
   purchase_date: string;
   expected_delivery_date: string;
-  payment_terms: {
-    type: 'cash' | 'installments';
-    discount_percent: number;
-    installments?: Array<{ days_after_purchase: number; percentage: number }>;
-  };
+  payment_terms: PaymentTerms;
   discount_bundle_threshold?: number;
   discount_bundle_percent?: number;
   is_finalized: boolean;
@@ -370,6 +367,24 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
     const derivedShippingCost = shippingComponents[0]
       ? Number(shippingComponents[0].amount_value)
       : 0;
+
+    if (wizardData.payment_terms?.type === 'installments') {
+      const schedule = Array.isArray(wizardData.payment_terms.schedule)
+        ? wizardData.payment_terms.schedule
+        : [];
+      if (schedule.length === 0) {
+        setError(t('procurement.installmentScheduleRequired'));
+        return;
+      }
+      const totalPercent = schedule.reduce(
+        (sum, row) => sum + Number(row.percent || 0),
+        0
+      );
+      if (Math.abs(totalPercent - 100) > 0.01) {
+        setError(t('procurement.installmentScheduleTotalMustBe100'));
+        return;
+      }
+    }
 
     setLoading(true);
 

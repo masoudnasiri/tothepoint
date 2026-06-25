@@ -10,8 +10,16 @@ const enDictionary: Record<string, string> = {
   'procurement.pricingAndCosts': 'Pricing and Costs',
   'procurement.delivery': 'Delivery',
   'procurement.payment': 'Payment',
+  'procurement.paymentType': 'Payment Type',
+  'procurement.cash': 'Cash',
+  'procurement.installments': 'Installments',
+  'procurement.installmentSchedule': 'Installment Schedule (must total 100%)',
+  'procurement.daysAfterPurchase': 'Days After Purchase',
+  'procurement.percentage': 'Percentage',
+  'procurement.addInstallment': 'Add Installment',
   'procurement.paymentMethod': 'Payment Method',
   'procurement.paymentDate': 'Payment Date',
+  'procurement.plannedSupplierPaymentDate': 'Planned Supplier Payment Date',
   'procurement.supplierEffectiveReceiptDate': 'Supplier Effective Receipt Date',
   'procurement.projectRequestedDeliveryDate': 'Project Requested Delivery Date',
   'procurement.supplierActualAvailableDeliveryDate': 'Supplier Actual Available Delivery Date',
@@ -24,6 +32,10 @@ const enDictionary: Record<string, string> = {
   'procurement.days': 'days',
   'procurement.supplierDeliveryNotes': 'Supplier Delivery Notes',
   'procurement.costComponents': 'Cost Components',
+  'procurement.bundleDiscountThreshold': 'Bundle Discount Threshold',
+  'procurement.bundleDiscountPercentage': 'Bundle Discount Percentage',
+  'procurement.bundleDiscountThresholdHelper': 'Minimum quantity to activate bundle discount',
+  'procurement.bundleDiscountPercentageHelper': 'Percentage discount applied when threshold is met',
   'procurement.addCostComponent': 'Add Cost Component',
   'procurement.noCostComponents': 'No cost components added yet',
   'procurement.componentType': 'Component Type',
@@ -51,6 +63,8 @@ const enDictionary: Record<string, string> = {
   'procurement.noActivePaymentMethodsMasterData':
     'No active payment methods exist. Define payment methods in Master Data first.',
   'procurement.selectPaymentMethodToSeeDelay': 'Select a payment method to see settlement delay',
+  'procurement.installmentScheduleUsesSinglePlannedPaymentDate':
+    'Installment schedule is stored as terms metadata; supplier effective receipt currently derives from the planned supplier payment date and settlement delay.',
   'procurement.settlementDelay': 'Settlement Delay',
   'procurement.notAvailableYet': 'Not available yet',
   'procurement.markAsFinalized': 'Mark as Finalized',
@@ -67,10 +81,23 @@ const faDictionary: Record<string, string> = {
   'procurement.pricingAndCosts': 'قیمت‌گذاری و هزینه‌ها',
   'procurement.delivery': 'اطلاعات تحویل',
   'procurement.payment': 'پرداخت',
+  'procurement.paymentType': 'نوع پرداخت',
+  'procurement.cash': 'نقدی',
+  'procurement.installments': 'قسطی',
+  'procurement.installmentSchedule': 'برنامه قسط (باید مجموع 100% باشد)',
+  'procurement.daysAfterPurchase': 'روز پس از خرید',
+  'procurement.percentage': 'درصد',
+  'procurement.addInstallment': 'افزودن قسط',
   'procurement.projectRequestedDeliveryDate': 'تاریخ درخواستی تحویل پروژه',
   'procurement.supplierActualAvailableDeliveryDate': 'تاریخ واقعی قابل تحویل تأمین‌کننده',
   'procurement.supplierEffectiveReceiptDate': 'تاریخ مؤثر دریافت تأمین‌کننده',
   'procurement.paymentDate': 'تاریخ پرداخت',
+  'procurement.plannedSupplierPaymentDate': 'تاریخ برنامه‌ریزی‌شده پرداخت به تأمین‌کننده',
+  'procurement.cashDiscountPercentage': 'درصد تخفیف نقدی',
+  'procurement.bundleDiscountThreshold': 'آستانه تخفیف بسته‌ای',
+  'procurement.bundleDiscountPercentage': 'درصد تخفیف بسته‌ای',
+  'procurement.bundleDiscountThresholdHelper': 'حداقل مقدار برای فعال‌سازی تخفیف بسته‌ای',
+  'procurement.bundleDiscountPercentageHelper': 'درصد تخفیف اعمال شده هنگام رسیدن به آستانه',
   'procurement.noActivePaymentMethodsMasterData':
     'هیچ روش پرداخت فعالی وجود ندارد. ابتدا روش‌های پرداخت را در اطلاعات پایه تعریف کنید.',
   'procurement.basePriceRequired': 'مولفه قیمت پایه الزامی است.',
@@ -221,6 +248,34 @@ describe('PackageWizardStep3', () => {
     expect(text).toContain('Payment');
     expect(text).toContain('Cost Components');
     expect(text).toContain('Preview available after saving.');
+    expect(text).toContain('Base Price');
+    expect(text).toContain('Planned Supplier Payment Date');
+  });
+
+  it('renders installment schedule controls when payment type is installments', async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <PackageWizardStep3
+          data={buildData({
+            payment_terms: {
+              type: 'installments',
+              schedule: [
+                { due_offset: 0, percent: 60 },
+                { due_offset: 30, percent: 40 },
+              ],
+            },
+          })}
+          projectItemId={1}
+          onChange={() => {}}
+        />
+      );
+    });
+
+    const text = container.textContent || '';
+    expect(text).toContain('Installment Schedule (must total 100%)');
+    expect(text).toContain('Add Installment');
+    expect(text).toContain('Planned Supplier Payment Date');
   });
 
   it('does not render invoice/receipt override controls and duplicate old pricing fields', async () => {
@@ -349,7 +404,7 @@ describe('PackageWizardStep3', () => {
     expect(text).toContain('قیمت‌گذاری و هزینه‌ها');
     expect(text).toContain('اطلاعات تحویل');
     expect(text).toContain('تاریخ واقعی قابل تحویل تأمین‌کننده');
-    expect(text).toContain('تاریخ پرداخت');
+    expect(text).toContain('تاریخ برنامه‌ریزی‌شده پرداخت به تأمین‌کننده');
     expect(text).toContain('تاریخ مؤثر دریافت تأمین‌کننده');
     expect(text).toContain('برای نوع «سایر» توضیحات الزامی است');
     expect(text).not.toContain('Pricing and Costs');
