@@ -160,3 +160,22 @@ dmypy.json
 *.backup
 *.old
 
+# Workspace hygiene archives and generated outputs
+oldfiles/
+.repo_hygiene_backups/
+.tmp_*/
+.tmp_local/
+qa-artifacts/
+playwright_runner_tmp/
+test-results/
+
+# Root-level generated installer/release artifacts
+rivar_*.tar.gz
+rivar_clean_installer_*.tar.gz
+MANIFEST_INCLUDED_FILES.txt
+MANIFEST_EXCLUDED_FILES.txt
+*.sha256
+
+# Preferred future artifact output location
+deployment/artifacts/
+

@@ -117,3 +117,39 @@ Exit criteria:
   2. backend test stabilization for Phase 3
   3. enforce agreed coverage validation at decision boundary
   4. remove frontend hardcoded flag override (or gate by environment policy)
+
+---
+
+## Standing Documentation Governance Rule (Mandatory)
+
+Every sprint that changes product or software behavior must update `docs/restart-audit` as an in-scope deliverable.
+
+Minimum required sprint documentation content:
+
+1. sprint name and date
+2. business/product purpose
+3. changed behavior
+4. changed API endpoints
+5. changed data model/schema fields
+6. changed backend services/routers
+7. changed frontend behavior (or explicit no-change statement)
+8. tests added/updated and result summary
+9. deployment notes
+10. known risks/technical debt
+11. rollback notes (if relevant)
+12. exact sprint status: `PASS`, `PASS WITH MINOR ISSUES`, or `FAIL`
+
+If a sprint changes code but does not update `docs/restart-audit`, that sprint is treated as incomplete.
+
+---
+
+## Current Sprint Pointer
+
+- Sprint 3C: Candidate Validation & Coverage Engine (`PASS WITH MINOR ISSUES` after QA)
+- Sprint 3C-Fix: Release Hygiene Closure (`PASS`, no redeploy required; scope-clean artifact/runtime verified)
+- Sprint 3D: Financial Projection Engine (`PASS WITH MINOR ISSUES` after QA)
+- Sprint 3D-Fix: Projection Contract Hardening + Stable QA Dataset (`PASS`, no code redeploy required)
+- Sprint 4A: Optimization Scenario Preview Engine (`PASS`, read-only scenario preview endpoints + tests + ADR-009)
+- Sprint 4A-Clean Installer + Fresh Demo Reinstall (`PASS`, official demo path `/opt/rivar-demo`, installer-driven deployment/verification baseline)
+- Sprint 4A-Workspace Organization (`PASS`, safe extras moved to `oldfiles/`, root clutter reduced, new file-output hygiene rules documented)
+- Next planned sprint: Sprint 5 - Optimization UX Decision Room (must use clean installer baseline flow and workspace hygiene rules)
