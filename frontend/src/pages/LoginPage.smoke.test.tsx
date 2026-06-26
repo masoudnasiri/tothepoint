@@ -10,6 +10,20 @@ jest.mock('../contexts/AuthContext.tsx', () => ({
   }),
 }));
 
+jest.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) =>
+      ({
+        'auth.signInHeading': 'Sign In',
+        'auth.signInPrompt': 'Enter your credentials',
+        'auth.username': 'Username',
+        'auth.password': 'Password',
+        'auth.signIn': 'Sign In',
+      })[key] || key,
+    i18n: { language: 'en' },
+  }),
+}));
+
 describe('LoginPage smoke tests', () => {
   let container: HTMLDivElement;
   let root: Root;

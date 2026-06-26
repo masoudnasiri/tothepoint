@@ -24,6 +24,8 @@ import SuppliersPage from './pages/SuppliersPage.tsx';
 import { AnalyticsDashboardPage } from './pages/AnalyticsDashboardPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 import AuditLogsPage from './pages/AuditLogsPage.tsx';
+import { AccessControlPage } from './pages/AccessControlPage.tsx';
+import { AccessControlRoute } from './components/AccessControlRoute.tsx';
 import LocalizedDateProvider from './components/LocalizedDateProvider.tsx';
 import { PRODUCER_NAME, PRODUCT_NAME } from './utils/appIdentity.ts';
 import { createRivarTheme } from './theme/rivarTheme.ts';
@@ -64,6 +66,14 @@ function AppContent() {
                         <Route path="/analytics" element={<AnalyticsDashboardPage />} />
                         <Route path="/reports" element={<ReportsPage />} />
                         <Route path="/users" element={<UsersPage />} />
+                        <Route
+                          path="/access-control"
+                          element={
+                            <AccessControlRoute>
+                              <AccessControlPage />
+                            </AccessControlRoute>
+                          }
+                        />
                         <Route path="/weights" element={<WeightsPage />} />
                         <Route path="/suppliers" element={<SuppliersPage />} />
                         <Route path="/audit-logs" element={<AuditLogsPage />} />

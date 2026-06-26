@@ -1,4 +1,10 @@
 // API Types
+export interface UserRoleSummary {
+  code: string;
+  display_name: string;
+  is_system: boolean;
+}
+
 export interface User {
   id: number;
   username: string;
@@ -6,8 +12,60 @@ export interface User {
   created_at: string;
   is_active: boolean;
   permissions?: string[];
-  roles?: Array<{ code: string; display_name: string; is_system: boolean }>;
+  roles?: UserRoleSummary[];
   permission_enforcement_enabled?: boolean;
+}
+
+export interface Permission {
+  id: number;
+  permission_key: string;
+  feature_key: string;
+  action: string;
+  description?: string | null;
+  is_system: boolean;
+  sort_order: number;
+}
+
+export interface Role {
+  id: number;
+  code: string;
+  display_name: string;
+  description?: string | null;
+  is_system: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface RoleCreate {
+  code: string;
+  display_name: string;
+  description?: string | null;
+}
+
+export interface RoleUpdate {
+  display_name?: string;
+  description?: string | null;
+  is_active?: boolean;
+}
+
+export interface RolePermissionsResponse {
+  role_id: number;
+  permission_keys: string[];
+}
+
+export interface RolePermissionsUpdate {
+  permission_keys: string[];
+}
+
+export interface UserRolesResponse {
+  user_id: number;
+  role_ids: number[];
+  roles: UserRoleSummary[];
+}
+
+export interface UserRolesUpdate {
+  role_ids: number[];
 }
 
 // Currency Types

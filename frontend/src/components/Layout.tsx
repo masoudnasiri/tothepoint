@@ -35,9 +35,11 @@ import {
   ExpandLess,
   ExpandMore,
   Info,
+  AdminPanelSettings,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
+import { canManageAccessControl } from '../utils/permissions.ts';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
 import { BRAND_NAME, PRODUCER_NAME, PRODUCT_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
@@ -55,6 +57,7 @@ interface NavigationItem {
   path?: string;
   roles: string[];
   children?: NavigationItem[];
+  accessControlOnly?: boolean;
 }
 
 const navigationItems: NavigationItem[] = [
@@ -75,6 +78,13 @@ const navigationItems: NavigationItem[] = [
   { textKey: 'navigation.optimization', icon: <Psychology />, path: '/optimization-enhanced', roles: ['admin', 'finance'] },
   { textKey: 'navigation.decisions', icon: <CheckCircle />, path: '/decisions', roles: ['admin', 'finance'] },
   { textKey: 'navigation.users', icon: <People />, path: '/users', roles: ['admin'] },
+  {
+    textKey: 'navigation.accessControl',
+    icon: <AdminPanelSettings />,
+    path: '/access-control',
+    roles: ['admin'],
+    accessControlOnly: true,
+  },
   { textKey: 'navigation.auditLogs', icon: <Info />, path: '/audit-logs', roles: ['admin'] },
   {
     textKey: 'navigation.baseInformation',
@@ -128,9 +138,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     return false;
   };
 
-  const filteredNavItems = navigationItems.filter(
-    item => user?.role && item.roles.includes(user.role)
-  );
+  const canSeeNavItem = (item: NavigationItem): boolean => {
+    if (item.accessControlOnly) {
+      return canManageAccessControl(user);
+    }
+    return Boolean(user?.role && item.roles.includes(user.role));
+  };
+
+  const filteredNavItems = navigationItems.filter(canSeeNavItem);
 
   const handleNavigation = (path: string) => {
     navigate(path);
@@ -165,7 +180,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     const isExpanded = expandedItems.has(item.textKey);
     const isActive = isItemActive(item);
     const hasChildren = !!(item.children && item.children.length > 0);
-    const filteredChildren = item.children?.filter(c => user?.role && c.roles.includes(user.role)) || [];
+    const filteredChildren = item.children?.filter(canSeeNavItem) || [];
 
     return (
       <React.Fragment key={item.textKey}>

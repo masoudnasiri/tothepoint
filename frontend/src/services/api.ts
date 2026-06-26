@@ -746,4 +746,25 @@ export const auditLogsAPI = {
   } = {}) => api.get('/audit-logs/', { params }),
 };
 
+// Access Control API (Sprint 5B / 5C)
+export const accessControlAPI = {
+  listPermissions: () => api.get('/access-control/permissions'),
+  listRoles: () => api.get('/access-control/roles'),
+  createRole: (payload: { code: string; display_name: string; description?: string | null }) =>
+    api.post('/access-control/roles', payload),
+  getRole: (roleId: number) => api.get(`/access-control/roles/${roleId}`),
+  updateRole: (
+    roleId: number,
+    payload: { display_name?: string; description?: string | null; is_active?: boolean }
+  ) => api.put(`/access-control/roles/${roleId}`, payload),
+  deactivateRole: (roleId: number) => api.delete(`/access-control/roles/${roleId}`),
+  getRolePermissions: (roleId: number) =>
+    api.get(`/access-control/roles/${roleId}/permissions`),
+  updateRolePermissions: (roleId: number, payload: { permission_keys: string[] }) =>
+    api.put(`/access-control/roles/${roleId}/permissions`, payload),
+  getUserRoles: (userId: number) => api.get(`/access-control/users/${userId}/roles`),
+  updateUserRoles: (userId: number, payload: { role_ids: number[] }) =>
+    api.put(`/access-control/users/${userId}/roles`, payload),
+};
+
 export default api;
