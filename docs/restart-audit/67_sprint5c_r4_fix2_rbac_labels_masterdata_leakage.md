@@ -63,9 +63,12 @@ Sprint type: **RBAC UX + master-data nav leakage fix**
 
 Post-deploy checks on `/opt/rivar-demo`:
 
-- `verify.sh` — expected **PASS**
-- `run_sprint5c_r4_fix2_smoke.py` — access-control-only user: `/users/` 200, `/items-master/` 403, `/suppliers/` 403, no `master_data.*` in `/auth/me`
-- Container grep: `userHasExplicitRbacGrants`, `ENFORCED_FEATURE_KEYS`, `canSeeItemsMasterNav`
+- Deploy commit: `f152297` (feature) + `26e9f5f` (smoke script)
+- `verify.sh` — **PASS**
+- `run_sprint5c_r4_fix2_smoke.sh` — **PASS**
+- Equivalent user `sprint5c_r4_fix2_ac_only_user` (copied Access Control Administrator permissions): legacy `pm`, 13 permissions, **no `master_data.*`**, `/users/` 200, `/access-control/roles` 200, `/items-master/` 403, `/suppliers/` 403
+- `testuser5` on demo: login returned 401 (user/password not present in demo DB); issue reproduced via equivalent AC-only smoke user
+- Container source: `userHasExplicitRbacGrants`, `ENFORCED_FEATURE_KEYS` present
 
 ## What is enforced now
 
