@@ -57,8 +57,8 @@ source "${ENV_FILE}"
 
 echo "Checking frontend routes..."
 curl -fsS -o /dev/null "${FRONTEND_URL}/"
-curl -fsS -o /dev/null "${FRONTEND_URL}/login"
-curl -fsS -o /dev/null "${FRONTEND_URL}/procurement"
+curl -fsS -o /dev/null -H "Accept: text/html" "${FRONTEND_URL}/login"
+curl -fsS -o /dev/null -H "Accept: text/html" "${FRONTEND_URL}/procurement"
 curl -fsS -o /dev/null "${FRONTEND_URL}/asset-manifest.json"
 
 echo "Checking backend health and OpenAPI..."
@@ -78,12 +78,12 @@ if [ "${ENSURE_FIXTURE}" -eq 1 ]; then
     sh -lc "cd /app && PYTHONPATH=/app python scripts/create_sprint4a_demo_fixture.py --mode recreate"
 fi
 
-echo "Running backend runtime verification..."
+echo "Running Sprint 3A-R3 backend runtime verification..."
 docker compose \
   --project-name rivar-demo \
   --env-file "${ENV_FILE}" \
   -f "${COMPOSE_FILE}" \
   exec -T backend \
-  sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_runtime.py --backend-url http://127.0.0.1:8000 --username '${VERIFY_USERNAME:-admin}' --password '${VERIFY_PASSWORD:-admin123}'"
+  sh -lc "cd /app && PYTHONPATH=/app python scripts/verify_runtime_r3.py --backend-url http://127.0.0.1:8000 --username '${VERIFY_USERNAME:-admin}' --password '${VERIFY_PASSWORD:-admin123}'"
 
 echo "Verification PASS."
