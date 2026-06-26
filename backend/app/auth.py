@@ -237,6 +237,38 @@ def require_users_permission(permission_key: str):
     return permission_checker
 
 
+def require_procurement_assignment_permission(permission_key: str):
+    """Sprint 5D: enforce RBAC for procurement assignment APIs regardless of global enforcement flag."""
+
+    async def permission_checker(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        from app.crud import log_audit
+        from app.services.rbac_service import (
+            user_has_procurement_assignment_permission as _has_perm,
+        )
+
+        if await _has_perm(db, current_user, permission_key):
+            return current_user
+        try:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="PROCUREMENT_ASSIGNMENT_PERMISSION_DENIED",
+                entity_type="procurement_assignment",
+                details={"permission_key": permission_key},
+            )
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient permissions: {permission_key}",
+        )
+
+    return permission_checker
+
+
 async def require_access_control_manager(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

@@ -33,5 +33,6 @@ run_psql_file() {
 
 # Canonical Sprint 3A-R3 migrations (idempotent; do not duplicate DDL elsewhere).
 run_psql_file "${INSTALL_DIR}/backend/add_procurement_cost_component_payment_metadata.sql"
+run_psql_file "${INSTALL_DIR}/backend/add_procurement_assignments_table.sql"
 
 echo "R3 schema migrations applied."

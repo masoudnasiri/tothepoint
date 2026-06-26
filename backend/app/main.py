@@ -11,7 +11,7 @@ import logging
 from app.config import settings
 from app.database import init_db
 from app.app_metadata import APP_VERSION, PRODUCER_NAME, PRODUCT_NAME
-from app.routers import auth, users, projects, items, items_master, procurement, procurement_financials, procurement_plan, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies, invoice_payment_simple, supplier_payments, brs_api, suppliers, audit, config, packages, access_control  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
+from app.routers import auth, users, projects, items, items_master, procurement, procurement_financials, procurement_plan, procurement_assignments, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies, invoice_payment_simple, supplier_payments, brs_api, suppliers, audit, config, packages, access_control  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -124,6 +124,7 @@ app.include_router(weights.router)
 app.include_router(decisions.router)
 app.include_router(delivery_options.router)
 app.include_router(procurement.router)
+app.include_router(procurement_assignments.router)
 app.include_router(procurement_financials.router)
 app.include_router(procurement_plan.router)
 app.include_router(finance.router)

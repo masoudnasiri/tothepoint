@@ -201,6 +201,57 @@ class ProjectAssignment(Base):
     project = relationship("Project", back_populates="project_assignments")
 
 
+class ProcurementAssignmentStatus(enum.Enum):
+    active = "active"
+    completed = "completed"
+    cancelled = "cancelled"
+
+
+class ProcurementAssignmentScope(enum.Enum):
+    project = "project"
+    project_item = "project_item"
+
+
+class ProcurementAssignment(Base):
+    """Assign procurement specialists to projects or project items (Sprint 5D)."""
+    __tablename__ = "procurement_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_item_id = Column(Integer, ForeignKey("project_items.id", ondelete="CASCADE"), nullable=True, index=True)
+    assignee_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    assigned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    status = Column(String(32), nullable=False, default=ProcurementAssignmentStatus.active.value, index=True)
+    assignment_scope = Column(String(32), nullable=False, index=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('active', 'completed', 'cancelled')",
+            name="chk_procurement_assignment_status",
+        ),
+        CheckConstraint(
+            "assignment_scope IN ('project', 'project_item')",
+            name="chk_procurement_assignment_scope",
+        ),
+        CheckConstraint(
+            "(assignment_scope = 'project' AND project_item_id IS NULL) "
+            "OR (assignment_scope = 'project_item' AND project_item_id IS NOT NULL)",
+            name="chk_procurement_assignment_scope_item",
+        ),
+    )
+
+    project = relationship("Project", backref="procurement_assignments")
+    project_item = relationship("ProjectItem", backref="procurement_assignments")
+    assignee = relationship("User", foreign_keys=[assignee_user_id], backref="procurement_assignments_received")
+    assigned_by = relationship("User", foreign_keys=[assigned_by_user_id], backref="procurement_assignments_created")
+
+
 class ProjectPhase(Base):
     __tablename__ = "project_phases"
     

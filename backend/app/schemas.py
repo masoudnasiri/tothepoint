@@ -321,6 +321,51 @@ class ProjectAssignment(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# Procurement assignment schemas (Sprint 5D)
+class ProcurementAssignmentRead(BaseModel):
+    id: int
+    project_id: int
+    project_item_id: Optional[int] = None
+    assignee_user_id: int
+    assigned_by_user_id: int
+    status: str
+    assignment_scope: str
+    note: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    cancelled_reason: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProcurementAssignmentCreate(BaseModel):
+    project_id: int
+    project_item_id: Optional[int] = None
+    assignee_user_id: int
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class ProcurementAssignmentBulkCreate(BaseModel):
+    project_id: int
+    assignee_user_ids: List[int] = Field(..., min_length=1)
+    project_item_ids: Optional[List[int]] = None
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class ProcurementAssignmentUpdate(BaseModel):
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class ProcurementAssignmentCancel(BaseModel):
+    cancelled_reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class ProcurementAssignmentStatusUpdate(BaseModel):
+    note: Optional[str] = Field(None, max_length=2000)
+
+
 # Project Phase Schemas
 class ProjectPhaseBase(BaseModel):
     phase_name: str = Field(..., min_length=1, max_length=100)

@@ -71,6 +71,13 @@ PERMISSION_DEFINITIONS: Tuple[PermissionDefinition, ...] = (
     _p("procurement.options", "edit", "Edit procurement options", 322),
     _p("procurement.options", "delete", "Delete procurement options", 323),
     _p("procurement.options", "submit", "Submit procurement options", 324),
+    # procurement assignments (Sprint 5D)
+    _p("procurement.assignments", "view", "View procurement assignments", 330),
+    _p("procurement.assignments", "create", "Create procurement assignments", 331),
+    _p("procurement.assignments", "edit", "Edit procurement assignments", 332),
+    _p("procurement.assignments", "delete", "Delete/deactivate procurement assignments", 333),
+    _p("procurement.assignments", "complete", "Complete procurement assignments", 334),
+    _p("procurement.assignments", "cancel", "Cancel procurement assignments", 335),
     # master_data
     _p("master_data", "view", "View master data", 400),
     _p("master_data.payment_methods", "view", "View payment methods", 410),
@@ -159,11 +166,23 @@ def _feature_actions(feature: str, actions: List[str]) -> Set[str]:
     return {f"{feature}.{action}" for action in actions}
 
 
+PROCUREMENT_ASSIGNMENT_MANAGE_PERMISSIONS = _keys(
+    "procurement.assignments.view",
+    "procurement.assignments.create",
+    "procurement.assignments.edit",
+    "procurement.assignments.delete",
+    "procurement.assignments.complete",
+    "procurement.assignments.cancel",
+)
+
 PMO_PERMISSIONS = (
     _keys(
         "projects.view", "projects.create", "projects.edit",
         "project_items.view", "project_items.create", "project_items.edit", "project_items.finalize",
         "procurement.view", "procurement.packages.view", "procurement.options.view",
+    )
+    | PROCUREMENT_ASSIGNMENT_MANAGE_PERMISSIONS
+    | _keys(
         "master_data.view", "master_data.payment_methods.view", "master_data.cost_components.view",
         "master_data.items.view", "master_data.items.create", "master_data.items.edit",
         "master_data.suppliers.view", "master_data.suppliers.create", "master_data.suppliers.edit",
@@ -178,6 +197,10 @@ PROJECT_MANAGER_PERMISSIONS = (
         "projects.view",
         "project_items.view", "project_items.create", "project_items.edit",
         "procurement.view", "procurement.packages.view", "procurement.options.view",
+        "procurement.assignments.view",
+        "procurement.assignments.create",
+        "procurement.assignments.edit",
+        "procurement.assignments.cancel",
         "master_data.view",
         "master_data.items.view", "master_data.items.create", "master_data.items.edit",
         "master_data.suppliers.view", "master_data.suppliers.create", "master_data.suppliers.edit",
@@ -188,6 +211,7 @@ PROJECT_MANAGER_PERMISSIONS = (
 
 PROCUREMENT_SPECIALIST_PERMISSIONS = (
     _keys(
+        "procurement.assignments.view",
         "procurement.view", "procurement.create", "procurement.edit",
         "procurement.packages.view", "procurement.packages.create", "procurement.packages.edit",
         "procurement.options.view", "procurement.options.create", "procurement.options.edit",
@@ -233,6 +257,9 @@ PILOT_PERMISSION_PREFIXES: Tuple[str, ...] = (
     "master_data.payment_methods.",
     "master_data.cost_components.",
 )
+
+# Sprint 5D: RBAC-enforced procurement assignment API prefix.
+PROCUREMENT_ASSIGNMENT_PERMISSION_PREFIX = "procurement.assignments."
 
 SYSTEM_ROLE_PERMISSION_KEYS: Dict[str, Set[str]] = {
     "system_admin": set(ALL_PERMISSION_KEYS),

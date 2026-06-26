@@ -254,6 +254,23 @@ async def user_has_users_permission(db: AsyncSession, user: User, permission_key
     return await user_has_permission(db, user, permission_key)
 
 
+async def user_has_procurement_assignment_permission(
+    db: AsyncSession, user: User, permission_key: str
+) -> bool:
+    """RBAC-only check for procurement assignment routes (ignores legacy role except admin bypass)."""
+    if not permission_key.startswith("procurement.assignments."):
+        raise ValueError(
+            f"Expected procurement.assignments.* permission key, got {permission_key!r}"
+        )
+    if not user.is_active:
+        return False
+    if settings.enable_super_admin_bypass and user.role == "admin":
+        return True
+    if await user_has_system_admin_role(db, user):
+        return True
+    return await user_has_permission(db, user, permission_key)
+
+
 async def get_user_role_summaries(db: AsyncSession, user_id: int) -> List[Dict[str, object]]:
     result = await db.execute(
         select(Role)
