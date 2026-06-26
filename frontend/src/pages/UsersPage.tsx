@@ -46,6 +46,7 @@ import {
   canEditUsers,
   canViewUsersSection,
 } from '../utils/permissions.ts';
+import { deriveLegacyRoleFromRoleCodes } from '../utils/legacyRoleDerivation.ts';
 
 interface UsersPageProps {
   embedded?: boolean;
@@ -75,11 +76,11 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
   const [formData, setFormData] = useState({
     username: '',
     password: '',
-    role: 'pm',
     is_active: true,
   });
   const [rbacRoles, setRbacRoles] = useState<Role[]>([]);
-  const [selectedRbacRoleIds, setSelectedRbacRoleIds] = useState<number[]>([]);
+  const [selectedRoleIds, setSelectedRoleIds] = useState<number[]>([]);
+  const [userRoleLabels, setUserRoleLabels] = useState<Record<number, string>>({});
   const [rolesLoading, setRolesLoading] = useState(false);
   const [roleAssignWarning, setRoleAssignWarning] = useState('');
 
@@ -103,20 +104,56 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
   const loadUserRbacRoles = async (userId: number) => {
     try {
       const res = await accessControlAPI.getUserRoles(userId);
-      setSelectedRbacRoleIds(res.data.role_ids || []);
+      setSelectedRoleIds(res.data.role_ids || []);
     } catch {
-      setSelectedRbacRoleIds([]);
+      setSelectedRoleIds([]);
     }
   };
 
+  const refreshUserRoleLabels = async (userList: User[], roles: Role[]) => {
+    const roleMap = new Map(roles.map((r) => [r.id, r.display_name]));
+    const entries = await Promise.all(
+      userList.map(async (userItem) => {
+        try {
+          const res = await accessControlAPI.getUserRoles(userItem.id);
+          const label = (res.data.role_ids || [])
+            .map((id: number) => roleMap.get(id))
+            .filter(Boolean)
+            .join(', ');
+          return [userItem.id, label || '—'] as const;
+        } catch {
+          return [userItem.id, '—'] as const;
+        }
+      })
+    );
+    setUserRoleLabels(Object.fromEntries(entries));
+  };
+
   useEffect(() => {
-    fetchUsers();
+    const init = async () => {
+      setRolesLoading(true);
+      try {
+        const res = await accessControlAPI.listRoles();
+        const activeRoles = (res.data as Role[]).filter((r) => r.is_active);
+        setRbacRoles(activeRoles);
+        await fetchUsers(activeRoles);
+      } catch {
+        setRbacRoles([]);
+        await fetchUsers([]);
+      } finally {
+        setRolesLoading(false);
+      }
+    };
+    void init();
   }, []);
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (rolesForLabels: Role[] = rbacRoles) => {
     try {
       const response = await usersAPI.list();
       setUsers(response.data);
+      if (rolesForLabels.length) {
+        await refreshUserRoleLabels(response.data, rolesForLabels);
+      }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load users');
     } finally {
@@ -126,22 +163,28 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
 
   const handleCreateUser = async () => {
     setRoleAssignWarning('');
+    if (!selectedRoleIds.length) {
+      setError(t('users.rolesRequired'));
+      return;
+    }
     try {
-      const res = await usersAPI.create(formData);
+      const selectedCodes = selectedRoleIds
+        .map((id) => rbacRoles.find((r) => r.id === id)?.code)
+        .filter((code): code is string => Boolean(code));
+      const legacyRole = deriveLegacyRoleFromRoleCodes(selectedCodes);
+      const res = await usersAPI.create({ ...formData, role: legacyRole });
       const created = res.data as User;
-      if (selectedRbacRoleIds.length) {
-        try {
-          await accessControlAPI.updateUserRoles(created.id, { role_ids: selectedRbacRoleIds });
-        } catch (roleErr: any) {
-          const detail = roleErr.response?.data?.detail;
-          setRoleAssignWarning(
-            typeof detail === 'string'
-              ? t('users.rbacRolesAssignFailed', { detail })
-              : t('users.rbacRolesAssignFailedGeneric')
-          );
-          fetchUsers();
-          return;
-        }
+      try {
+        await accessControlAPI.updateUserRoles(created.id, { role_ids: selectedRoleIds });
+      } catch (roleErr: any) {
+        const detail = roleErr.response?.data?.detail;
+        setRoleAssignWarning(
+          typeof detail === 'string'
+            ? t('users.rolesAssignFailed', { detail })
+            : t('users.rolesAssignFailedGeneric')
+        );
+        fetchUsers();
+        return;
       }
       setCreateDialogOpen(false);
       resetForm();
@@ -171,16 +214,19 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
     if (!selectedUser) return;
     
     try {
-      const updateData = { ...formData };
-      // Only include password if it's not empty
-      if (!updateData.password || updateData.password.trim() === '') {
+      const updateData: Record<string, unknown> = { ...formData };
+      if (!updateData.password || String(updateData.password).trim() === '') {
         delete updateData.password;
       }
+      const selectedCodes = selectedRoleIds
+        .map((id) => rbacRoles.find((r) => r.id === id)?.code)
+        .filter((code): code is string => Boolean(code));
+      updateData.role = deriveLegacyRoleFromRoleCodes(selectedCodes);
       
       await usersAPI.update(selectedUser.id, updateData);
       if (canEdit) {
         try {
-          await accessControlAPI.updateUserRoles(selectedUser.id, { role_ids: selectedRbacRoleIds });
+          await accessControlAPI.updateUserRoles(selectedUser.id, { role_ids: selectedRoleIds });
         } catch (roleErr: any) {
           const detail = roleErr.response?.data?.detail;
           setError(
@@ -231,10 +277,9 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
     setFormData({
       username: '',
       password: '',
-      role: 'pm',
       is_active: true,
     });
-    setSelectedRbacRoleIds([]);
+    setSelectedRoleIds([]);
     setRoleAssignWarning('');
   };
 
@@ -249,29 +294,11 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
     setFormData({
       username: userItem.username,
       password: '',
-      role: userItem.role,
       is_active: userItem.is_active,
     });
     void loadRbacRoles();
     void loadUserRbacRoles(userItem.id);
     setEditDialogOpen(true);
-  };
-
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'admin':
-        return 'error';
-      case 'pmo':
-        return 'secondary';
-      case 'pm':
-        return 'primary';
-      case 'procurement':
-        return 'warning';
-      case 'finance':
-        return 'success';
-      default:
-        return 'default';
-    }
   };
 
   const formatDate = (dateString: string) => {
@@ -333,7 +360,7 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
           <TableHead>
             <TableRow>
               <TableCell>{t('users.username')}</TableCell>
-              <TableCell>{t('users.role')}</TableCell>
+              <TableCell>{t('users.roles')}</TableCell>
               <TableCell align="center">{t('users.active')}</TableCell>
               <TableCell>{t('users.created')}</TableCell>
               <TableCell align="center">{t('common.actions')}</TableCell>
@@ -348,11 +375,9 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
                   </Typography>
                 </TableCell>
                 <TableCell>
-                  <Chip 
-                    label={userItem.role.toUpperCase()} 
-                    color={getRoleColor(userItem.role) as any}
-                    size="small"
-                  />
+                  <Typography variant="body2">
+                    {userRoleLabels[userItem.id] || '—'}
+                  </Typography>
                 </TableCell>
                 <TableCell align="center">
                   <Chip 
@@ -419,26 +444,12 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>{t('users.legacyBaseRole')}</InputLabel>
-            <Select
-              value={formData.role}
-              label={t('users.legacyBaseRole')}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-            >
-              <MenuItem value="pmo">PMO (Project Management Office)</MenuItem>
-              <MenuItem value="pm">Project Manager</MenuItem>
-              <MenuItem value="procurement">Procurement Specialist</MenuItem>
-              <MenuItem value="finance">Finance User</MenuItem>
-              <MenuItem value="admin">Admin</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>{t('users.rbacRoles')}</InputLabel>
+            <InputLabel>{t('users.roles')}</InputLabel>
             <Select
               multiple
-              value={selectedRbacRoleIds}
-              label={t('users.rbacRoles')}
-              onChange={(e) => setSelectedRbacRoleIds(e.target.value as number[])}
+              value={selectedRoleIds}
+              label={t('users.roles')}
+              onChange={(e) => setSelectedRoleIds(e.target.value as number[])}
               disabled={rolesLoading}
               renderValue={(selected) =>
                 selected
@@ -448,14 +459,12 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
             >
               {rbacRoles.map((role) => (
                 <MenuItem key={role.id} value={role.id}>
-                  {role.display_name} ({role.code})
+                  {role.display_name}
+                  {role.is_system ? '' : ` (${role.code})`}
                 </MenuItem>
               ))}
             </Select>
           </FormControl>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            {t('users.rbacRolesAssignHint')}
-          </Typography>
           <FormControlLabel
             control={
               <Switch
@@ -500,27 +509,12 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
             disabled={!canEdit}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>{t('users.legacyBaseRole')}</InputLabel>
-            <Select
-              value={formData.role}
-              label={t('users.legacyBaseRole')}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              disabled={!canEdit}
-            >
-              <MenuItem value="pmo">PMO (Project Management Office)</MenuItem>
-              <MenuItem value="pm">Project Manager</MenuItem>
-              <MenuItem value="procurement">Procurement Specialist</MenuItem>
-              <MenuItem value="finance">Finance User</MenuItem>
-              <MenuItem value="admin">Admin</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>{t('users.rbacRoles')}</InputLabel>
+            <InputLabel>{t('users.roles')}</InputLabel>
             <Select
               multiple
-              value={selectedRbacRoleIds}
-              label={t('users.rbacRoles')}
-              onChange={(e) => setSelectedRbacRoleIds(e.target.value as number[])}
+              value={selectedRoleIds}
+              label={t('users.roles')}
+              onChange={(e) => setSelectedRoleIds(e.target.value as number[])}
               disabled={rolesLoading || !canEdit}
               renderValue={(selected) =>
                 selected
@@ -530,7 +524,8 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
             >
               {rbacRoles.map((role) => (
                 <MenuItem key={role.id} value={role.id}>
-                  {role.display_name} ({role.code})
+                  {role.display_name}
+                  {role.is_system ? '' : ` (${role.code})`}
                 </MenuItem>
               ))}
             </Select>

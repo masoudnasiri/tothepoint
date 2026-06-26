@@ -65,11 +65,10 @@ jest.mock('react-i18next', () => ({
         'users.createUser': 'Create User',
         'users.editUser': 'Edit User',
         'users.updateUser': 'Update User',
-        'users.legacyBaseRole': 'Legacy/base role (compatibility)',
-        'users.rbacRoles': 'RBAC roles',
-        'users.rbacRolesAssignHint': 'Roles assigned after user creation if partial failure.',
-        'users.rbacRolesAssignFailed': `User created but role assignment failed: ${opts?.detail || ''}`,
-        'users.rbacRolesAssignFailedGeneric': 'User created but role assignment failed.',
+        'users.roles': 'Roles',
+        'users.rolesRequired': 'Select at least one role.',
+        'users.rolesAssignFailed': `User created but role assignment failed: ${opts?.detail || ''}`,
+        'users.rolesAssignFailedGeneric': 'User created but role assignment failed.',
         'users.username': 'Username',
         'users.password': 'Password',
         'users.passwordLeaveBlank': 'Password (leave blank)',
@@ -81,6 +80,7 @@ jest.mock('react-i18next', () => ({
         'common.delete': 'Delete',
         'common.actions': 'Actions',
         'accessControl.saveUserRolesFailed': 'Failed to save user roles',
+        'accessControl.featureAccessDenied': 'Access denied',
       };
       return map[key] || key;
     },
@@ -101,6 +101,7 @@ const sampleUsers = [
 ];
 
 const sampleRoles = [
+  { id: 1, code: 'system_admin', display_name: 'System Administrator', is_active: true, is_system: true },
   { id: 2, code: 'project_manager', display_name: 'Project Manager', is_active: true, is_system: true },
   { id: 99, code: 'qa_custom', display_name: 'QA Custom', is_active: true, is_system: false },
 ];
@@ -117,7 +118,7 @@ function findIconButton(title: string): HTMLButtonElement | undefined {
   return document.querySelector(`button[title="${title}"]`) as HTMLButtonElement | undefined;
 }
 
-describe('UsersPage RBAC role assignment', () => {
+describe('UsersPage role assignment', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -151,6 +152,7 @@ describe('UsersPage RBAC role assignment', () => {
       root.render(<UsersPage />);
       await Promise.resolve();
       await Promise.resolve();
+      await Promise.resolve();
     });
   };
 
@@ -162,24 +164,70 @@ describe('UsersPage RBAC role assignment', () => {
     });
   };
 
-  it('create dialog includes legacy/base role and RBAC role multi-select', async () => {
+  it('create dialog shows one Roles selector only', async () => {
     await renderPage();
     await clickButton('Add User');
 
     expect(mockListRoles).toHaveBeenCalled();
-    expect(pageText()).toContain('Legacy/base role (compatibility)');
-    expect(pageText()).toContain('RBAC roles');
+    expect(pageText()).toContain('Roles');
+    expect(pageText()).not.toContain('Legacy/base role');
+    expect(pageText()).not.toContain('RBAC roles');
+    expect(document.querySelectorAll('[role="combobox"]').length).toBe(1);
   });
 
-  it('create user calls usersAPI.create and accessControlAPI.updateUserRoles when roles selected', async () => {
+  it('system and custom roles appear in the same selector', async () => {
+    await renderPage();
+    await clickButton('Add User');
+
+    const roleSelect = document.querySelector('[role="combobox"]') as HTMLElement;
+    await act(async () => {
+      roleSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const options = Array.from(document.querySelectorAll('[role="option"]')).map((el) => el.textContent);
+    expect(options.some((text) => text?.includes('System Administrator'))).toBe(true);
+    expect(options.some((text) => text?.includes('QA Custom'))).toBe(true);
+  });
+
+  it('create user assigns RBAC roles and derives hidden legacy role', async () => {
+    mockUpdateUserRoles.mockResolvedValueOnce({ data: { user_id: 50, role_ids: [1] } });
+    await renderPage();
+    await clickButton('Add User');
+
+    const roleSelect = document.querySelector('[role="combobox"]') as HTMLElement;
+    await act(async () => {
+      roleSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await Promise.resolve();
+    });
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find((el) =>
+      el.textContent?.includes('System Administrator')
+    );
+    await act(async () => {
+      option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await clickButton('Create User');
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockCreateUser).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'admin' })
+    );
+    expect(mockUpdateUserRoles).toHaveBeenCalledWith(50, { role_ids: [1] });
+  });
+
+  it('custom-only selection derives pm compatibility role', async () => {
     mockUpdateUserRoles.mockResolvedValueOnce({ data: { user_id: 50, role_ids: [99] } });
     await renderPage();
     await clickButton('Add User');
 
-    const selects = document.querySelectorAll('[role="combobox"]');
-    const rbacSelect = selects[selects.length - 1] as HTMLElement;
+    const roleSelect = document.querySelector('[role="combobox"]') as HTMLElement;
     await act(async () => {
-      rbacSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      roleSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       await Promise.resolve();
     });
     const option = Array.from(document.querySelectorAll('[role="option"]')).find((el) =>
@@ -196,11 +244,12 @@ describe('UsersPage RBAC role assignment', () => {
       await Promise.resolve();
     });
 
-    expect(mockCreateUser).toHaveBeenCalled();
-    expect(mockUpdateUserRoles).toHaveBeenCalledWith(50, { role_ids: [99] });
+    expect(mockCreateUser).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'pm' })
+    );
   });
 
-  it('edit user loads current RBAC roles when opening edit dialog', async () => {
+  it('edit user loads and updates assigned roles', async () => {
     await renderPage();
     await act(async () => {
       findIconButton('Edit')?.click();
@@ -208,20 +257,8 @@ describe('UsersPage RBAC role assignment', () => {
       await Promise.resolve();
     });
 
-    expect(mockListRoles).toHaveBeenCalled();
     expect(mockGetUserRoles).toHaveBeenCalledWith(10);
-    expect(pageText()).toContain('Edit User');
-    expect(pageText()).toContain('Legacy/base role (compatibility)');
-    expect(pageText()).toContain('RBAC roles');
-  });
-
-  it('edit user updates RBAC roles via accessControlAPI.updateUserRoles', async () => {
-    await renderPage();
-    await act(async () => {
-      findIconButton('Edit')?.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    expect(pageText()).not.toContain('Legacy/base role');
     await clickButton('Update User');
 
     await act(async () => {
@@ -229,7 +266,7 @@ describe('UsersPage RBAC role assignment', () => {
       await Promise.resolve();
     });
 
-    expect(mockUpdateUser).toHaveBeenCalledWith(10, expect.any(Object));
+    expect(mockUpdateUser).toHaveBeenCalledWith(10, expect.objectContaining({ role: 'pm' }));
     expect(mockUpdateUserRoles).toHaveBeenCalledWith(10, { role_ids: [2] });
   });
 
@@ -260,10 +297,9 @@ describe('UsersPage RBAC role assignment', () => {
     await renderPage();
     await clickButton('Add User');
 
-    const selects = document.querySelectorAll('[role="combobox"]');
-    const rbacSelect = selects[selects.length - 1] as HTMLElement;
+    const roleSelect = document.querySelector('[role="combobox"]') as HTMLElement;
     await act(async () => {
-      rbacSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      roleSelect.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
       await Promise.resolve();
     });
     const option = Array.from(document.querySelectorAll('[role="option"]')).find((el) =>

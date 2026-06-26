@@ -426,9 +426,31 @@ export const AccessControlPage: React.FC<AccessControlPageProps> = ({
           ) : roles.length === 0 ? (
             <Alert severity="info">{t('accessControl.noRoles')}</Alert>
           ) : (
-            <Box display="grid" gridTemplateColumns={{ xs: '1fr', lg: '1fr 1.2fr' }} gap={2}>
-              <TableContainer component={Paper}>
-                <Table size="small">
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', lg: 'row' },
+                gap: 2,
+                alignItems: 'stretch',
+                width: '100%',
+                minWidth: 0,
+              }}
+            >
+              <Box
+                sx={{
+                  flex: { xs: '1 1 auto', lg: '0 0 38%' },
+                  minWidth: 0,
+                  maxWidth: { lg: '42%' },
+                }}
+              >
+                <TableContainer
+                  component={Paper}
+                  sx={{
+                    maxHeight: { xs: 360, lg: '72vh' },
+                    overflow: 'auto',
+                  }}
+                >
+                <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
                       <TableCell>{t('accessControl.roleCode')}</TableCell>
@@ -474,8 +496,25 @@ export const AccessControlPage: React.FC<AccessControlPageProps> = ({
                   </TableBody>
                 </Table>
               </TableContainer>
+              </Box>
 
-              <Paper sx={{ p: 2 }}>
+              <Box
+                sx={{
+                  flex: { xs: '1 1 auto', lg: '1 1 62%' },
+                  minWidth: 0,
+                  minHeight: 0,
+                }}
+              >
+              <Paper
+                sx={{
+                  p: 2,
+                  height: { lg: '72vh' },
+                  maxHeight: { xs: 'none', lg: '72vh' },
+                  overflow: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+              >
                 {!selectedRole ? (
                   <Typography color="text.secondary">{t('accessControl.selectRole')}</Typography>
                 ) : detailLoading ? (
@@ -558,6 +597,14 @@ export const AccessControlPage: React.FC<AccessControlPageProps> = ({
                       {t('accessControl.permissionMatrix')}
                     </Typography>
 
+                    <Box
+                      sx={{
+                        flex: '1 1 auto',
+                        minHeight: 0,
+                        overflow: 'auto',
+                        pr: 0.5,
+                      }}
+                    >
                     {PERMISSION_GROUP_ORDER.map((groupKey) => {
                       const features = matrixByGroup[groupKey];
                       if (!features) return null;
@@ -613,6 +660,8 @@ export const AccessControlPage: React.FC<AccessControlPageProps> = ({
                       );
                     })}
 
+                    </Box>
+
                     <Button
                       variant="outlined"
                       startIcon={<SaveIcon />}
@@ -624,6 +673,7 @@ export const AccessControlPage: React.FC<AccessControlPageProps> = ({
                   </Box>
                 )}
               </Paper>
+              </Box>
             </Box>
           )}
         </Box>
