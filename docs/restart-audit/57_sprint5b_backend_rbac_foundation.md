@@ -1,7 +1,7 @@
 # Sprint 5B — Backend RBAC Foundation
 
 Date: 2026-06-26  
-Status: **PASS**  
+Status: **PASS WITH MINOR ISSUES**  
 Sprint type: **Backend implementation** (no Role Management UI; no broad enforcement)
 
 ## Baseline
@@ -129,8 +129,10 @@ Recorded after backend redeploy to demo server (compose `rivar-demo`):
 | `GET /access-control/roles` (admin) | 200 |
 | `GET /access-control/roles` (procurement) | 403 |
 | `GET /payment-methods` | 200 |
-| `GET /procurement-options/{id}/readiness` | 200 |
-| R3 `verify_runtime_r3.py` | PASS |
+| `GET /procurement-options/19/readiness` | 404 (fixture reseed blocked — see note) |
+| R3 `verify_runtime_r3.py` via `verify.sh` | **FAIL** on server — `payment_metadata` column missing on `procurement_cost_components` (pre-existing DB schema drift; unrelated to RBAC) |
+
+**RBAC-specific smoke (admin token):** `me_perms=59`, `me_roles=1`, `ac_perms=200`, `ac_roles=200`, `ac_roles_proc=403` — **PASS**
 
 `/root/pdss_demo` not used.
 
