@@ -144,3 +144,15 @@ Installer scripts:
 - Sprint 3A-R3 closure is accepted PASS with committed provenance.
 - Recommendation: resume Workspace Organization only after this closure record is treated as the active accepted baseline.
 
+## Terminology Refinement Follow-up (UI Labels Only)
+
+- Scope: user-facing payment schedule wording refinement in Package Wizard Step 3.
+- Updated visible terminology:
+  - EN: `Payment schedule type`, `Single-stage`, `Multi-stage`, `Default payment schedule`, `Custom payment schedule for this cost`
+  - FA: `نوع زمان‌بندی پرداخت`, `تک‌مرحله‌ای`, `چندمرحله‌ای`, `برنامه پرداخت پیش‌فرض`, `برنامه پرداخت اختصاصی این هزینه`
+- Explicitly unchanged:
+  - backend enum/internal contract values (`cash` / `installments`)
+  - persistence schema and stored payload structure
+  - payment schedule logic and component metadata behavior
+  - financial projection and optimization/scenario calculations
+

@@ -10,13 +10,13 @@ const enDictionary: Record<string, string> = {
   'procurement.pricingAndCosts': 'Pricing and Costs',
   'procurement.delivery': 'Delivery',
   'procurement.payment': 'Payment',
-  'procurement.paymentType': 'Payment Type',
-  'procurement.cash': 'Cash',
-  'procurement.installments': 'Installments',
-  'procurement.installmentSchedule': 'Installment Schedule (must total 100%)',
+  'procurement.paymentType': 'Payment schedule type',
+  'procurement.cash': 'Single-stage',
+  'procurement.installments': 'Multi-stage',
+  'procurement.installmentSchedule': 'Multi-stage schedule (must total 100%)',
   'procurement.daysAfterPurchase': 'Days After Purchase',
   'procurement.percentage': 'Percentage',
-  'procurement.addInstallment': 'Add Installment',
+  'procurement.addInstallment': 'Add stage',
   'procurement.paymentMethod': 'Payment Method',
   'procurement.paymentDate': 'Payment Date',
   'procurement.plannedSupplierPaymentDate': 'Planned Supplier Payment Date',
@@ -81,13 +81,13 @@ const faDictionary: Record<string, string> = {
   'procurement.pricingAndCosts': 'قیمت‌گذاری و هزینه‌ها',
   'procurement.delivery': 'اطلاعات تحویل',
   'procurement.payment': 'پرداخت',
-  'procurement.paymentType': 'نوع پرداخت',
-  'procurement.cash': 'نقدی',
-  'procurement.installments': 'قسطی',
-  'procurement.installmentSchedule': 'برنامه قسط (باید مجموع 100% باشد)',
+  'procurement.paymentType': 'نوع زمان‌بندی پرداخت',
+  'procurement.cash': 'تک‌مرحله‌ای',
+  'procurement.installments': 'چندمرحله‌ای',
+  'procurement.installmentSchedule': 'برنامه پرداخت چندمرحله‌ای (مجموع باید ۱۰۰٪ باشد)',
   'procurement.daysAfterPurchase': 'روز پس از خرید',
   'procurement.percentage': 'درصد',
-  'procurement.addInstallment': 'افزودن قسط',
+  'procurement.addInstallment': 'افزودن مرحله',
   'procurement.projectRequestedDeliveryDate': 'تاریخ درخواستی تحویل پروژه',
   'procurement.supplierActualAvailableDeliveryDate': 'تاریخ واقعی قابل تحویل تأمین‌کننده',
   'procurement.supplierEffectiveReceiptDate': 'تاریخ مؤثر دریافت تأمین‌کننده',
@@ -273,8 +273,8 @@ describe('PackageWizardStep3', () => {
     });
 
     const text = container.textContent || '';
-    expect(text).toContain('Installment Schedule (must total 100%)');
-    expect(text).toContain('Add Installment');
+    expect(text).toContain('Multi-stage schedule (must total 100%)');
+    expect(text).toContain('Add stage');
     expect(text).toContain('Planned Supplier Payment Date');
   });
 
