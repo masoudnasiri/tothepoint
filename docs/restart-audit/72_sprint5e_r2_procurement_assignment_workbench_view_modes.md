@@ -58,6 +58,16 @@ Unchanged Sprint 5E helpers: view/create/cancel gated; admin bypass only.
 | `ProcurementPage.assignmentsRelocation.test.ts` | PASS |
 | `npm run build` | PASS |
 
+## Runtime smoke (2026-06-26)
+
+| Check | Result |
+|-------|--------|
+| Deploy | `/opt/rivar-demo` @ `d3a1760`, sprint=5E-R2 |
+| `run_sprint5d_smoke.sh` | PASS (13 checks, 0 failures) |
+| `verify.sh` | PASS |
+| `/health` | 200 |
+| Frontend `:3000` | 200 |
+
 ## Deployment
 
 - Script: `deployment/rivar-installer/deploy_update_5e_r2.sh`
