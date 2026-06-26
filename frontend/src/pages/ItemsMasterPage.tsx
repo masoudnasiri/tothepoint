@@ -41,6 +41,12 @@ import { useTranslation } from 'react-i18next';
 import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
+import {
+  canCreateItemsMaster,
+  canDeleteItemsMaster,
+  canEditItemsMaster,
+  canViewItemsMaster,
+} from '../utils/permissions.ts';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
 
 export const ItemsMasterPage: React.FC = () => {
@@ -85,7 +91,10 @@ export const ItemsMasterPage: React.FC = () => {
   const [subItemsLoading, setSubItemsLoading] = useState(false);
   const [draftSubItems, setDraftSubItems] = useState<Array<{ name: string; description?: string; part_number?: string }>>([]);
 
-  const canEdit = user?.role === 'admin' || user?.role === 'pm' || user?.role === 'pmo' || user?.role === 'finance';
+  const canView = canViewItemsMaster(user);
+  const canCreate = canCreateItemsMaster(user);
+  const canEdit = canEditItemsMaster(user);
+  const canDelete = canDeleteItemsMaster(user);
 
   useEffect(() => {
     fetchItems();
@@ -223,6 +232,14 @@ export const ItemsMasterPage: React.FC = () => {
       (item.model && item.model.toLowerCase().includes(search))
     );
   });
+
+  if (!canView) {
+    return (
+      <Box>
+        <Alert severity="error">{t('accessControl.featureAccessDenied')}</Alert>
+      </Box>
+    );
+  }
 
   if (loading) {
     return (
@@ -380,12 +397,14 @@ export const ItemsMasterPage: React.FC = () => {
     <Box>
       <RivarPageHeader
         title={t('itemsMaster.title')}
-        actions={canEdit ? (
+        actions={
           <>
             <Button variant="outlined" size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />} onClick={() => { setLoading(true); fetchItems(); }}>{t('common.refresh')}</Button>
-            <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={() => { resetForm(); setSelectedItem(null); setCreateDialogOpen(true); }}>{t('itemsMaster.createItem')}</Button>
+            {canCreate && (
+              <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={() => { resetForm(); setSelectedItem(null); setCreateDialogOpen(true); }}>{t('itemsMaster.createItem')}</Button>
+            )}
           </>
-        ) : undefined}
+        }
       />
 
       {error && (
@@ -478,51 +497,49 @@ export const ItemsMasterPage: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell align="center">
+                    <IconButton
+                      size="small"
+                      onClick={() => {
+                        setSelectedItem(item);
+                        fetchSubItems(item.id);
+                        setViewDialogOpen(true);
+                      }}
+                      title={t('common.view')}
+                      color="primary"
+                    >
+                      <PreviewIcon />
+                    </IconButton>
                     {canEdit && (
-                      <>
-                        <IconButton
-                          size="small"
-                          onClick={() => {
-                            setSelectedItem(item);
-                            fetchSubItems(item.id);
-                            setViewDialogOpen(true);
-                          }}
-                          title="View Item"
-                          color="primary"
-                        >
-                          <PreviewIcon />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          onClick={() => {
-                            setSelectedItem(item);
-                            setFormData({
-                              company: item.company,
-                              item_name: item.item_name,
-                              model: item.model || '',
-                              part_number: (item as any).part_number || '',
-                              category: item.category || '',
-                              unit: item.unit,
-                              description: item.description || '',
-                            });
-                            setEditDialogOpen(true);
-                            fetchSubItems(item.id);
-                          }}
-                          title="Edit Item"
-                        >
-                          <EditIcon />
-                        </IconButton>
-                        {user?.role === 'admin' && (
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDeleteItem(item.id, item.item_code)}
-                            title="Delete Item"
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        )}
-                      </>
+                      <IconButton
+                        size="small"
+                        onClick={() => {
+                          setSelectedItem(item);
+                          setFormData({
+                            company: item.company,
+                            item_name: item.item_name,
+                            model: item.model || '',
+                            part_number: (item as any).part_number || '',
+                            category: item.category || '',
+                            unit: item.unit,
+                            description: item.description || '',
+                          });
+                          setEditDialogOpen(true);
+                          fetchSubItems(item.id);
+                        }}
+                        title={t('common.edit')}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                    )}
+                    {canDelete && (
+                      <IconButton
+                        size="small"
+                        onClick={() => handleDeleteItem(item.id, item.item_code)}
+                        title={t('common.delete')}
+                        color="error"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
                     )}
                   </TableCell>
                 </TableRow>

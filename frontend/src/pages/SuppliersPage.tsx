@@ -174,8 +174,15 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizedDateProvider } from '../components/LocalizedDateProvider.tsx';
 import { useTranslation } from 'react-i18next';
+import { useAuth } from '../contexts/AuthContext.tsx';
 import { suppliersAPI } from '../services/api.ts';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
+import {
+  canCreateSuppliers,
+  canDeleteSuppliers,
+  canEditSuppliers,
+  canViewSuppliers,
+} from '../utils/permissions.ts';
 
 interface Supplier {
   id: number;
@@ -324,6 +331,11 @@ function TabPanel(props: TabPanelProps) {
 
 const SuppliersPage: React.FC = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const canView = canViewSuppliers(user);
+  const canCreate = canCreateSuppliers(user);
+  const canEdit = canEditSuppliers(user);
+  const canDelete = canDeleteSuppliers(user);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2261,6 +2273,14 @@ const SuppliersPage: React.FC = () => {
     );
   };
 
+  if (!canView) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Alert severity="error">{t('accessControl.featureAccessDenied')}</Alert>
+      </Box>
+    );
+  }
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -2276,9 +2296,11 @@ const SuppliersPage: React.FC = () => {
           title={t('suppliers.title')}
           subtitle={t('suppliers.description')}
           actions={
-            <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={openCreateDialog}>
-              {t('suppliers.addSupplier')}
-            </Button>
+            canCreate ? (
+              <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={openCreateDialog}>
+                {t('suppliers.addSupplier')}
+              </Button>
+            ) : undefined
           }
         />
 
@@ -2471,23 +2493,27 @@ const SuppliersPage: React.FC = () => {
                               <ViewIcon />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title={t('suppliers.edit')}>
-                            <IconButton
-                              size="small"
-                              onClick={() => openEditDialog(supplier)}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={t('suppliers.delete')}>
-                            <IconButton
-                              size="small"
-                              onClick={() => openDeleteDialog(supplier)}
-                              color="error"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
+                          {canEdit && (
+                            <Tooltip title={t('suppliers.edit')}>
+                              <IconButton
+                                size="small"
+                                onClick={() => openEditDialog(supplier)}
+                              >
+                                <EditIcon />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                          {canDelete && (
+                            <Tooltip title={t('suppliers.delete')}>
+                              <IconButton
+                                size="small"
+                                onClick={() => openDeleteDialog(supplier)}
+                                color="error"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Box>
                       </TableCell>
                     </TableRow>

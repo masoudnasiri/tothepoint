@@ -18,14 +18,13 @@ import { ProcurementPlanPage } from './pages/ProcurementPlanPage.tsx';
 import { FinancePage } from './pages/FinancePage.tsx';
 import { OptimizationPage } from './pages/OptimizationPage.tsx';
 import { OptimizationPageEnhanced } from './pages/OptimizationPage_enhanced.tsx';
-import { UsersPage } from './pages/UsersPage.tsx';
 import { WeightsPage } from './pages/WeightsPage.tsx';
 import SuppliersPage from './pages/SuppliersPage.tsx';
 import { AnalyticsDashboardPage } from './pages/AnalyticsDashboardPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 import AuditLogsPage from './pages/AuditLogsPage.tsx';
-import { AccessControlPage } from './pages/AccessControlPage.tsx';
-import { AccessControlRoute } from './components/AccessControlRoute.tsx';
+import { UsersAccessControlPage } from './pages/UsersAccessControlPage.tsx';
+import { UsersAccessControlRoute } from './components/UsersAccessControlRoute.tsx';
 import LocalizedDateProvider from './components/LocalizedDateProvider.tsx';
 import { PRODUCER_NAME, PRODUCT_NAME } from './utils/appIdentity.ts';
 import { createRivarTheme } from './theme/rivarTheme.ts';
@@ -65,15 +64,16 @@ function AppContent() {
                         <Route path="/optimization-enhanced" element={<OptimizationPageEnhanced />} />
                         <Route path="/analytics" element={<AnalyticsDashboardPage />} />
                         <Route path="/reports" element={<ReportsPage />} />
-                        <Route path="/users" element={<UsersPage />} />
+                        <Route path="/users" element={<Navigate to="/users-access?tab=users" replace />} />
                         <Route
-                          path="/access-control"
+                          path="/users-access"
                           element={
-                            <AccessControlRoute>
-                              <AccessControlPage />
-                            </AccessControlRoute>
+                            <UsersAccessControlRoute>
+                              <UsersAccessControlPage />
+                            </UsersAccessControlRoute>
                           }
                         />
+                        <Route path="/access-control" element={<Navigate to="/users-access?tab=roles" replace />} />
                         <Route path="/weights" element={<WeightsPage />} />
                         <Route path="/suppliers" element={<SuppliersPage />} />
                         <Route path="/audit-logs" element={<AuditLogsPage />} />

@@ -13,7 +13,7 @@ import logging
 
 from app.database import get_db
 from app.crud import log_audit
-from app.auth import get_current_user, require_role
+from app.auth import require_pilot_permission
 from app.models import User, ItemMaster, ItemSubItem
 from app.schemas import (
     ItemMaster as ItemMasterSchema,
@@ -66,14 +66,10 @@ async def list_items_master(
     search: Optional[str] = None,
     category: Optional[str] = None,
     active_only: bool = True,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.view")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    List all master items with optional filtering
-    
-    All authenticated users can view items master
-    """
+    """List all master items with optional filtering."""
     query = select(ItemMaster)
     
     # Filter by active status
@@ -108,10 +104,10 @@ async def list_items_master(
 @router.get("/{item_id}", response_model=ItemMasterSchema)
 async def get_item_master(
     item_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.view")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get a specific master item by ID"""
+    """Get a specific master item by ID."""
     result = await db.execute(
         select(ItemMaster).where(ItemMaster.id == item_id)
     )
@@ -130,16 +126,10 @@ async def get_item_master(
 async def create_item_master(
     item_data: ItemMasterCreate,
     request: Request,
-    current_user: User = Depends(require_role(["admin", "pm", "pmo", "finance"])),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.create")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Create a new master item
-    
-    Allowed roles: admin, pm, pmo, finance
-    Item code is auto-generated from company + name + model
-    """
-    # Generate item code
+    """Create a new master item."""
     item_code = generate_item_code(
         item_data.company,
         item_data.item_name,
@@ -206,16 +196,10 @@ async def update_item_master(
     item_id: int,
     item_update: ItemMasterUpdate,
     request: Request,
-    current_user: User = Depends(require_role(["admin", "pm", "pmo", "finance"])),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.edit")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Update a master item
-    
-    Allowed roles: admin, pm, pmo, finance
-    Item code will be regenerated if company/name/model changes
-    """
-    # Get existing item
+    """Update a master item."""
     result = await db.execute(
         select(ItemMaster).where(ItemMaster.id == item_id)
     )
@@ -291,17 +275,12 @@ async def update_item_master(
 async def delete_item_master(
     item_id: int,
     request: Request,
-    current_user: User = Depends(require_role(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.delete")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Delete a master item (Admin only)
-    
-    Cannot delete if item is referenced by project_items
-    """
+    """Delete a master item (cannot delete if referenced by project items)."""
     from app.models import ProjectItem
-    
-    # Check if item exists
+
     result = await db.execute(
         select(ItemMaster).where(ItemMaster.id == item_id)
     )
@@ -356,8 +335,8 @@ async def preview_item_code(
     company: str,
     item_name: str,
     model: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.view")),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Preview what item code will be generated for given inputs
@@ -382,10 +361,10 @@ async def preview_item_code(
 @router.get("/search/by-code/{item_code}", response_model=ItemMasterSchema)
 async def get_item_by_code(
     item_code: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.view")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get master item by item code"""
+    """Get master item by item code."""
     result = await db.execute(
         select(ItemMaster).where(ItemMaster.item_code == item_code)
     )
@@ -408,11 +387,10 @@ async def get_item_by_code(
 async def create_sub_item(
     item_id: int,
     payload: ItemSubItemCreate,
-    current_user: User = Depends(require_role(["admin", "pm", "pmo", "procurement"])),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.edit")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Create a sub-item under an items_master entry"""
-    # Ensure parent exists
+    """Create a sub-item under an items_master entry."""
     result = await db.execute(select(ItemMaster).where(ItemMaster.id == item_id))
     master = result.scalar_one_or_none()
     if not master:
@@ -433,10 +411,10 @@ async def create_sub_item(
 @router.get("/{item_id}/subitems", response_model=List[ItemSubItemSchema])
 async def list_sub_items(
     item_id: int,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.view")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """List sub-items for a master item"""
+    """List sub-items for a master item."""
     result = await db.execute(
         select(ItemSubItem).where(ItemSubItem.item_master_id == item_id).order_by(ItemSubItem.id)
     )
@@ -448,8 +426,8 @@ async def update_sub_item(
     item_id: int,
     subitem_id: int,
     payload: ItemSubItemUpdate,
-    current_user: User = Depends(require_role(["admin", "pm", "pmo", "procurement"])),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.edit")),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(ItemSubItem).where(
@@ -473,8 +451,8 @@ async def update_sub_item(
 async def delete_sub_item(
     item_id: int,
     subitem_id: int,
-    current_user: User = Depends(require_role(["admin"])),
-    db: AsyncSession = Depends(get_db)
+    current_user: User = Depends(require_pilot_permission("master_data.items.delete")),
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
         select(ItemSubItem).where(

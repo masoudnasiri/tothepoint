@@ -221,6 +221,26 @@ async def user_has_permission(db: AsyncSession, user: User, permission_key: str)
     return permission_key in permissions
 
 
+async def user_has_system_admin_role(db: AsyncSession, user: User) -> bool:
+    result = await db.execute(
+        select(Role.code)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user.id, Role.is_active == True, Role.code == "system_admin")  # noqa: E712
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def user_has_pilot_permission(db: AsyncSession, user: User, permission_key: str) -> bool:
+    """RBAC-only check for pilot-enforced master data routes (ignores legacy role except admin bypass)."""
+    if not user.is_active:
+        return False
+    if settings.enable_super_admin_bypass and user.role == "admin":
+        return True
+    if await user_has_system_admin_role(db, user):
+        return True
+    return await user_has_permission(db, user, permission_key)
+
+
 async def get_user_role_summaries(db: AsyncSession, user_id: int) -> List[Dict[str, object]]:
     result = await db.execute(
         select(Role)

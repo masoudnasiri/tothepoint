@@ -26,7 +26,9 @@ jest.mock('react-i18next', () => ({
     t: (key: string) =>
       ({
         'navigation.dashboard': 'Dashboard',
+        'navigation.users': 'Users',
         'navigation.usersAccessControl': 'Users & Access Control',
+        'navigation.accessControl': 'Access Control',
         'navigation.auditLogs': 'Audit Logs',
         'auth.logout': 'Logout',
       })[key] || key,
@@ -34,7 +36,7 @@ jest.mock('react-i18next', () => ({
   }),
 }));
 
-describe('Layout access control navigation', () => {
+describe('Layout users & access control navigation', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -53,7 +55,7 @@ describe('Layout access control navigation', () => {
     container.remove();
   });
 
-  it('shows unified Users & Access Control menu item for admin', async () => {
+  it('shows a single Users & Access Control menu item for admin', async () => {
     mockUseAuth.mockReturnValue({
       user: { role: 'admin', username: 'admin', permissions: ['access_control.roles.manage'] },
       logout: jest.fn(),
@@ -71,9 +73,10 @@ describe('Layout access control navigation', () => {
     });
 
     expect(container.textContent).toContain('Users & Access Control');
+    expect((container.textContent?.match(/Users & Access Control/g) || []).length).toBe(1);
   });
 
-  it('hides unified menu item for procurement user', async () => {
+  it('hides unified menu item for unauthorized procurement user', async () => {
     mockUseAuth.mockReturnValue({
       user: {
         role: 'procurement',
@@ -95,5 +98,29 @@ describe('Layout access control navigation', () => {
     });
 
     expect(container.textContent).not.toContain('Users & Access Control');
+  });
+
+  it('shows unified menu for users.view-only RBAC user', async () => {
+    mockUseAuth.mockReturnValue({
+      user: {
+        role: 'pm',
+        username: 'viewer',
+        permissions: ['users.view'],
+      },
+      logout: jest.fn(),
+    });
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <Layout>
+            <div>Content</div>
+          </Layout>
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.textContent).toContain('Users & Access Control');
   });
 });

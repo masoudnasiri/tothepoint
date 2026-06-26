@@ -1,6 +1,14 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
+
+jest.mock('../contexts/AuthContext.tsx', () => ({
+  useAuth: () => ({
+    user: { role: 'admin', permissions: ['access_control.user_roles.edit'] },
+    loading: false,
+  }),
+}));
+
 import { AccessControlPage } from './AccessControlPage.tsx';
 
 const mockListRoles = jest.fn();
@@ -59,6 +67,11 @@ jest.mock('react-i18next', () => ({
         'accessControl.savePermissions': 'Save permissions',
         'accessControl.saveRole': 'Save role',
         'accessControl.systemAdminLocked': 'System admin locked',
+        'accessControl.enforcementPilotNotice': 'Pilot enforcement notice',
+        'permissionGroups.access_control': 'Access Control',
+        'permissionFeatures.access_control_roles': 'Roles',
+        'permissionActions.view': 'View',
+        'permissionActions.manage': 'Manage',
         'common.refresh': 'Refresh',
         'common.create': 'Create',
         'common.cancel': 'Cancel',
@@ -96,7 +109,7 @@ const samplePermissions = [
   {
     id: 1,
     permission_key: 'access_control.roles.view',
-    feature_key: 'access_control',
+    feature_key: 'access_control.roles',
     action: 'view',
     description: 'View roles',
     is_system: true,
@@ -105,7 +118,7 @@ const samplePermissions = [
   {
     id: 2,
     permission_key: 'access_control.roles.manage',
-    feature_key: 'access_control',
+    feature_key: 'access_control.roles',
     action: 'manage',
     description: 'Manage roles',
     is_system: true,
@@ -167,6 +180,9 @@ describe('AccessControlPage', () => {
     expect(container.textContent).toContain('System role');
     expect(container.textContent).toContain('Custom role');
     expect(container.textContent).toContain('Permission matrix');
+    expect(container.textContent).toContain('Pilot enforcement notice');
+    expect(container.textContent).toContain('Roles');
+    expect(container.textContent).not.toMatch(/Feature: access_control/);
   });
 
   it('opens create role dialog', async () => {

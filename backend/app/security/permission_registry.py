@@ -81,6 +81,14 @@ PERMISSION_DEFINITIONS: Tuple[PermissionDefinition, ...] = (
     _p("master_data.cost_components", "create", "Create cost components", 421),
     _p("master_data.cost_components", "edit", "Edit cost components", 422),
     _p("master_data.cost_components", "delete", "Delete cost components", 423),
+    _p("master_data.items", "view", "View items master catalog", 430),
+    _p("master_data.items", "create", "Create items master records", 431),
+    _p("master_data.items", "edit", "Edit items master records", 432),
+    _p("master_data.items", "delete", "Delete items master records", 433),
+    _p("master_data.suppliers", "view", "View suppliers", 440),
+    _p("master_data.suppliers", "create", "Create suppliers", 441),
+    _p("master_data.suppliers", "edit", "Edit suppliers", 442),
+    _p("master_data.suppliers", "delete", "Delete suppliers", 443),
     # audit
     _p("audit_logs", "view", "View audit logs", 500),
     # finance / cashflow
@@ -157,6 +165,8 @@ PMO_PERMISSIONS = (
         "project_items.view", "project_items.create", "project_items.edit", "project_items.finalize",
         "procurement.view", "procurement.packages.view", "procurement.options.view",
         "master_data.view", "master_data.payment_methods.view", "master_data.cost_components.view",
+        "master_data.items.view", "master_data.items.create", "master_data.items.edit",
+        "master_data.suppliers.view", "master_data.suppliers.create", "master_data.suppliers.edit",
         "decisions.view", "decisions.review",
         "reports.view",
         "users.view",
@@ -169,6 +179,8 @@ PROJECT_MANAGER_PERMISSIONS = (
         "project_items.view", "project_items.create", "project_items.edit",
         "procurement.view", "procurement.packages.view", "procurement.options.view",
         "master_data.view",
+        "master_data.items.view", "master_data.items.create", "master_data.items.edit",
+        "master_data.suppliers.view", "master_data.suppliers.create", "master_data.suppliers.edit",
         "decisions.view", "decisions.review",
         "reports.view",
     )
@@ -183,6 +195,8 @@ PROCUREMENT_SPECIALIST_PERMISSIONS = (
         "master_data.view", "master_data.payment_methods.view",
         "master_data.cost_components.view", "master_data.cost_components.create",
         "master_data.cost_components.edit",
+        "master_data.items.view",
+        "master_data.suppliers.view",
         "reports.view",
     )
 )
@@ -194,6 +208,8 @@ FINANCE_ANALYST_PERMISSIONS = (
         "master_data.view", "master_data.payment_methods.view",
         "master_data.payment_methods.create", "master_data.payment_methods.edit",
         "master_data.payment_methods.delete",
+        "master_data.items.view", "master_data.items.create", "master_data.items.edit",
+        "master_data.suppliers.view", "master_data.suppliers.create", "master_data.suppliers.edit",
         "procurement.view", "procurement.options.view",
         "optimization.view", "optimization.run", "optimization.review", "optimization.approve",
         "decisions.view", "decisions.approve", "decisions.lock",
@@ -208,7 +224,13 @@ ACCESS_CONTROL_ADMIN_PERMISSIONS = _feature_actions(
     "access_control.permissions", ["view", "manage"]
 ) | _feature_actions(
     "access_control.user_roles", ["view", "edit"]
-) | _keys("users.view")
+) | _keys("users.view", "users.create", "users.edit", "users.delete")
+
+# Sprint 5C-R1 pilot: always enforce RBAC for these permission prefixes (not legacy role).
+PILOT_PERMISSION_PREFIXES: Tuple[str, ...] = (
+    "master_data.items.",
+    "master_data.suppliers.",
+)
 
 SYSTEM_ROLE_PERMISSION_KEYS: Dict[str, Set[str]] = {
     "system_admin": set(ALL_PERMISSION_KEYS),

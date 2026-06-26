@@ -199,6 +199,25 @@ def require_any_permission(permission_keys: list[str]):
     return permission_checker
 
 
+def require_pilot_permission(permission_key: str):
+    """Sprint 5C-R1: enforce RBAC for Items Master / Suppliers regardless of global enforcement flag."""
+
+    async def permission_checker(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        from app.services.rbac_service import user_has_pilot_permission as _user_has_pilot_permission
+
+        if await _user_has_pilot_permission(db, current_user, permission_key):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient permissions: {permission_key}",
+        )
+
+    return permission_checker
+
+
 async def require_access_control_manager(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

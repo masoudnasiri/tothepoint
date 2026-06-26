@@ -33,6 +33,7 @@ import {
 import { Add as AddIcon, Refresh as RefreshIcon, Save as SaveIcon } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { accessControlAPI, usersAPI } from '../services/api.ts';
+import { useAuth } from '../contexts/AuthContext.tsx';
 import type {
   Permission,
   Role,
@@ -41,6 +42,18 @@ import type {
   User,
 } from '../types/index.ts';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
+import {
+  PERMISSION_GROUP_ORDER,
+  actionLabelKey,
+  featureLabelKey,
+  resolvePermissionGroup,
+} from '../utils/permissionLabels.ts';
+import { canEditUserRoleAssignment } from '../utils/permissions.ts';
+
+interface AccessControlPageProps {
+  embedded?: boolean;
+  mode?: 'full' | 'roles' | 'userRoles';
+}
 
 const ROLE_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
 
@@ -65,9 +78,14 @@ function groupPermissionsByFeature(permissions: Permission[]): Record<string, Pe
   }, {});
 }
 
-export const AccessControlPage: React.FC = () => {
+export const AccessControlPage: React.FC<AccessControlPageProps> = ({
+  embedded = false,
+  mode = 'full',
+}) => {
   const { t } = useTranslation();
-  const [tab, setTab] = useState(0);
+  const { user: currentUser } = useAuth();
+  const initialTab = mode === 'userRoles' ? 1 : 0;
+  const [tab, setTab] = useState(initialTab);
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [permissionCounts, setPermissionCounts] = useState<Record<number, number>>({});
@@ -96,7 +114,51 @@ export const AccessControlPage: React.FC = () => {
     [roles, selectedRoleId]
   );
 
-  const permissionsByFeature = useMemo(() => groupPermissionsByFeature(permissions), [permissions]);
+  const matrixByGroup = useMemo(() => {
+    const grouped: Record<string, Record<string, Permission[]>> = {};
+    for (const perm of permissions) {
+      const group = resolvePermissionGroup(perm.feature_key);
+      if (!grouped[group]) grouped[group] = {};
+      if (!grouped[group][perm.feature_key]) grouped[group][perm.feature_key] = [];
+      grouped[group][perm.feature_key].push(perm);
+    }
+    for (const group of Object.keys(grouped)) {
+      for (const feature of Object.keys(grouped[group])) {
+        grouped[group][feature].sort((a, b) => a.sort_order - b.sort_order);
+      }
+    }
+    return grouped;
+  }, [permissions]);
+
+  const allActions = useMemo(() => {
+    const actions = new Set<string>();
+    permissions.forEach((p) => actions.add(p.action));
+    const order = ['view', 'create', 'edit', 'delete', 'manage', 'assign', 'export'];
+    return Array.from(actions).sort((a, b) => {
+      const ai = order.indexOf(a);
+      const bi = order.indexOf(b);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
+  }, [permissions]);
+
+  const labelForFeature = (featureKey: string) => {
+    const key = featureLabelKey(featureKey);
+    const translated = t(key);
+    return translated === key ? featureKey : translated;
+  };
+
+  const labelForAction = (action: string) => {
+    const key = actionLabelKey(action);
+    const translated = t(key);
+    return translated === key ? action : translated;
+  };
+
+  const showRolesPanel = mode === 'full' || mode === 'roles';
+  const showUserRolesPanel = mode === 'full' || mode === 'userRoles';
+  const userRolesReadOnly = !canEditUserRoleAssignment(currentUser);
 
   const permissionsReadOnly = Boolean(
     selectedRole && (selectedRole.code === 'system_admin' || !selectedRole.is_active)
@@ -317,15 +379,24 @@ export const AccessControlPage: React.FC = () => {
 
   return (
     <Box>
-      <RivarPageHeader
-        title={t('accessControl.title')}
-        subtitle={t('accessControl.subtitle')}
-        actions={
+      {!embedded && (
+        <RivarPageHeader
+          title={t('accessControl.title')}
+          subtitle={t('accessControl.subtitle')}
+          actions={
+            <Button startIcon={<RefreshIcon />} onClick={loadRolesAndPermissions} disabled={loading}>
+              {t('common.refresh')}
+            </Button>
+          }
+        />
+      )}
+      {embedded && (
+        <Box display="flex" justifyContent="flex-end" mb={2}>
           <Button startIcon={<RefreshIcon />} onClick={loadRolesAndPermissions} disabled={loading}>
             {t('common.refresh')}
           </Button>
-        }
-      />
+        </Box>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -333,12 +404,14 @@ export const AccessControlPage: React.FC = () => {
         </Alert>
       )}
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label={t('accessControl.rolesTab')} />
-        <Tab label={t('accessControl.userRolesTab')} />
-      </Tabs>
+      {mode === 'full' && (
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
+          <Tab label={t('accessControl.rolesTab')} />
+          <Tab label={t('accessControl.userRolesTab')} />
+        </Tabs>
+      )}
 
-      {tab === 0 && (
+      {(mode === 'full' ? tab === 0 : showRolesPanel) && (
         <Box>
           <Box display="flex" justifyContent="flex-end" mb={2}>
             <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
@@ -477,35 +550,68 @@ export const AccessControlPage: React.FC = () => {
                       </Alert>
                     )}
 
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      {t('accessControl.enforcementPilotNotice')}
+                    </Alert>
+
                     <Typography variant="subtitle1" gutterBottom>
                       {t('accessControl.permissionMatrix')}
                     </Typography>
 
-                    {Object.entries(permissionsByFeature).map(([featureKey, featurePerms]) => (
-                      <Box key={featureKey} sx={{ mb: 2 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-                          {t('accessControl.feature')}: {featureKey}
-                        </Typography>
-                        <Box display="flex" flexWrap="wrap" gap={1}>
-                          {featurePerms
-                            .sort((a, b) => a.sort_order - b.sort_order)
-                            .map((perm) => (
-                              <FormControlLabel
-                                key={perm.permission_key}
-                                control={
-                                  <Checkbox
-                                    size="small"
-                                    checked={rolePermissionKeys.has(perm.permission_key)}
-                                    onChange={() => togglePermission(perm.permission_key)}
-                                    disabled={permissionsReadOnly}
-                                  />
-                                }
-                                label={`${t('accessControl.action')}: ${perm.action}`}
-                              />
-                            ))}
+                    {PERMISSION_GROUP_ORDER.map((groupKey) => {
+                      const features = matrixByGroup[groupKey];
+                      if (!features) return null;
+                      return (
+                        <Box key={groupKey} sx={{ mb: 3 }}>
+                          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                            {t(`permissionGroups.${groupKey}`)}
+                          </Typography>
+                          <TableContainer component={Paper} variant="outlined">
+                            <Table size="small">
+                              <TableHead>
+                                <TableRow>
+                                  <TableCell>{t('accessControl.feature')}</TableCell>
+                                  {allActions.map((action) => (
+                                    <TableCell key={action} align="center">
+                                      {labelForAction(action)}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              </TableHead>
+                              <TableBody>
+                                {Object.entries(features).map(([featureKey, featurePerms]) => (
+                                  <TableRow key={featureKey}>
+                                    <TableCell>
+                                      <Typography variant="body2">{labelForFeature(featureKey)}</Typography>
+                                      <Typography variant="caption" color="text.secondary">
+                                        {featureKey}
+                                      </Typography>
+                                    </TableCell>
+                                    {allActions.map((action) => {
+                                      const perm = featurePerms.find((p) => p.action === action);
+                                      if (!perm) {
+                                        return <TableCell key={action} align="center">—</TableCell>;
+                                      }
+                                      return (
+                                        <TableCell key={action} align="center">
+                                          <Checkbox
+                                            size="small"
+                                            checked={rolePermissionKeys.has(perm.permission_key)}
+                                            onChange={() => togglePermission(perm.permission_key)}
+                                            disabled={permissionsReadOnly}
+                                            title={perm.permission_key}
+                                          />
+                                        </TableCell>
+                                      );
+                                    })}
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </TableContainer>
                         </Box>
-                      </Box>
-                    ))}
+                      );
+                    })}
 
                     <Button
                       variant="outlined"
@@ -523,7 +629,7 @@ export const AccessControlPage: React.FC = () => {
         </Box>
       )}
 
-      {tab === 1 && (
+      {(mode === 'full' ? tab === 1 : showUserRolesPanel) && (
         <Paper sx={{ p: 2, maxWidth: 720 }}>
           <Typography variant="h6" gutterBottom>
             {t('accessControl.assignRolesToUser')}
@@ -555,6 +661,7 @@ export const AccessControlPage: React.FC = () => {
                   value={userRoleIds}
                   label={t('accessControl.roles')}
                   onChange={(e) => setUserRoleIds(e.target.value as number[])}
+                  disabled={userRolesReadOnly}
                   renderValue={(selected) =>
                     selected
                       .map((id) => activeRoles.find((r) => r.id === id)?.display_name || String(id))
@@ -572,7 +679,7 @@ export const AccessControlPage: React.FC = () => {
                 variant="contained"
                 startIcon={<SaveIcon />}
                 onClick={handleSaveUserRoles}
-                disabled={saving}
+                disabled={saving || userRolesReadOnly}
               >
                 {t('accessControl.saveUserRoles')}
               </Button>

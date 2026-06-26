@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from sqlalchemy import and_, or_, func, select, update
@@ -12,7 +12,7 @@ import mimetypes
 
 from app.database import get_db
 from app.crud import log_audit
-from app.auth import get_current_user
+from app.auth import require_pilot_permission
 from app.models import User, Supplier, SupplierContact, SupplierDocument, SupplierStatus, ComplianceStatus, RiskLevel
 from app.schemas import (
     Supplier as SupplierSchema,
@@ -100,7 +100,7 @@ async def list_suppliers(
     risk_level: Optional[RiskLevel] = Query(None),
     country: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """List suppliers with filtering and pagination"""
     query = select(Supplier).options(joinedload(Supplier.contacts), joinedload(Supplier.documents))
@@ -160,7 +160,7 @@ async def list_all_contacts(
     search: Optional[str] = Query(None),
     supplier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """List all contacts with optional filters"""
     try:
@@ -230,7 +230,7 @@ async def list_all_contacts(
 async def get_supplier(
     supplier_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """Get supplier by ID with contacts and documents"""
     from sqlalchemy import select
@@ -256,7 +256,7 @@ async def get_supplier(
 async def create_supplier(
     supplier_data: SupplierCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.create")),
     request: Request = None
 ):
     """Create new supplier"""
@@ -305,7 +305,7 @@ async def update_supplier(
     supplier_id: int,
     supplier_data: SupplierUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.edit")),
     request: Request = None
 ):
     """Update supplier"""
@@ -346,7 +346,7 @@ async def update_supplier(
 async def delete_supplier(
     supplier_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.delete")),
     request: Request = None
 ):
     """Delete supplier"""
@@ -408,7 +408,7 @@ async def list_supplier_contacts(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """List contacts for a supplier"""
     from sqlalchemy import select
@@ -445,7 +445,7 @@ async def create_supplier_contact(
     supplier_id: int,
     contact_data: SupplierContactCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.edit"))
 ):
     """Create new contact for supplier"""
     # Check if supplier exists
@@ -500,7 +500,7 @@ async def update_supplier_contact(
     contact_id: int,
     contact_data: SupplierContactUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.edit"))
 ):
     """Update supplier contact"""
     from sqlalchemy import select, update as sql_update
@@ -548,7 +548,7 @@ async def delete_supplier_contact(
     supplier_id: int,
     contact_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.delete"))
 ):
     """Delete supplier contact"""
     from sqlalchemy import select
@@ -579,7 +579,7 @@ async def list_supplier_documents(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """List documents for a supplier"""
     from sqlalchemy import select
@@ -624,7 +624,7 @@ async def upload_supplier_document(
     expiry_date: Optional[date] = Form(None),
     notes: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.edit"))
 ):
     """Upload document for supplier"""
     # Check if supplier exists
@@ -679,7 +679,7 @@ async def download_supplier_document(
     supplier_id: int,
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """Download supplier document"""
     from sqlalchemy import select
@@ -714,7 +714,7 @@ async def update_supplier_document(
     document_id: int,
     document_data: SupplierDocumentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.edit"))
 ):
     """Update supplier document metadata"""
     from sqlalchemy import select
@@ -748,7 +748,7 @@ async def delete_supplier_document(
     supplier_id: int,
     document_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.delete"))
 ):
     """Delete supplier document"""
     from sqlalchemy import select
@@ -780,7 +780,7 @@ async def delete_supplier_document(
 @router.get("/categories/list")
 async def list_categories(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """Get list of unique categories from suppliers"""
     from sqlalchemy import select
@@ -803,7 +803,7 @@ async def list_categories(
 @router.get("/industries/list")
 async def list_industries(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """Get list of unique industries from suppliers"""
     from sqlalchemy import select
@@ -826,7 +826,7 @@ async def list_industries(
 @router.get("/countries/list")
 async def list_countries(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_pilot_permission("master_data.suppliers.view"))
 ):
     """Get list of unique countries from suppliers"""
     from sqlalchemy import select, distinct

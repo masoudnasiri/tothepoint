@@ -33,15 +33,25 @@ import {
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { usersAPI } from '../services/api.ts';
-import { User } from '../types/index.ts';
+import { usersAPI, accessControlAPI } from '../services/api.ts';
+import { User, Role } from '../types/index.ts';
 import { useTranslation } from 'react-i18next';
 import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
+import {
+  canCreateUsers,
+  canDeleteUsers,
+  canEditUsers,
+  canViewUsersSection,
+} from '../utils/permissions.ts';
 
-export const UsersPage: React.FC = () => {
+interface UsersPageProps {
+  embedded?: boolean;
+}
+
+export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
   
@@ -68,6 +78,36 @@ export const UsersPage: React.FC = () => {
     role: 'pm',
     is_active: true,
   });
+  const [rbacRoles, setRbacRoles] = useState<Role[]>([]);
+  const [selectedRbacRoleIds, setSelectedRbacRoleIds] = useState<number[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [roleAssignWarning, setRoleAssignWarning] = useState('');
+
+  const canView = canViewUsersSection(user);
+  const canCreate = canCreateUsers(user);
+  const canEdit = canEditUsers(user);
+  const canDelete = canDeleteUsers(user);
+
+  const loadRbacRoles = async () => {
+    setRolesLoading(true);
+    try {
+      const res = await accessControlAPI.listRoles();
+      setRbacRoles((res.data as Role[]).filter((r) => r.is_active));
+    } catch {
+      setRbacRoles([]);
+    } finally {
+      setRolesLoading(false);
+    }
+  };
+
+  const loadUserRbacRoles = async (userId: number) => {
+    try {
+      const res = await accessControlAPI.getUserRoles(userId);
+      setSelectedRbacRoleIds(res.data.role_ids || []);
+    } catch {
+      setSelectedRbacRoleIds([]);
+    }
+  };
 
   useEffect(() => {
     fetchUsers();
@@ -85,8 +125,22 @@ export const UsersPage: React.FC = () => {
   };
 
   const handleCreateUser = async () => {
+    setRoleAssignWarning('');
     try {
-      await usersAPI.create(formData);
+      const res = await usersAPI.create(formData);
+      const created = res.data as User;
+      if (selectedRbacRoleIds.length) {
+        try {
+          await accessControlAPI.updateUserRoles(created.id, { role_ids: selectedRbacRoleIds });
+        } catch (roleErr: any) {
+          const detail = roleErr.response?.data?.detail;
+          setRoleAssignWarning(
+            typeof detail === 'string'
+              ? t('users.rbacRolesAssignFailed', { detail })
+              : t('users.rbacRolesAssignFailedGeneric')
+          );
+        }
+      }
       setCreateDialogOpen(false);
       resetForm();
       fetchUsers();
@@ -122,6 +176,19 @@ export const UsersPage: React.FC = () => {
       }
       
       await usersAPI.update(selectedUser.id, updateData);
+      if (canEdit) {
+        try {
+          await accessControlAPI.updateUserRoles(selectedUser.id, { role_ids: selectedRbacRoleIds });
+        } catch (roleErr: any) {
+          const detail = roleErr.response?.data?.detail;
+          setError(
+            typeof detail === 'string'
+              ? detail
+              : t('accessControl.saveUserRolesFailed')
+          );
+          return;
+        }
+      }
       setEditDialogOpen(false);
       setSelectedUser(null);
       resetForm();
@@ -165,6 +232,27 @@ export const UsersPage: React.FC = () => {
       role: 'pm',
       is_active: true,
     });
+    setSelectedRbacRoleIds([]);
+    setRoleAssignWarning('');
+  };
+
+  const openCreateDialog = () => {
+    resetForm();
+    void loadRbacRoles();
+    setCreateDialogOpen(true);
+  };
+
+  const openEditDialog = (userItem: User) => {
+    setSelectedUser(userItem);
+    setFormData({
+      username: userItem.username,
+      password: '',
+      role: userItem.role,
+      is_active: userItem.is_active,
+    });
+    void loadRbacRoles();
+    void loadUserRbacRoles(userItem.id);
+    setEditDialogOpen(true);
   };
 
   const getRoleColor = (role: string) => {
@@ -188,6 +276,12 @@ export const UsersPage: React.FC = () => {
     return formatDisplayDate(dateString);
   };
 
+  if (!canView) {
+    return (
+      <Alert severity="error">{t('accessControl.featureAccessDenied')}</Alert>
+    );
+  }
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -198,15 +292,33 @@ export const UsersPage: React.FC = () => {
 
   return (
     <Box>
-      <RivarPageHeader
-        title={t('navigation.users')}
-        actions={
-          <>
-            <Button variant="outlined" size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />} onClick={fetchUsers}>{t('common.refresh')}</Button>
-            <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={() => { setFormData({ username: '', password: '', role: 'pm', is_active: true }); setCreateDialogOpen(true); }}>{t('users.addUser')}</Button>
-          </>
-        }
-      />
+      {!embedded && (
+        <RivarPageHeader
+          title={t('navigation.users')}
+          actions={
+            <>
+              <Button variant="outlined" size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />} onClick={fetchUsers}>{t('common.refresh')}</Button>
+              {canCreate && (
+                <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={openCreateDialog}>{t('users.addUser')}</Button>
+              )}
+            </>
+          }
+        />
+      )}
+      {embedded && (
+        <Box display="flex" justifyContent="flex-end" gap={1} mb={2}>
+          <Button variant="outlined" size="small" startIcon={<RefreshIcon sx={{ fontSize: 15 }} />} onClick={fetchUsers}>{t('common.refresh')}</Button>
+          {canCreate && (
+            <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 15 }} />} onClick={openCreateDialog}>{t('users.addUser')}</Button>
+          )}
+        </Box>
+      )}
+
+      {roleAssignWarning && (
+        <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setRoleAssignWarning('')}>
+          {roleAssignWarning}
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -253,31 +365,26 @@ export const UsersPage: React.FC = () => {
                   </Typography>
                 </TableCell>
                 <TableCell align="center">
-                  <IconButton
-                    size="small"
-                    onClick={() => {
-                      setSelectedUser(userItem);
-                      setFormData({
-                        username: userItem.username,
-                        password: '',
-                        role: userItem.role,
-                        is_active: userItem.is_active,
-                      });
-                      setEditDialogOpen(true);
-                    }}
-                    title="Edit User"
-                  >
-                    <EditIcon />
-                  </IconButton>
-                  <IconButton
-                    size="small"
-                    onClick={() => handleDeleteUser(userItem.id)}
-                    title="Delete User"
-                    color="error"
-                    disabled={userItem.id === user?.id} // Can't delete self
-                  >
-                    <DeleteIcon />
-                  </IconButton>
+                  {canEdit && (
+                    <IconButton
+                      size="small"
+                      onClick={() => openEditDialog(userItem)}
+                      title={t('common.edit')}
+                    >
+                      <EditIcon />
+                    </IconButton>
+                  )}
+                  {canDelete && (
+                    <IconButton
+                      size="small"
+                      onClick={() => handleDeleteUser(userItem.id)}
+                      title={t('common.delete')}
+                      color="error"
+                      disabled={userItem.id === user?.id}
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -287,7 +394,7 @@ export const UsersPage: React.FC = () => {
 
       {/* Create User Dialog */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Create New User</DialogTitle>
+        <DialogTitle>{t('users.createUser')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
@@ -310,9 +417,10 @@ export const UsersPage: React.FC = () => {
             sx={{ mb: 2 }}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Role</InputLabel>
+            <InputLabel>{t('users.legacyBaseRole')}</InputLabel>
             <Select
               value={formData.role}
+              label={t('users.legacyBaseRole')}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
             >
               <MenuItem value="pmo">PMO (Project Management Office)</MenuItem>
@@ -322,6 +430,30 @@ export const UsersPage: React.FC = () => {
               <MenuItem value="admin">Admin</MenuItem>
             </Select>
           </FormControl>
+          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+            <InputLabel>{t('users.rbacRoles')}</InputLabel>
+            <Select
+              multiple
+              value={selectedRbacRoleIds}
+              label={t('users.rbacRoles')}
+              onChange={(e) => setSelectedRbacRoleIds(e.target.value as number[])}
+              disabled={rolesLoading}
+              renderValue={(selected) =>
+                selected
+                  .map((id) => rbacRoles.find((r) => r.id === id)?.display_name || String(id))
+                  .join(', ')
+              }
+            >
+              {rbacRoles.map((role) => (
+                <MenuItem key={role.id} value={role.id}>
+                  {role.display_name} ({role.code})
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            {t('users.rbacRolesAssignHint')}
+          </Typography>
           <FormControlLabel
             control={
               <Switch
@@ -333,16 +465,15 @@ export const UsersPage: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
+          <Button onClick={() => setCreateDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button onClick={handleCreateUser} variant="contained">
-            Create User
+            {t('users.createUser')}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Edit User Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit User</DialogTitle>
+        <DialogTitle>{t('users.editUser')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
@@ -353,6 +484,7 @@ export const UsersPage: React.FC = () => {
             value={formData.username}
             onChange={(e) => setFormData({ ...formData, username: e.target.value })}
             sx={{ mb: 2 }}
+            disabled={!canEdit}
           />
           <TextField
             margin="dense"
@@ -363,18 +495,42 @@ export const UsersPage: React.FC = () => {
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             sx={{ mb: 2 }}
+            disabled={!canEdit}
           />
           <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
-            <InputLabel>Role</InputLabel>
+            <InputLabel>{t('users.legacyBaseRole')}</InputLabel>
             <Select
               value={formData.role}
+              label={t('users.legacyBaseRole')}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+              disabled={!canEdit}
             >
               <MenuItem value="pmo">PMO (Project Management Office)</MenuItem>
               <MenuItem value="pm">Project Manager</MenuItem>
               <MenuItem value="procurement">Procurement Specialist</MenuItem>
               <MenuItem value="finance">Finance User</MenuItem>
               <MenuItem value="admin">Admin</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl fullWidth margin="dense" sx={{ mb: 2 }}>
+            <InputLabel>{t('users.rbacRoles')}</InputLabel>
+            <Select
+              multiple
+              value={selectedRbacRoleIds}
+              label={t('users.rbacRoles')}
+              onChange={(e) => setSelectedRbacRoleIds(e.target.value as number[])}
+              disabled={rolesLoading || !canEdit}
+              renderValue={(selected) =>
+                selected
+                  .map((id) => rbacRoles.find((r) => r.id === id)?.display_name || String(id))
+                  .join(', ')
+              }
+            >
+              {rbacRoles.map((role) => (
+                <MenuItem key={role.id} value={role.id}>
+                  {role.display_name} ({role.code})
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
           <FormControlLabel
@@ -388,10 +544,12 @@ export const UsersPage: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleEditUser} variant="contained">
-            Update User
-          </Button>
+          <Button onClick={() => setEditDialogOpen(false)}>{t('common.cancel')}</Button>
+          {canEdit && (
+            <Button onClick={handleEditUser} variant="contained">
+              {t('users.updateUser')}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
     </Box>

@@ -24,7 +24,6 @@ import {
   LocalShipping,
   AccountBalance,
   Analytics,
-  People,
   Logout,
   Tune,
   CheckCircle,
@@ -39,7 +38,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { canManageAccessControl } from '../utils/permissions.ts';
+import { canAccessUsersAccessControlSection } from '../utils/permissions.ts';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
 import { BRAND_NAME, PRODUCER_NAME, PRODUCT_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
@@ -58,6 +57,7 @@ interface NavigationItem {
   roles: string[];
   children?: NavigationItem[];
   accessControlOnly?: boolean;
+  usersAccessControlOnly?: boolean;
 }
 
 const navigationItems: NavigationItem[] = [
@@ -77,13 +77,12 @@ const navigationItems: NavigationItem[] = [
   { textKey: 'navigation.finance', icon: <AccountBalance />, path: '/finance', roles: ['admin', 'finance'] },
   { textKey: 'navigation.optimization', icon: <Psychology />, path: '/optimization-enhanced', roles: ['admin', 'finance'] },
   { textKey: 'navigation.decisions', icon: <CheckCircle />, path: '/decisions', roles: ['admin', 'finance'] },
-  { textKey: 'navigation.users', icon: <People />, path: '/users', roles: ['admin'] },
   {
-    textKey: 'navigation.accessControl',
+    textKey: 'navigation.usersAccessControl',
     icon: <AdminPanelSettings />,
-    path: '/access-control',
+    path: '/users-access',
     roles: ['admin'],
-    accessControlOnly: true,
+    usersAccessControlOnly: true,
   },
   { textKey: 'navigation.auditLogs', icon: <Info />, path: '/audit-logs', roles: ['admin'] },
   {
@@ -139,8 +138,11 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   };
 
   const canSeeNavItem = (item: NavigationItem): boolean => {
+    if (item.usersAccessControlOnly) {
+      return canAccessUsersAccessControlSection(user);
+    }
     if (item.accessControlOnly) {
-      return canManageAccessControl(user);
+      return canAccessUsersAccessControlSection(user);
     }
     return Boolean(user?.role && item.roles.includes(user.role));
   };

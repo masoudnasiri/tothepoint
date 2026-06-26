@@ -22,14 +22,104 @@ export function hasAnyPermission(
   return permissionKeys.some((key) => user.permissions!.includes(key));
 }
 
+function isLegacyAdmin(user: User | null | undefined): boolean {
+  return user?.role === 'admin';
+}
+
 /** Mirrors backend access-control manager guard during RBAC transition. */
 export function canManageAccessControl(user: User | null | undefined): boolean {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (isLegacyAdmin(user)) return true;
   if (user.permissions?.length) {
     return hasAnyPermission(user, ACCESS_CONTROL_MANAGE_PERMISSIONS);
   }
   return false;
+}
+
+export function canViewUsersSection(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'users.view');
+}
+
+export function canCreateUsers(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'users.create');
+}
+
+export function canEditUsers(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'users.edit');
+}
+
+export function canDeleteUsers(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'users.delete');
+}
+
+export function canViewUserRoleAssignment(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasAnyPermission(user, ['access_control.user_roles.view', 'access_control.user_roles.edit']);
+}
+
+export function canEditUserRoleAssignment(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'access_control.user_roles.edit');
+}
+
+export function canAccessUsersAccessControlSection(user: User | null | undefined): boolean {
+  return (
+    canViewUsersSection(user) ||
+    canManageAccessControl(user) ||
+    canViewUserRoleAssignment(user)
+  );
+}
+
+/**
+ * Sprint 5C-R1 pilot: Items Master / Suppliers use effective RBAC permissions.
+ * Legacy base role does not grant write except explicit admin bypass.
+ */
+export function hasPilotPermission(user: User | null | undefined, permissionKey: string): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, permissionKey);
+}
+
+export function canViewItemsMaster(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.items.view');
+}
+
+export function canCreateItemsMaster(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.items.create');
+}
+
+export function canEditItemsMaster(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.items.edit');
+}
+
+export function canDeleteItemsMaster(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.items.delete');
+}
+
+export function canViewSuppliers(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.suppliers.view');
+}
+
+export function canCreateSuppliers(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.suppliers.create');
+}
+
+export function canEditSuppliers(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.suppliers.edit');
+}
+
+export function canDeleteSuppliers(user: User | null | undefined): boolean {
+  return hasPilotPermission(user, 'master_data.suppliers.delete');
 }
 
 export function usePermissions(user: User | null | undefined) {
@@ -39,6 +129,17 @@ export function usePermissions(user: User | null | undefined) {
       hasAnyPermission: (permissionKeys: readonly string[] | string[]) =>
         hasAnyPermission(user, permissionKeys),
       canManageAccessControl: () => canManageAccessControl(user),
+      canViewUsersSection: () => canViewUsersSection(user),
+      canAccessUsersAccessControlSection: () => canAccessUsersAccessControlSection(user),
+      hasPilotPermission: (permissionKey: string) => hasPilotPermission(user, permissionKey),
+      canViewItemsMaster: () => canViewItemsMaster(user),
+      canCreateItemsMaster: () => canCreateItemsMaster(user),
+      canEditItemsMaster: () => canEditItemsMaster(user),
+      canDeleteItemsMaster: () => canDeleteItemsMaster(user),
+      canViewSuppliers: () => canViewSuppliers(user),
+      canCreateSuppliers: () => canCreateSuppliers(user),
+      canEditSuppliers: () => canEditSuppliers(user),
+      canDeleteSuppliers: () => canDeleteSuppliers(user),
     }),
     [user]
   );
