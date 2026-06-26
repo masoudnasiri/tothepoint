@@ -26,6 +26,8 @@ import {
   Pagination,
   Grid,
   InputAdornment,
+  Tab,
+  Tabs,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { formatApiError } from '../utils/errorUtils.ts';
@@ -53,11 +55,17 @@ import { CoverageSummaryModal } from '../components/packages/CoverageSummaryModa
 import { SubItemRequirement } from '../utils/coverageCalculator.ts';
 import { useTranslation } from 'react-i18next';
 import { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
 import { MyProcurementAssignmentsPanel } from '../components/procurement/MyProcurementAssignmentsPanel.tsx';
-import { canViewProcurementAssignments } from '../utils/permissions.ts';
+import { ProcurementAssignmentManagementPanel } from '../components/procurement/ProcurementAssignmentManagementPanel.tsx';
+import {
+  canCreateProcurementAssignments,
+  canViewAllProcurementAssignments,
+  canViewProcurementAssignments,
+} from '../utils/permissions.ts';
 import { RivarMetricCard } from '../components/ui/RivarMetricCard.tsx';
 import { RivarPanel } from '../components/ui/RivarPanel.tsx';
 import { RivarToolbar } from '../components/ui/RivarToolbar.tsx';
@@ -166,6 +174,23 @@ interface BulkRollbackPreviewResponse {
 export const ProcurementPage: React.FC = () => {
   const { user } = useAuth();
   const { t, i18n } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const assignmentProjectIdParam = searchParams.get('projectId');
+  const initialAssignmentProjectId = assignmentProjectIdParam
+    ? Number(assignmentProjectIdParam)
+    : null;
+  const showAssignmentsArea = canViewProcurementAssignments(user);
+  const showAssignmentManagement =
+    canCreateProcurementAssignments(user) || canViewAllProcurementAssignments(user);
+  const [pageTab, setPageTab] = useState<'operations' | 'assignments'>(() =>
+    searchParams.get('tab') === 'assignments' ? 'assignments' : 'operations'
+  );
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'assignments') {
+      setPageTab('assignments');
+    }
+  }, [searchParams]);
 
   const isFa = i18n.language?.startsWith('fa');
   const formatDisplayDate = useMemo(() => (dateString: string | null) => {
@@ -739,8 +764,29 @@ export const ProcurementPage: React.FC = () => {
         ) : undefined}
       />
 
-      {canViewProcurementAssignments(user) && <MyProcurementAssignmentsPanel />}
+      {showAssignmentsArea && (
+        <Tabs
+          value={pageTab}
+          onChange={(_, value: 'operations' | 'assignments') => setPageTab(value)}
+          sx={{ mb: 3 }}
+        >
+          <Tab value="operations" label={t('procurement.operationsTab')} />
+          <Tab value="assignments" label={t('procurementAssignments.title')} />
+        </Tabs>
+      )}
 
+      {pageTab === 'assignments' && showAssignmentsArea ? (
+        <Box>
+          {showAssignmentManagement ? (
+            <ProcurementAssignmentManagementPanel
+              initialProjectId={initialAssignmentProjectId}
+            />
+          ) : (
+            <MyProcurementAssignmentsPanel />
+          )}
+        </Box>
+      ) : (
+        <>
       {notice && (
         <Alert severity="success" sx={{ mb: 3 }} onClose={() => setNotice('')}>
           {notice}
@@ -1383,6 +1429,9 @@ export const ProcurementPage: React.FC = () => {
             }
           }}
         />
+      )}
+
+        </>
       )}
 
       {/* Package Wizard */}

@@ -31,8 +31,6 @@ import {
   ListItemSecondaryAction,
   MenuItem,
   Autocomplete,
-  Tabs,
-  Tab,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -47,7 +45,6 @@ import {
   CheckCircle as FinalizeIcon,
   Unpublished as UnfinalizeIcon,
   Lock as LockedIcon,
-  Assignment as AssignmentIcon,
 } from '@mui/icons-material';
 import { DeliveryOptionsManager } from '../components/DeliveryOptionsManager.tsx';
 import LocalizedDateProvider from '../components/LocalizedDateProvider.tsx';
@@ -70,11 +67,11 @@ import {
 } from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
-import { ProcurementAssignmentsPanel } from '../components/procurement/ProcurementAssignmentsPanel.tsx';
 import {
-  canCreateProcurementAssignments,
-  canViewProcurementAssignments,
-} from '../utils/permissions.ts';
+  ProjectAssignmentSummaryPanel,
+  useProjectItemAssignmentMap,
+} from '../components/procurement/ProjectAssignmentSummaryPanel.tsx';
+import { canViewProcurementAssignments } from '../utils/permissions.ts';
 
 interface BulkEligibilityItemReport {
   project_item_id: number;
@@ -144,12 +141,8 @@ export const ProjectItemsPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [finalizedFilter, setFinalizedFilter] = useState<string>('');
   const [externalPurchaseFilter, setExternalPurchaseFilter] = useState<string>('');
-  const [pageTab, setPageTab] = useState<'items' | 'assignments'>('items');
-  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
-  const [bulkAssignItemIds, setBulkAssignItemIds] = useState<number[]>([]);
-
-  const showAssignmentsTab = canViewProcurementAssignments(user);
-  const canAssignItems = canCreateProcurementAssignments(user);
+  const showAssignmentSummary = canViewProcurementAssignments(user);
+  const assignmentByItemId = useProjectItemAssignmentMap(parseInt(projectId || '0', 10));
   // Form data with delivery_options array
   const [formData, setFormData] = useState<ProjectItemCreate>({
     project_id: parseInt(projectId || '0'),
@@ -218,18 +211,6 @@ export const ProjectItemsPage: React.FC = () => {
     setFinalizedFilter('');
     setExternalPurchaseFilter('');
     setPage(0);
-  };
-
-  const toggleItemSelection = (itemId: number) => {
-    setSelectedItemIds((prev) =>
-      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId]
-    );
-  };
-
-  const handleAssignSelectedItems = () => {
-    if (selectedItemIds.length === 0) return;
-    setBulkAssignItemIds([...selectedItemIds]);
-    setPageTab('assignments');
   };
 
   const resolveEligibilityMessage = (issue: ProcurementEligibilityIssue): string => {
@@ -749,26 +730,10 @@ export const ProjectItemsPage: React.FC = () => {
         actions={<IconButton onClick={() => navigate('/projects')} size="small"><ArrowBackIcon sx={{ fontSize: 18 }} /></IconButton>}
       />
 
-      {showAssignmentsTab && (
-        <Tabs
-          value={pageTab}
-          onChange={(_, value: 'items' | 'assignments') => setPageTab(value)}
-          sx={{ mb: 2 }}
-        >
-          <Tab value="items" label={t('projectItems.itemsTab')} />
-          <Tab value="assignments" label={t('procurementAssignments.title')} />
-        </Tabs>
+      {showAssignmentSummary && projectId && (
+        <ProjectAssignmentSummaryPanel projectId={parseInt(projectId, 10)} />
       )}
 
-      {pageTab === 'assignments' && showAssignmentsTab ? (
-        <ProcurementAssignmentsPanel
-          projectId={parseInt(projectId || '0', 10)}
-          projectItems={items}
-          bulkItemIds={bulkAssignItemIds}
-          onBulkDialogConsumed={() => setBulkAssignItemIds([])}
-        />
-      ) : (
-        <>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="subtitle1" color="text.secondary">
           {t('projectItems.projectId')}: {projectId}
@@ -823,17 +788,6 @@ export const ProjectItemsPage: React.FC = () => {
           >
             {t('projectItems.finalizeAllItems')}
           </Button>
-          {canAssignItems && (
-            <Button
-              variant="outlined"
-              startIcon={<AssignmentIcon />}
-              onClick={handleAssignSelectedItems}
-              disabled={selectedItemIds.length === 0}
-              sx={{ ml: 1 }}
-            >
-              {t('procurementAssignments.assignSelectedItems')}
-            </Button>
-          )}
         </Box>
       </Box>
 
@@ -931,22 +885,8 @@ export const ProjectItemsPage: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              {canAssignItems && (
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    indeterminate={
-                      selectedItemIds.length > 0 && selectedItemIds.length < items.length
-                    }
-                    checked={items.length > 0 && selectedItemIds.length === items.length}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedItemIds(items.map((item) => item.id));
-                      } else {
-                        setSelectedItemIds([]);
-                      }
-                    }}
-                  />
-                </TableCell>
+              {showAssignmentSummary && (
+                <TableCell>{t('procurementAssignments.assignedUser')}</TableCell>
               )}
               <TableCell>{t('projectItems.itemCode')}</TableCell>
               <TableCell>{t('projectItems.itemName')}</TableCell>
@@ -966,13 +906,18 @@ export const ProjectItemsPage: React.FC = () => {
                 : `${t('projectItems.procurementBlocked')}: ${eligibilityMessages.join(' | ')}`;
 
               return (
-              <TableRow key={item.id} selected={selectedItemIds.includes(item.id)}>
-                {canAssignItems && (
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      checked={selectedItemIds.includes(item.id)}
-                      onChange={() => toggleItemSelection(item.id)}
-                    />
+              <TableRow key={item.id}>
+                {showAssignmentSummary && (
+                  <TableCell>
+                    {(assignmentByItemId[item.id] || []).length > 0 ? (
+                      <Box display="flex" flexWrap="wrap" gap={0.5}>
+                        {(assignmentByItemId[item.id] || []).map((label) => (
+                          <Chip key={`${item.id}-${label}`} size="small" label={label} />
+                        ))}
+                      </Box>
+                    ) : (
+                      '—'
+                    )}
                   </TableCell>
                 )}
                 <TableCell>
@@ -1551,8 +1496,6 @@ export const ProjectItemsPage: React.FC = () => {
           <Button onClick={() => setViewDialogOpen(false)}>{t('projectItems.close')}</Button>
         </DialogActions>
       </Dialog>
-        </>
-      )}
     </Box>
   );
 };

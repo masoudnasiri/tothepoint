@@ -11,7 +11,9 @@ import {
   DialogTitle,
   FormControl,
   InputLabel,
+  ListItemText,
   MenuItem,
+  OutlinedInput,
   Paper,
   Select,
   Table,
@@ -30,10 +32,16 @@ import {
   CheckCircle as CompleteIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
-import { procurementAssignmentsAPI, usersAPI } from '../../services/api.ts';
-import type { ProjectItem, User } from '../../types/index.ts';
+import {
+  itemsAPI,
+  procurementAssignmentsAPI,
+  projectsAPI,
+  usersAPI,
+} from '../../services/api.ts';
+import type { Project, ProjectItem, User } from '../../types/index.ts';
 import type {
   ProcurementAssignment,
+  ProcurementAssignmentScope,
   ProcurementAssignmentStatus,
 } from '../../types/procurementAssignments.ts';
 import { useAuth } from '../../contexts/AuthContext.tsx';
@@ -46,14 +54,13 @@ import {
 } from '../../utils/permissions.ts';
 import { formatApiError } from '../../utils/errorUtils.ts';
 import { ProcurementAssigneePicker } from './ProcurementAssigneePicker.tsx';
+import { filterProcurementCapableUsers } from '../../utils/procurementAssigneeUtils.ts';
 
 type StatusFilter = 'active' | 'all' | ProcurementAssignmentStatus;
+type CreateScope = 'project' | 'project_item';
 
-interface ProcurementAssignmentsPanelProps {
-  projectId: number;
-  projectItems?: ProjectItem[];
-  bulkItemIds?: number[];
-  onBulkDialogConsumed?: () => void;
+interface ProcurementAssignmentManagementPanelProps {
+  initialProjectId?: number | null;
 }
 
 function statusLabelKey(status: ProcurementAssignmentStatus): string {
@@ -71,29 +78,42 @@ function statusChipColor(status: ProcurementAssignmentStatus): 'success' | 'defa
   return 'warning';
 }
 
-export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelProps> = ({
-  projectId,
-  projectItems = [],
-  bulkItemIds = [],
-  onBulkDialogConsumed,
-}) => {
+export const ProcurementAssignmentManagementPanel: React.FC<
+  ProcurementAssignmentManagementPanelProps
+> = ({ initialProjectId = null }) => {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const [assignments, setAssignments] = useState<ProcurementAssignment[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectItems, setProjectItems] = useState<ProjectItem[]>([]);
   const [usersById, setUsersById] = useState<Record<number, User>>({});
   const [loading, setLoading] = useState(true);
+  const [itemsLoading, setItemsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [projectFilter, setProjectFilter] = useState<number | ''>(initialProjectId ?? '');
+  const [assigneeFilter, setAssigneeFilter] = useState<number | ''>('');
+  const [scopeFilter, setScopeFilter] = useState<ProcurementAssignmentScope | ''>('');
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<ProcurementAssignment | null>(null);
+  const [createProjectId, setCreateProjectId] = useState<number | ''>(initialProjectId ?? '');
+  const [createScope, setCreateScope] = useState<CreateScope>('project');
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
   const [assigneeIds, setAssigneeIds] = useState<number[]>([]);
   const [note, setNote] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const projectsById = useMemo(() => {
+    const map: Record<number, Project> = {};
+    projects.forEach((p) => {
+      map[p.id] = p;
+    });
+    return map;
+  }, [projects]);
 
   const itemLabelById = useMemo(() => {
     const map: Record<number, string> = {};
@@ -102,6 +122,11 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
     });
     return map;
   }, [projectItems]);
+
+  const assigneeOptions = useMemo(
+    () => filterProcurementCapableUsers(Object.values(usersById)),
+    [usersById]
+  );
 
   const formatDate = (value?: string | null) => {
     if (!value) return '—';
@@ -114,6 +139,15 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
       return value;
     }
   };
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const response = await projectsAPI.list({ limit: 500 });
+      setProjects(response.data || []);
+    } catch {
+      /* optional labels */
+    }
+  }, []);
 
   const loadUsers = useCallback(async () => {
     try {
@@ -132,9 +166,17 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
     if (!canViewProcurementAssignments(user)) return;
     try {
       setLoading(true);
-      const params: { status?: string } = {};
+      const params: {
+        status?: string;
+        project_id?: number;
+        assignee_user_id?: number;
+        assignment_scope?: ProcurementAssignmentScope;
+      } = {};
       if (statusFilter !== 'all') params.status = statusFilter;
-      const response = await procurementAssignmentsAPI.listByProject(projectId, params);
+      if (projectFilter !== '') params.project_id = projectFilter;
+      if (assigneeFilter !== '') params.assignee_user_id = assigneeFilter;
+      if (scopeFilter !== '') params.assignment_scope = scopeFilter;
+      const response = await procurementAssignmentsAPI.list(params);
       setAssignments(response.data || []);
       setError('');
     } catch (err: unknown) {
@@ -142,81 +184,99 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
     } finally {
       setLoading(false);
     }
-  }, [projectId, statusFilter, t, user]);
+  }, [assigneeFilter, projectFilter, scopeFilter, statusFilter, t, user]);
+
+  const loadProjectItems = useCallback(async (projectId: number) => {
+    try {
+      setItemsLoading(true);
+      const response = await itemsAPI.listByProject(projectId, { limit: 500 });
+      const rows = response.data?.items || response.data || [];
+      setProjectItems(Array.isArray(rows) ? rows : []);
+    } catch (err: unknown) {
+      setError(formatApiError(err, t('procurementAssignments.failedToLoadProjectItems')));
+    } finally {
+      setItemsLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
+    loadProjects();
     loadUsers();
-  }, [loadUsers]);
+  }, [loadProjects, loadUsers]);
 
   useEffect(() => {
     loadAssignments();
   }, [loadAssignments]);
 
   useEffect(() => {
-    if (bulkItemIds.length > 0 && canCreateProcurementAssignments(user)) {
-      setBulkDialogOpen(true);
+    if (projectFilter !== '') {
+      loadProjectItems(projectFilter);
     }
-  }, [bulkItemIds, user]);
+  }, [projectFilter, loadProjectItems]);
+
+  useEffect(() => {
+    if (initialProjectId != null) {
+      setProjectFilter(initialProjectId);
+      setCreateProjectId(initialProjectId);
+    }
+  }, [initialProjectId]);
+
+  useEffect(() => {
+    if (createDialogOpen && createProjectId !== '' && createScope === 'project_item') {
+      loadProjectItems(createProjectId);
+    }
+  }, [createDialogOpen, createProjectId, createScope, loadProjectItems]);
 
   if (!canViewProcurementAssignments(user)) {
     return <Alert severity="warning">{t('procurementAssignments.accessDenied')}</Alert>;
   }
 
   const userLabel = (id: number) => usersById[id]?.username || `#${id}`;
+  const projectLabel = (id: number) => {
+    const project = projectsById[id];
+    return project ? `${project.project_code} — ${project.name}` : `#${id}`;
+  };
 
-  const handleCreateProjectLevel = async () => {
-    if (assigneeIds.length === 0) return;
+  const mapDuplicateError = (err: unknown, fallback: string) => {
+    const msg = formatApiError(err, fallback);
+    return err &&
+      typeof err === 'object' &&
+      (err as { response?: { status?: number } }).response?.status === 409
+      ? t('procurementAssignments.duplicateAssignment')
+      : msg;
+  };
+
+  const handleCreate = async () => {
+    if (assigneeIds.length === 0 || createProjectId === '') return;
+    if (createScope === 'project_item' && selectedItemIds.length === 0) return;
+
     setSubmitting(true);
     setError('');
     try {
-      for (const assigneeId of assigneeIds) {
-        await procurementAssignmentsAPI.create({
-          project_id: projectId,
-          assignee_user_id: assigneeId,
+      if (createScope === 'project') {
+        for (const assigneeId of assigneeIds) {
+          await procurementAssignmentsAPI.create({
+            project_id: createProjectId,
+            assignee_user_id: assigneeId,
+            note: note || undefined,
+          });
+        }
+      } else {
+        await procurementAssignmentsAPI.bulkCreate({
+          project_id: createProjectId,
+          assignee_user_ids: assigneeIds,
+          project_item_ids: selectedItemIds,
           note: note || undefined,
         });
       }
-      setProjectDialogOpen(false);
+      setCreateDialogOpen(false);
       setAssigneeIds([]);
+      setSelectedItemIds([]);
       setNote('');
       setSuccess(t('procurementAssignments.createSuccess'));
       await loadAssignments();
     } catch (err: unknown) {
-      const msg = formatApiError(err, t('procurementAssignments.createFailed'));
-      setError(
-        err && typeof err === 'object' && (err as { response?: { status?: number } }).response?.status === 409
-          ? t('procurementAssignments.duplicateAssignment')
-          : msg
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleBulkCreate = async () => {
-    if (assigneeIds.length === 0 || bulkItemIds.length === 0) return;
-    setSubmitting(true);
-    setError('');
-    try {
-      await procurementAssignmentsAPI.bulkCreate({
-        project_id: projectId,
-        assignee_user_ids: assigneeIds,
-        project_item_ids: bulkItemIds,
-        note: note || undefined,
-      });
-      setBulkDialogOpen(false);
-      setAssigneeIds([]);
-      setNote('');
-      onBulkDialogConsumed?.();
-      setSuccess(t('procurementAssignments.bulkCreateSuccess'));
-      await loadAssignments();
-    } catch (err: unknown) {
-      const msg = formatApiError(err, t('procurementAssignments.createFailed'));
-      setError(
-        err && typeof err === 'object' && (err as { response?: { status?: number } }).response?.status === 409
-          ? t('procurementAssignments.duplicateAssignment')
-          : msg
-      );
+      setError(mapDuplicateError(err, t('procurementAssignments.createFailed')));
     } finally {
       setSubmitting(false);
     }
@@ -262,28 +322,73 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
         <Typography variant="h6" display="flex" alignItems="center" gap={1}>
           <AssignmentIcon fontSize="small" />
-          {t('procurementAssignments.title')}
+          {t('procurementAssignments.managementTitle')}
         </Typography>
-        <Box display="flex" gap={1} flexWrap="wrap">
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <InputLabel>{t('procurementAssignments.statusFilter')}</InputLabel>
-            <Select
-              value={statusFilter}
-              label={t('procurementAssignments.statusFilter')}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            >
-              <MenuItem value="active">{t('procurementAssignments.statusActive')}</MenuItem>
-              <MenuItem value="completed">{t('procurementAssignments.statusCompleted')}</MenuItem>
-              <MenuItem value="cancelled">{t('procurementAssignments.statusCancelled')}</MenuItem>
-              <MenuItem value="all">{t('procurementAssignments.assignmentHistory')}</MenuItem>
-            </Select>
-          </FormControl>
-          {canCreateProcurementAssignments(user) && (
-            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setProjectDialogOpen(true)}>
-              {t('procurementAssignments.projectLevelAssignment')}
-            </Button>
-          )}
-        </Box>
+        {canCreateProcurementAssignments(user) && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setCreateDialogOpen(true)}>
+            {t('procurementAssignments.assignProcurementUser')}
+          </Button>
+        )}
+      </Box>
+
+      <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel>{t('procurementAssignments.selectProject')}</InputLabel>
+          <Select
+            value={projectFilter}
+            label={t('procurementAssignments.selectProject')}
+            onChange={(e) => setProjectFilter(e.target.value === '' ? '' : Number(e.target.value))}
+          >
+            <MenuItem value="">{t('procurementAssignments.allProjects')}</MenuItem>
+            {projects.map((project) => (
+              <MenuItem key={project.id} value={project.id}>
+                {project.project_code} — {project.name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>{t('procurementAssignments.statusFilter')}</InputLabel>
+          <Select
+            value={statusFilter}
+            label={t('procurementAssignments.statusFilter')}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          >
+            <MenuItem value="active">{t('procurementAssignments.statusActive')}</MenuItem>
+            <MenuItem value="completed">{t('procurementAssignments.statusCompleted')}</MenuItem>
+            <MenuItem value="cancelled">{t('procurementAssignments.statusCancelled')}</MenuItem>
+            <MenuItem value="all">{t('procurementAssignments.assignmentHistory')}</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <InputLabel>{t('procurementAssignments.assignedUser')}</InputLabel>
+          <Select
+            value={assigneeFilter}
+            label={t('procurementAssignments.assignedUser')}
+            onChange={(e) => setAssigneeFilter(e.target.value === '' ? '' : Number(e.target.value))}
+          >
+            <MenuItem value="">{t('procurementAssignments.allAssignees')}</MenuItem>
+            {assigneeOptions.map((assignee) => (
+              <MenuItem key={assignee.id} value={assignee.id}>
+                {assignee.username}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>{t('procurementAssignments.assignmentScope')}</InputLabel>
+          <Select
+            value={scopeFilter}
+            label={t('procurementAssignments.assignmentScope')}
+            onChange={(e) =>
+              setScopeFilter(e.target.value === '' ? '' : (e.target.value as ProcurementAssignmentScope))
+            }
+          >
+            <MenuItem value="">{t('procurementAssignments.allScopes')}</MenuItem>
+            <MenuItem value="project">{t('procurementAssignments.projectAssignment')}</MenuItem>
+            <MenuItem value="project_item">{t('procurementAssignments.itemAssignment')}</MenuItem>
+          </Select>
+        </FormControl>
       </Box>
 
       {error && (
@@ -302,12 +407,13 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
           <CircularProgress size={32} />
         </Box>
       ) : assignments.length === 0 ? (
-        <Alert severity="info">{t('procurementAssignments.noAssignedProcurementUsers')}</Alert>
+        <Alert severity="info">{t('procurementAssignments.noAssignments')}</Alert>
       ) : (
         <TableContainer component={Paper}>
           <Table size="small">
             <TableHead>
               <TableRow>
+                <TableCell>{t('procurementAssignments.project')}</TableCell>
                 <TableCell>{t('procurementAssignments.scope')}</TableCell>
                 <TableCell>{t('procurementAssignments.item')}</TableCell>
                 <TableCell>{t('procurementAssignments.assignedUser')}</TableCell>
@@ -323,10 +429,11 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
             <TableBody>
               {assignments.map((row) => (
                 <TableRow key={row.id}>
+                  <TableCell>{projectLabel(row.project_id)}</TableCell>
                   <TableCell>
                     {row.assignment_scope === 'project'
-                      ? t('procurementAssignments.projectLevelAssignment')
-                      : t('procurementAssignments.itemLevelAssignment')}
+                      ? t('procurementAssignments.projectAssignment')
+                      : t('procurementAssignments.itemAssignment')}
                   </TableCell>
                   <TableCell>
                     {row.project_item_id
@@ -357,7 +464,7 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
                                 setCompleteDialogOpen(true);
                               }}
                             >
-                              {t('procurementAssignments.completeAssignment')}
+                              {t('procurementAssignments.complete')}
                             </Button>
                           )}
                           {canCancelProcurementAssignments(user) && (
@@ -370,7 +477,7 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
                                 setCancelDialogOpen(true);
                               }}
                             >
-                              {t('procurementAssignments.cancelAssignment')}
+                              {t('procurementAssignments.cancel')}
                             </Button>
                           )}
                         </Box>
@@ -384,11 +491,72 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
         </TableContainer>
       )}
 
-      <Dialog open={projectDialogOpen} onClose={() => setProjectDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t('procurementAssignments.projectLevelAssignment')}</DialogTitle>
+      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{t('procurementAssignments.assignProcurementUser')}</DialogTitle>
         <DialogContent>
           <Box pt={1} display="flex" flexDirection="column" gap={2}>
-            <ProcurementAssigneePicker value={assigneeIds} onChange={setAssigneeIds} />
+            <FormControl fullWidth>
+              <InputLabel>{t('procurementAssignments.selectProject')}</InputLabel>
+              <Select
+                value={createProjectId}
+                label={t('procurementAssignments.selectProject')}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setCreateProjectId(next);
+                  setSelectedItemIds([]);
+                }}
+              >
+                {projects.map((project) => (
+                  <MenuItem key={project.id} value={project.id}>
+                    {project.project_code} — {project.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>{t('procurementAssignments.assignmentScope')}</InputLabel>
+              <Select
+                value={createScope}
+                label={t('procurementAssignments.assignmentScope')}
+                onChange={(e) => {
+                  setCreateScope(e.target.value as CreateScope);
+                  setSelectedItemIds([]);
+                }}
+              >
+                <MenuItem value="project">{t('procurementAssignments.projectAssignment')}</MenuItem>
+                <MenuItem value="project_item">{t('procurementAssignments.itemAssignment')}</MenuItem>
+              </Select>
+            </FormControl>
+            {createScope === 'project_item' && (
+              <FormControl fullWidth disabled={createProjectId === '' || itemsLoading}>
+                <InputLabel>{t('procurementAssignments.selectProjectItems')}</InputLabel>
+                <Select
+                  multiple
+                  value={selectedItemIds}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSelectedItemIds(typeof value === 'string' ? value.split(',').map(Number) : value);
+                  }}
+                  input={<OutlinedInput label={t('procurementAssignments.selectProjectItems')} />}
+                  renderValue={(selected) =>
+                    selected
+                      .map((id) => itemLabelById[id] || `#${id}`)
+                      .join(', ')
+                  }
+                >
+                  {projectItems.map((item) => (
+                    <MenuItem key={item.id} value={item.id}>
+                      <ListItemText primary={`${item.item_code} — ${item.item_name}`} />
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+            <ProcurementAssigneePicker
+              value={assigneeIds}
+              onChange={setAssigneeIds}
+              label={t('procurementAssignments.selectProcurementUsers')}
+            />
             {canEditProcurementAssignments(user) && (
               <TextField
                 label={t('procurementAssignments.assignmentNote')}
@@ -402,43 +570,18 @@ export const ProcurementAssignmentsPanel: React.FC<ProcurementAssignmentsPanelPr
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setProjectDialogOpen(false)}>{t('procurement.cancel')}</Button>
+          <Button onClick={() => setCreateDialogOpen(false)}>{t('procurement.cancel')}</Button>
           <Button
             variant="contained"
-            disabled={submitting || assigneeIds.length === 0}
-            onClick={handleCreateProjectLevel}
+            disabled={
+              submitting ||
+              assigneeIds.length === 0 ||
+              createProjectId === '' ||
+              (createScope === 'project_item' && selectedItemIds.length === 0)
+            }
+            onClick={handleCreate}
           >
             {t('procurementAssignments.assignProcurementUser')}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={bulkDialogOpen} onClose={() => setBulkDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{t('procurementAssignments.assignSelectedItems')}</DialogTitle>
-        <DialogContent>
-          <Box pt={1} display="flex" flexDirection="column" gap={2}>
-            <Typography variant="body2" color="text.secondary">
-              {t('procurementAssignments.selectedItemsCount', { count: bulkItemIds.length })}
-            </Typography>
-            <ProcurementAssigneePicker value={assigneeIds} onChange={setAssigneeIds} />
-            <TextField
-              label={t('procurementAssignments.assignmentNote')}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              multiline
-              minRows={2}
-              fullWidth
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBulkDialogOpen(false)}>{t('procurement.cancel')}</Button>
-          <Button
-            variant="contained"
-            disabled={submitting || assigneeIds.length === 0 || bulkItemIds.length === 0}
-            onClick={handleBulkCreate}
-          >
-            {t('procurementAssignments.assignSelectedItems')}
           </Button>
         </DialogActions>
       </Dialog>
