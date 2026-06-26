@@ -155,5 +155,5 @@ If a sprint changes code but does not update `docs/restart-audit`, that sprint i
 - Sprint 4A-UI Regression Recovery (`PASS`, restored accepted Payment Methods visibility in Master Data and redeployed via clean installer flow)
 - Sprint 3A-R1: Package Wizard Step 3 Recovery (`PASS WITH MINOR ISSUES`, layout recovered and redeployed; follow-up contract restoration required)
 - Sprint 3A-R2: Payment and Cost Contract Restoration (`PASS WITH MINOR ISSUES`, payment terms/discount/base-price default restored; runtime deployment smoke required per sprint checklist)
-- Sprint 3A-R3: Cost-Level Payment Schedule + Save/Verify Stability (`PASS`, component payment metadata contract + save/reopen stability + installer/runtime verification completed on `/opt/rivar-demo`)
-- Next planned work: Resume Sprint 4A-Workspace Organization with Sprint 3A-R3 baseline as current accepted state
+- Sprint 3A-R3: Cost-Level Payment Schedule + Save/Verify Stability (`PASS`, closure provenance committed as `cd9f7ca26a72a0a1e49e745169bb6c352d7cfcf9`, pushed to `origin/recovery/sprint3a-r3-cost-level-payment-schedule`, installer/runtime verification re-confirmed on `/opt/rivar-demo`, FK cleanup issue fixed in fixture cleanup path)
+- Next planned work: Resume Sprint 4A-Workspace Organization only after Sprint 3A-R3 closure PASS baseline is acknowledged as current accepted state

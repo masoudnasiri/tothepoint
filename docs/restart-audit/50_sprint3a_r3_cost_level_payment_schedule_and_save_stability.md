@@ -1,7 +1,7 @@
 # Sprint 3A-R3 - Cost-Level Payment Schedule and Save/Verify Stability
 
 - Status: PASS
-- Date: 2026-06-25
+- Date: 2026-06-26
 - Branch: `recovery/sprint3a-r3-cost-level-payment-schedule`
 
 ## Product Purpose
@@ -105,8 +105,42 @@ Installer scripts:
   - `procurement_option_id=4`
   - `candidate_id=candidate:13:103:5:4`
 
+## Closure Provenance (Commit/Push/Verify)
+
+- Final Sprint 3A-R3 closure commit:
+  - `cd9f7ca26a72a0a1e49e745169bb6c352d7cfcf9`
+  - message: `fix: add cost-level payment schedule contract`
+- Push result:
+  - pushed to `origin/recovery/sprint3a-r3-cost-level-payment-schedule` successfully
+  - remote branch confirmed contains closure commit via `git branch -r --contains HEAD` and `git ls-remote --heads`
+- FK violation review:
+  - observed during closure verification: fixture cleanup failed with FK on `procurement_options_supplier_id_fkey`
+  - root cause: cleanup selector missed procurement options linked by fixture supplier/payment-method IDs
+  - fix applied in `backend/scripts/create_sprint4a_demo_fixture.py`:
+    - include supplier-linked and payment-method-linked procurement options in cleanup option-id set before deleting suppliers/payment methods
+  - post-fix verification: `deployment/rivar-installer/verify.sh` passes without FK errors
+- Final installer/runtime verification (post-fix):
+  - `verify.sh` PASS on `/opt/rivar-demo`
+  - fixture recreate cleanup evidence:
+    - `procurement_options=6`, `delivery_options=1`, `suppliers=1`, `payment_methods=1`
+  - runtime verifier PASS with discovered IDs:
+    - `project_id=14`
+    - `project_item_id=104`
+    - `package_id=10`
+    - `procurement_option_id=10`
+    - `candidate_id=candidate:14:104:10:10`
+- Save/reopen stability smoke (post-commit):
+  - `GET /procurement/option/10` -> `200`
+  - `PUT /procurement/option/10` -> `200`
+  - `POST /procurement/options` -> `200` (created option id `12`)
+
 ## Risks / Debt
 
 - Existing repo has broad unrelated local modifications; release artifact must be strict scope-clean.
 - Frontend build warnings remain from pre-existing files outside Sprint 3A-R3 scope.
+
+## Continuation Gate
+
+- Sprint 3A-R3 closure is accepted PASS with committed provenance.
+- Recommendation: resume Workspace Organization only after this closure record is treated as the active accepted baseline.
 
