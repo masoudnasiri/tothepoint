@@ -222,6 +222,69 @@ async def test_cannot_delete_system_admin_role(db_session, override_db):
 
 
 @pytest.mark.asyncio
+async def test_can_deactivate_custom_role(db_session, override_db):
+    admin = await _create_user(db_session, "rbac_custom_deact_admin", "admin")
+    custom = Role(
+        code="qa_custom_deact",
+        display_name="QA Custom Deact",
+        is_system=False,
+        is_active=True,
+    )
+    db_session.add(custom)
+    await db_session.commit()
+    await db_session.refresh(custom)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.delete(
+            f"/access-control/roles/{custom.id}",
+            headers=_auth_header(admin),
+        )
+    assert response.status_code == 200
+    await db_session.refresh(custom)
+    assert custom.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_list_roles_includes_user_count(db_session, override_db):
+    admin = await _create_user(db_session, "rbac_role_count_admin", "admin")
+    pm_user = await _create_user(db_session, "rbac_role_count_pm", "pm")
+    pmo_role = (
+        await db_session.execute(select(Role).where(Role.code == "pmo"))
+    ).scalar_one()
+    db_session.add(UserRole(user_id=pm_user.id, role_id=pmo_role.id))
+    await db_session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/access-control/roles", headers=_auth_header(admin))
+    assert response.status_code == 200
+    pmo_payload = next(item for item in response.json() if item["code"] == "pmo")
+    assert pmo_payload["user_count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_list_role_assigned_users(db_session, override_db):
+    admin = await _create_user(db_session, "rbac_assigned_admin", "admin")
+    pm_user = await _create_user(db_session, "rbac_assigned_pm", "pm")
+    pmo_role = (
+        await db_session.execute(select(Role).where(Role.code == "pmo"))
+    ).scalar_one()
+    db_session.add(UserRole(user_id=pm_user.id, role_id=pmo_role.id))
+    await db_session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get(
+            f"/access-control/roles/{pmo_role.id}/assigned-users",
+            headers=_auth_header(admin),
+        )
+    assert response.status_code == 200
+    usernames = {item["username"] for item in response.json()}
+    assert "rbac_assigned_pm" in usernames
+
+
+@pytest.mark.asyncio
 async def test_legacy_role_helpers_unchanged(db_session):
     admin = await _create_user(db_session, "rbac_legacy_admin", "admin")
     proc = await _create_user(db_session, "rbac_legacy_proc", "procurement")

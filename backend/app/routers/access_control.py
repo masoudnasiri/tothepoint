@@ -5,7 +5,7 @@ Access control APIs — roles, permissions, user role assignments (Sprint 5B).
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import require_access_control_manager
@@ -15,6 +15,7 @@ from app.models import Permission, Role, RolePermission, User, UserRole
 from app.schemas import (
     PermissionResponse,
     RoleCreate,
+    RoleAssignedUserResponse,
     RolePermissionsResponse,
     RolePermissionsUpdate,
     RoleResponse,
@@ -53,7 +54,26 @@ async def list_roles(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(Role).order_by(Role.is_system.desc(), Role.code.asc()))
-    return list(result.scalars().all())
+    roles = list(result.scalars().all())
+    counts_result = await db.execute(
+        select(UserRole.role_id, func.count(UserRole.user_id)).group_by(UserRole.role_id)
+    )
+    user_counts = {role_id: count for role_id, count in counts_result.all()}
+    perm_counts_result = await db.execute(
+        select(RolePermission.role_id, func.count(RolePermission.permission_id)).group_by(
+            RolePermission.role_id
+        )
+    )
+    permission_counts = {role_id: count for role_id, count in perm_counts_result.all()}
+    return [
+        RoleResponse.model_validate(role).model_copy(
+            update={
+                "user_count": int(user_counts.get(role.id, 0)),
+                "permission_count": int(permission_counts.get(role.id, 0)),
+            }
+        )
+        for role in roles
+    ]
 
 
 @router.post("/roles", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
@@ -175,6 +195,27 @@ async def deactivate_role(
     )
     await db.commit()
     return {"message": "Role deactivated successfully"}
+
+
+@router.get("/roles/{role_id}/assigned-users", response_model=List[RoleAssignedUserResponse])
+async def list_role_assigned_users(
+    role_id: int,
+    current_user: User = Depends(require_access_control_manager),
+    db: AsyncSession = Depends(get_db),
+):
+    role = await db.get(Role, role_id)
+    if not role:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Role not found")
+    result = await db.execute(
+        select(User.id, User.username, User.is_active)
+        .join(UserRole, UserRole.user_id == User.id)
+        .where(UserRole.role_id == role_id)
+        .order_by(User.username.asc())
+    )
+    return [
+        RoleAssignedUserResponse(id=row[0], username=row[1], is_active=row[2])
+        for row in result.all()
+    ]
 
 
 @router.get("/roles/{role_id}/permissions", response_model=RolePermissionsResponse)

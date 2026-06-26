@@ -758,6 +758,8 @@ export const accessControlAPI = {
     payload: { display_name?: string; description?: string | null; is_active?: boolean }
   ) => api.put(`/access-control/roles/${roleId}`, payload),
   deactivateRole: (roleId: number) => api.delete(`/access-control/roles/${roleId}`),
+  getRoleAssignedUsers: (roleId: number) =>
+    api.get(`/access-control/roles/${roleId}/assigned-users`),
   getRolePermissions: (roleId: number) =>
     api.get(`/access-control/roles/${roleId}/permissions`),
   updateRolePermissions: (roleId: number, payload: { permission_keys: string[] }) =>

@@ -229,8 +229,16 @@ class RoleResponse(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
+    user_count: int = 0
+    permission_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class RoleAssignedUserResponse(BaseModel):
+    id: int
+    username: str
+    is_active: bool
 
 
 class PermissionResponse(BaseModel):

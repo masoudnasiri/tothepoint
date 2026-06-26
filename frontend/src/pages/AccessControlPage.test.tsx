@@ -9,15 +9,12 @@ jest.mock('../contexts/AuthContext.tsx', () => ({
   }),
 }));
 
-import { AccessControlPage } from './AccessControlPage.tsx';
-
 const mockListRoles = jest.fn();
 const mockListPermissions = jest.fn();
 const mockGetRolePermissions = jest.fn();
 const mockGetRole = jest.fn();
-const mockCreateRole = jest.fn();
-const mockUpdateRole = jest.fn();
-const mockUpdateRolePermissions = jest.fn();
+const mockGetRoleAssignedUsers = jest.fn();
+const mockDeactivateRole = jest.fn();
 const mockListUsers = jest.fn();
 const mockGetUserRoles = jest.fn();
 
@@ -27,12 +24,13 @@ jest.mock('../services/api.ts', () => ({
     listPermissions: (...args: unknown[]) => mockListPermissions(...args),
     getRolePermissions: (...args: unknown[]) => mockGetRolePermissions(...args),
     getRole: (...args: unknown[]) => mockGetRole(...args),
-    createRole: (...args: unknown[]) => mockCreateRole(...args),
-    updateRole: (...args: unknown[]) => mockUpdateRole(...args),
-    updateRolePermissions: (...args: unknown[]) => mockUpdateRolePermissions(...args),
+    getRoleAssignedUsers: (...args: unknown[]) => mockGetRoleAssignedUsers(...args),
+    createRole: jest.fn(),
+    updateRole: jest.fn(),
+    updateRolePermissions: jest.fn(),
+    deactivateRole: (...args: unknown[]) => mockDeactivateRole(...args),
     getUserRoles: (...args: unknown[]) => mockGetUserRoles(...args),
     updateUserRoles: jest.fn(),
-    deactivateRole: jest.fn(),
   },
   usersAPI: {
     list: (...args: unknown[]) => mockListUsers(...args),
@@ -47,34 +45,30 @@ jest.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: { name?: string }) => {
       const map: Record<string, string> = {
-        'accessControl.title': 'Access Control',
-        'accessControl.subtitle': 'Manage roles',
-        'accessControl.rolesTab': 'Roles & Permissions',
-        'accessControl.userRolesTab': 'User Role Assignment',
+        'accessControl.searchRoles': 'Search roles',
         'accessControl.createRole': 'Create role',
-        'accessControl.roleCode': 'Role code',
         'accessControl.roleName': 'Display name',
+        'accessControl.roleCode': 'Role code',
         'accessControl.roleType': 'Type',
         'accessControl.status': 'Status',
         'accessControl.permissionCount': 'Permissions',
+        'accessControl.assignedUsers': 'Assigned users',
         'accessControl.systemRole': 'System role',
         'accessControl.customRole': 'Custom role',
         'accessControl.active': 'Active',
-        'accessControl.inactive': 'Inactive',
-        'accessControl.permissionMatrix': 'Permission matrix',
-        'accessControl.feature': 'Feature',
-        'accessControl.action': 'Action',
-        'accessControl.savePermissions': 'Save permissions',
-        'accessControl.saveRole': 'Save role',
-        'accessControl.systemAdminLocked': 'System admin locked',
-        'accessControl.enforcementPilotNotice': 'Pilot enforcement notice',
-        'permissionGroups.access_control': 'Access Control',
-        'permissionFeatures.access_control_roles': 'Roles',
-        'permissionActions.view': 'View',
-        'permissionActions.manage': 'Manage',
+        'accessControl.deactivateRole': 'Deactivate role',
+        'accessControl.roleDetailsTab': 'Role details',
+        'accessControl.permissionsTab': 'Permissions',
+        'accessControl.assignedUsersTab': 'Assigned users',
+        'accessControl.assignRolesToUser': 'Assign roles',
+        'accessControl.selectUser': 'User',
+        'accessControl.chooseUser': 'Choose user',
+        'accessControl.roles': 'Roles',
         'common.refresh': 'Refresh',
-        'common.create': 'Create',
+        'common.edit': 'Edit',
+        'common.actions': 'Actions',
         'common.cancel': 'Cancel',
+        'common.close': 'Close',
       };
       if (key === 'accessControl.deactivateRoleConfirm' && opts?.name) {
         return `Deactivate ${opts.name}?`;
@@ -83,6 +77,8 @@ jest.mock('react-i18next', () => ({
     },
   }),
 }));
+
+import { AccessControlPage } from './AccessControlPage.tsx';
 
 const sampleRoles = [
   {
@@ -93,6 +89,8 @@ const sampleRoles = [
     is_system: true,
     is_active: true,
     created_at: '2026-01-01',
+    user_count: 1,
+    permission_count: 5,
   },
   {
     id: 99,
@@ -102,59 +100,31 @@ const sampleRoles = [
     is_system: false,
     is_active: true,
     created_at: '2026-01-01',
+    user_count: 0,
+    permission_count: 1,
   },
 ];
 
-const samplePermissions = [
-  {
-    id: 1,
-    permission_key: 'access_control.roles.view',
-    feature_key: 'access_control.roles',
-    action: 'view',
-    description: 'View roles',
-    is_system: true,
-    sort_order: 10,
-  },
-  {
-    id: 2,
-    permission_key: 'access_control.roles.manage',
-    feature_key: 'access_control.roles',
-    action: 'manage',
-    description: 'Manage roles',
-    is_system: true,
-    sort_order: 14,
-  },
-];
-
-describe('AccessControlPage', () => {
+describe('AccessControlPage role management', () => {
   let container: HTMLDivElement;
   let root: Root;
+
+  jest.setTimeout(20000);
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
     mockListRoles.mockResolvedValue({ data: sampleRoles });
-    mockListPermissions.mockResolvedValue({ data: samplePermissions });
+    mockListPermissions.mockResolvedValue({ data: [] });
     mockGetRolePermissions.mockResolvedValue({
       data: { role_id: 1, permission_keys: ['access_control.roles.manage'] },
     });
     mockGetRole.mockResolvedValue({ data: sampleRoles[0] });
+    mockGetRoleAssignedUsers.mockResolvedValue({ data: [] });
+    mockDeactivateRole.mockResolvedValue({ data: { message: 'ok' } });
     mockListUsers.mockResolvedValue({ data: [{ id: 2, username: 'proc1', role: 'procurement' }] });
     mockGetUserRoles.mockResolvedValue({ data: { user_id: 2, role_ids: [1], roles: [] } });
-    mockCreateRole.mockResolvedValue({
-      data: {
-        id: 100,
-        code: 'sprint5c_smoke',
-        display_name: 'Sprint 5C Smoke',
-        is_system: false,
-        is_active: true,
-        created_at: '2026-01-01',
-      },
-    });
-    mockUpdateRole.mockResolvedValue({ data: sampleRoles[1] });
-    mockUpdateRolePermissions.mockResolvedValue({
-      data: { role_id: 99, permission_keys: ['access_control.roles.view'] },
-    });
+    window.confirm = jest.fn(() => true);
   });
 
   afterEach(() => {
@@ -164,42 +134,41 @@ describe('AccessControlPage', () => {
       });
     }
     container.remove();
+    document.body.innerHTML = '';
     jest.clearAllMocks();
   });
 
-  it('loads and displays roles with system/custom status', async () => {
+  const renderRolesPanel = async () => {
     await act(async () => {
       root = createRoot(container);
-      root.render(<AccessControlPage />);
-      await Promise.resolve();
-      await Promise.resolve();
+      root.render(<AccessControlPage embedded mode="roles" />);
     });
+    for (let i = 0; i < 40; i += 1) {
+      if (document.body.textContent?.includes('System Admin')) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  };
 
+  it('shows role list without always-visible editor drawer', async () => {
+    await renderRolesPanel();
     expect(mockListRoles).toHaveBeenCalled();
-    expect(container.textContent).toContain('System Admin');
-    expect(container.textContent).toContain('System role');
-    expect(container.textContent).toContain('Custom role');
-    expect(container.textContent).toContain('Permission matrix');
-    expect(container.textContent).toContain('Pilot enforcement notice');
-    expect(container.textContent).toContain('Roles');
-    expect(container.textContent).not.toMatch(/Feature: access_control/);
+    expect(document.body.textContent).toContain('System Admin');
+    expect(document.body.textContent).toContain('QA Custom');
+    expect(document.querySelector('.MuiDrawer-root')).toBeNull();
   });
 
-  it('opens create role dialog', async () => {
+  it('opens drawer editor when edit is clicked', async () => {
+    await renderRolesPanel();
+    const edit = document.querySelector('button[aria-label="Edit"]') as HTMLButtonElement;
     await act(async () => {
-      root = createRoot(container);
-      root.render(<AccessControlPage />);
-      await Promise.resolve();
-      await Promise.resolve();
+      edit?.click();
     });
+    expect(document.querySelector('.MuiDrawer-root')).not.toBeNull();
+    expect(document.body.textContent).toContain('Role details');
+  });
 
-    const createButtons = Array.from(container.querySelectorAll('button')).filter((b) =>
-      b.textContent?.includes('Create role')
-    );
-    await act(async () => {
-      createButtons[0]?.click();
-    });
-
-    expect(container.textContent).toContain('Role code');
+  it('shows deactivate only for custom roles', async () => {
+    await renderRolesPanel();
+    expect(document.querySelectorAll('button[aria-label="Deactivate role"]').length).toBe(1);
   });
 });

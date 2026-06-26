@@ -35,6 +35,14 @@ export interface Role {
   is_active: boolean;
   created_at: string;
   updated_at?: string | null;
+  user_count?: number;
+  permission_count?: number;
+}
+
+export interface RoleAssignedUser {
+  id: number;
+  username: string;
+  is_active: boolean;
 }
 
 export interface RoleCreate {
