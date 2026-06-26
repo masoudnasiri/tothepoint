@@ -93,6 +93,25 @@ Admin/PMO/PM with `project_items.view` (or legacy PMO/PM role) unchanged.
 | Deploy script | `deployment/rivar-installer/deploy_update_5e_r2_fix.sh` |
 | Target | `/opt/rivar-demo`, compose `rivar-demo` |
 | Rebuild | frontend + backend |
+| Git commit | `65fdad6bf2e3db7b6549a60b0dc64af3903d7b6a` |
+| Remote push | Verified on `origin/restart/sprint5e-r2-fix-secure-assigned-item-visibility` |
+| Agent deploy attempt | **Blocked** — SSH/SCP to `193.162.129.58` requires credentials not available in agent shell (`Permission denied (publickey,password)`) |
+| Demo pre-deploy probe | `/health` 200, `/openapi.json` 200; **`my-assigned-items` / `assigned-items` paths absent** (demo still on prior 5E-R2 build) |
+| Post-deploy verify | **Pending** — run on server after sync |
+
+### Manual deploy (operator)
+
+```bash
+cd /opt/rivar-demo
+git fetch origin
+git checkout restart/sprint5e-r2-fix-secure-assigned-item-visibility
+git pull --ff-only origin restart/sprint5e-r2-fix-secure-assigned-item-visibility
+bash deployment/rivar-installer/deploy_update_5e_r2_fix.sh \
+  65fdad6bf2e3db7b6549a60b0dc64af3903d7b6a \
+  restart/sprint5e-r2-fix-secure-assigned-item-visibility
+bash deployment/rivar-installer/verify.sh
+bash deployment/rivar-installer/run_sprint5d_smoke.sh
+```
 
 ## Scope exclusions
 
