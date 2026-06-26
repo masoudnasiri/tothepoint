@@ -113,7 +113,7 @@ Recommended manual checks after deploy:
 ## Git provenance
 
 Branch: `restart/sprint5c-r1-rbac-ux-masterdata-permission-pilot`  
-Commit: _(filled after push)_
+Commit: `47b2e8a` on `restart/sprint5c-r1-rbac-ux-masterdata-permission-pilot`
 
 ## Recommended next sprint
 
