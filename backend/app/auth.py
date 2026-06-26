@@ -269,6 +269,25 @@ def require_procurement_assignment_permission(permission_key: str):
     return permission_checker
 
 
+def require_project_items_permission(permission_key: str):
+    """Sprint 5E-R2-Fix: enforce RBAC for project item management routes."""
+
+    async def permission_checker(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        from app.services.rbac_service import user_has_project_items_permission as _has_perm
+
+        if await _has_perm(db, current_user, permission_key):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient permissions: {permission_key}",
+        )
+
+    return permission_checker
+
+
 async def require_access_control_manager(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

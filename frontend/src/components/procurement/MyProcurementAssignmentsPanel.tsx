@@ -16,9 +16,10 @@ import { procurementAssignmentsAPI, projectsAPI } from '../../services/api.ts';
 import type { Project } from '../../types/index.ts';
 import type { ProcurementAssignment } from '../../types/procurementAssignments.ts';
 import { useAuth } from '../../contexts/AuthContext.tsx';
-import { canViewProcurementAssignments } from '../../utils/permissions.ts';
+import { canViewProcurementAssignments, canViewProjectItems } from '../../utils/permissions.ts';
 import { formatApiError } from '../../utils/errorUtils.ts';
 import type { ProcurementAssignmentStatus } from '../../types/procurementAssignments.ts';
+import { AssignedProcurementItemsDialog } from './AssignedProcurementItemsDialog.tsx';
 
 function statusLabelKey(status: ProcurementAssignmentStatus): string {
   const map: Record<ProcurementAssignmentStatus, string> = {
@@ -37,6 +38,8 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [assignedItemsProjectId, setAssignedItemsProjectId] = useState<number | null>(null);
+  const [assignedItemsProjectLabel, setAssignedItemsProjectLabel] = useState('');
 
   const load = useCallback(async () => {
     if (!user?.id || !canViewProcurementAssignments(user)) return;
@@ -134,9 +137,25 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
                 {t('procurementAssignments.assignedProjects')}:{' '}
                 {project ? `${project.project_code} — ${project.name}` : `#${projectId}`}
                 {' '}
-                <Link component={RouterLink} to={`/projects/${projectId}/items`} underline="hover">
-                  {t('procurementAssignments.openProjectItems')}
-                </Link>
+                {canViewProjectItems(user) ? (
+                  <Link component={RouterLink} to={`/projects/${projectId}/items`} underline="hover">
+                    {t('procurementAssignments.openProjectItems')}
+                  </Link>
+                ) : (
+                  <Link
+                    component="button"
+                    type="button"
+                    underline="hover"
+                    onClick={() => {
+                      setAssignedItemsProjectId(projectId);
+                      setAssignedItemsProjectLabel(
+                        project ? `${project.project_code} — ${project.name}` : `#${projectId}`
+                      );
+                    }}
+                  >
+                    {t('procurementAssignments.viewAssignedItems')}
+                  </Link>
+                )}
               </Typography>
 
               {groups.project.length > 0 && (
@@ -176,6 +195,13 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
           );
         })
       )}
+
+      <AssignedProcurementItemsDialog
+        open={assignedItemsProjectId != null}
+        onClose={() => setAssignedItemsProjectId(null)}
+        projectId={assignedItemsProjectId}
+        projectLabel={assignedItemsProjectLabel}
+      />
     </Paper>
   );
 };

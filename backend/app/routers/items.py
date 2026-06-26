@@ -7,7 +7,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.auth import get_current_user, require_pm, require_pmo, require_pm_or_pmo, require_role, get_user_projects
+from app.auth import (
+    get_current_user,
+    require_pm,
+    require_pmo,
+    require_pm_or_pmo,
+    require_role,
+    require_project_items_permission,
+    get_user_projects,
+)
 from app.crud import (
     create_project_item, get_project_item, get_project_items,
     update_project_item, delete_project_item, finalize_project_item, log_audit
@@ -60,7 +68,7 @@ async def list_project_items(
     status: str = None,
     is_finalized: bool = None,
     external_purchase: bool = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_items_permission("project_items.view")),
     db: AsyncSession = Depends(get_db)
 ):
     """Get project items for a specific project with procurement status, search, and filters"""
@@ -378,7 +386,7 @@ async def list_finalized_items(
 @router.get("/{item_id}")
 async def get_project_item_by_id(
     item_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_items_permission("project_items.view")),
     db: AsyncSession = Depends(get_db)
 ):
     """Get project item by ID with sub-items breakdown included"""
@@ -456,7 +464,7 @@ async def get_project_item_by_id(
 )
 async def get_project_item_procurement_eligibility(
     item_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_items_permission("project_items.view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Read-only eligibility diagnostics for send-to-procurement gate."""
@@ -484,7 +492,7 @@ async def get_project_item_procurement_eligibility(
 @router.get("/{item_id}/subitems")
 async def get_project_item_subitems(
     item_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_project_items_permission("project_items.view")),
     db: AsyncSession = Depends(get_db)
 ):
     """

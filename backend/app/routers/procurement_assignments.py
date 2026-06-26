@@ -13,6 +13,7 @@ from app.auth import get_current_user, require_procurement_assignment_permission
 from app.database import get_db
 from app.models import User
 from app.schemas import (
+    ProcurementAssignedItemSummary,
     ProcurementAssignmentBulkCreate,
     ProcurementAssignmentCancel,
     ProcurementAssignmentCreate,
@@ -20,8 +21,66 @@ from app.schemas import (
     ProcurementAssignmentUpdate,
 )
 from app.services import procurement_assignment_service as svc
+from app.services import procurement_assigned_items_service as assigned_items_svc
 
 router = APIRouter(tags=["procurement-assignments"])
+
+
+@router.get(
+    "/procurement-assignments/my-assigned-items",
+    response_model=List[ProcurementAssignedItemSummary],
+)
+async def list_my_assigned_items(
+    status_filter: Optional[str] = Query("active", alias="status"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_procurement_assignment_permission("procurement.assignments.view")),
+):
+    return await assigned_items_svc.list_assigned_item_summaries(
+        db,
+        current_user,
+        status_filter=status_filter,
+        restrict_to_actor=True,
+    )
+
+
+@router.get(
+    "/procurement-assignments/assigned-items",
+    response_model=List[ProcurementAssignedItemSummary],
+)
+async def list_assigned_items(
+    project_id: Optional[int] = Query(None),
+    assignee_user_id: Optional[int] = Query(None),
+    status_filter: Optional[str] = Query("active", alias="status"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_procurement_assignment_permission("procurement.assignments.view")),
+):
+    return await assigned_items_svc.list_assigned_item_summaries(
+        db,
+        current_user,
+        project_id=project_id,
+        status_filter=status_filter,
+        assignee_user_id=assignee_user_id,
+    )
+
+
+@router.get(
+    "/procurement-assignments/projects/{project_id}/assigned-items",
+    response_model=List[ProcurementAssignedItemSummary],
+)
+async def list_project_assigned_items(
+    project_id: int,
+    assignee_user_id: Optional[int] = Query(None),
+    status_filter: Optional[str] = Query("active", alias="status"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_procurement_assignment_permission("procurement.assignments.view")),
+):
+    return await assigned_items_svc.list_assigned_item_summaries(
+        db,
+        current_user,
+        project_id=project_id,
+        status_filter=status_filter,
+        assignee_user_id=assignee_user_id,
+    )
 
 
 @router.get("/procurement-assignments", response_model=List[ProcurementAssignmentRead])

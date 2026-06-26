@@ -792,6 +792,17 @@ export const procurementAssignmentsAPI = {
     api.get(`/project-items/${projectItemId}/procurement-assignments`, { params }),
   listByUser: (userId: number, params?: { status?: string }) =>
     api.get(`/users/${userId}/procurement-assignments`, { params }),
+  listMyAssignedItems: (params?: { status?: string }) =>
+    api.get('/procurement-assignments/my-assigned-items', { params }),
+  listAssignedItems: (params?: {
+    project_id?: number;
+    assignee_user_id?: number;
+    status?: string;
+  }) => api.get('/procurement-assignments/assigned-items', { params }),
+  listProjectAssignedItems: (
+    projectId: number,
+    params?: { assignee_user_id?: number; status?: string }
+  ) => api.get(`/procurement-assignments/projects/${projectId}/assigned-items`, { params }),
 };
 
 export default api;

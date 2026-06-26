@@ -12,6 +12,7 @@ import { DashboardPage } from './pages/DashboardPage.tsx';
 import { ProjectsPage } from './pages/ProjectsPage.tsx';
 import { ItemsMasterPage } from './pages/ItemsMasterPage.tsx';
 import { ProjectItemsPage } from './pages/ProjectItemsPage.tsx';
+import { ProjectItemsRoute } from './components/ProjectItemsRoute.tsx';
 import { FinalizedDecisionsPage } from './pages/FinalizedDecisionsPage.tsx';
 import { ProcurementPage } from './pages/ProcurementPage.tsx';
 import { ProcurementPlanPage } from './pages/ProcurementPlanPage.tsx';
@@ -56,7 +57,14 @@ function AppContent() {
                         <Route path="/decisions" element={<FinalizedDecisionsPage />} />
                         <Route path="/projects" element={<ProjectsPage />} />
                         <Route path="/items-master" element={<ItemsMasterPage />} />
-                        <Route path="/projects/:projectId/items" element={<ProjectItemsPage />} />
+                        <Route
+                          path="/projects/:projectId/items"
+                          element={
+                            <ProjectItemsRoute>
+                              <ProjectItemsPage />
+                            </ProjectItemsRoute>
+                          }
+                        />
                         <Route path="/procurement" element={<ProcurementPage />} />
                         <Route path="/procurement-plan" element={<ProcurementPlanPage />} />
                         <Route path="/finance" element={<FinancePage />} />

@@ -358,6 +358,38 @@ class ProcurementAssignmentUpdate(BaseModel):
     note: Optional[str] = Field(None, max_length=2000)
 
 
+class ProcurementAssignedItemAssignmentInfo(BaseModel):
+    """Assignment metadata attached to a sanitized procurement item row."""
+
+    assignment_id: int
+    assignment_scope: str
+    assignment_status: str
+    assignee_user_id: int
+    assignee_username: Optional[str] = None
+
+
+class ProcurementAssignedItemSummary(BaseModel):
+    """
+    Sanitized project item row for procurement assignment viewing (Sprint 5E-R2-Fix).
+    Excludes financial/lifecycle fields and project-management actions.
+    """
+
+    project_id: int
+    project_code: str
+    project_name: str
+    project_item_id: int
+    item_code: str
+    item_name: Optional[str] = None
+    description: Optional[str] = None
+    quantity: int
+    delivery_options: List[str] = Field(default_factory=list)
+    item_status: Optional[str] = None
+    external_purchase: bool = False
+    is_finalized: bool = False
+    covered_by_project_assignment: bool = False
+    assignments: List[ProcurementAssignedItemAssignmentInfo] = Field(default_factory=list)
+
+
 class ProcurementAssignmentCancel(BaseModel):
     cancelled_reason: str = Field(..., min_length=1, max_length=2000)
 

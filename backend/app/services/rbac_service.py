@@ -271,6 +271,35 @@ async def user_has_procurement_assignment_permission(
     return await user_has_permission(db, user, permission_key)
 
 
+async def user_has_project_items_permission(
+    db: AsyncSession, user: User, permission_key: str
+) -> bool:
+    """RBAC-first check for project item management routes (Sprint 5E-R2-Fix)."""
+    if not permission_key.startswith("project_items."):
+        raise ValueError(f"Expected project_items.* permission key, got {permission_key!r}")
+    if not user.is_active:
+        return False
+    if settings.enable_super_admin_bypass and user.role == "admin":
+        return True
+    if await user_has_system_admin_role(db, user):
+        return True
+
+    perms = await get_effective_permissions(db, user)
+    if perms:
+        return permission_key in perms
+
+    # Legacy role fallback when no RBAC roles are assigned.
+    if permission_key == "project_items.view":
+        return user.role in ("pmo", "pm")
+    if permission_key in ("project_items.create", "project_items.edit"):
+        return user.role in ("pmo", "pm")
+    if permission_key == "project_items.delete":
+        return user.role == "pmo"
+    if permission_key == "project_items.finalize":
+        return user.role == "pmo"
+    return False
+
+
 async def get_user_role_summaries(db: AsyncSession, user_id: int) -> List[Dict[str, object]]:
     result = await db.execute(
         select(Role)

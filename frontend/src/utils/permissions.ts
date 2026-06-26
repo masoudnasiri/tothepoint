@@ -246,6 +246,8 @@ export function usePermissions(user: User | null | undefined) {
       canDeleteProcurementAssignments: () => canDeleteProcurementAssignments(user),
       canManageProcurementAssignments: () => canManageProcurementAssignments(user),
       canViewAllProcurementAssignments: () => canViewAllProcurementAssignments(user),
+      canViewProjectItems: () => canViewProjectItems(user),
+      canManageProjectItems: () => canManageProjectItems(user),
     }),
     [user]
   );
@@ -306,4 +308,29 @@ export function canViewAllProcurementAssignments(user: User | null | undefined):
     'procurement.assignments.complete',
     'procurement.assignments.cancel',
   ]);
+}
+
+/** Sprint 5E-R2-Fix: full Project Items management page/API access. */
+export function canViewProjectItems(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return hasPermission(user, 'project_items.view');
+  }
+  return Boolean(user.role && ['pmo', 'pm'].includes(user.role));
+}
+
+export function canManageProjectItems(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return hasAnyPermission(user, [
+      'project_items.view',
+      'project_items.create',
+      'project_items.edit',
+      'project_items.delete',
+      'project_items.finalize',
+    ]);
+  }
+  return Boolean(user.role && ['pmo', 'pm'].includes(user.role));
 }

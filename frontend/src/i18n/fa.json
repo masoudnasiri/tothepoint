@@ -215,6 +215,8 @@
     "unfinalizeItem": "لغو نهایی کردن اقلام (حذف از تامین)",
     "perPage": "در هر صفحه",
     "failedToLoadProjectItems": "بارگذاری اقلام پروژه ناموفق",
+    "accessDeniedTitle": "دسترسی به اقلام پروژه مجاز نیست",
+    "accessDeniedMessage": "مجوز مدیریت اقلام پروژه را ندارید. برای کار تخصیص‌یافته از نمای اقلام تخصیص‌یافته در ماژول تأمین استفاده کنید.",
     "failedToLoadItemsCatalog": "بارگذاری کاتالوگ اقلام ناموفق",
     "failedToCreateItem": "ایجاد اقلام ناموفق",
     "failedToUpdateItem": "به‌روزرسانی اقلام ناموفق",
@@ -376,7 +378,14 @@
     "bulkRemoveSummary": "{{success}} تخصیص حذف شد. ناموفق: {{failed}}.",
     "noActiveAssignmentsSelected": "تخصیص فعالی انتخاب نشده است",
     "myAssignmentsWorkflowHint": "برای پیشبرد کار از گردش کار تأمین استفاده کنید؛ این صفحه مسئولیت تخصیص‌یافته به شما را نشان می‌دهد.",
-    "assign": "تخصیص"
+    "assign": "تخصیص",
+    "viewAssignedItems": "مشاهده اقلام تخصیص‌یافته",
+    "assignedItemsReadOnlyHint": "نمای فقط‌خواندنی تأمین. فیلدهای مالی و مدیریت پروژه در اینجا نمایش داده نمی‌شوند.",
+    "failedToLoadAssignedItems": "بارگذاری اقلام تخصیص‌یافته ناموفق بود",
+    "noAssignedItemsInView": "قلم تخصیص‌یافته‌ای برای نمایش وجود ندارد",
+    "deliveryDates": "تاریخ‌های تحویل",
+    "itemFinalized": "نهایی‌شده",
+    "quantity": "تعداد"
   },
   "projects": {
     "title": "پروژه‌ها",

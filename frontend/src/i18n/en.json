@@ -215,6 +215,8 @@
     "unfinalizeItem": "Unfinalize Item (remove from procurement)",
     "perPage": "Per Page",
     "failedToLoadProjectItems": "Failed to load project items",
+    "accessDeniedTitle": "Project items access denied",
+    "accessDeniedMessage": "You do not have permission to manage project items. Use the procurement assigned-items view for your assigned work.",
     "failedToLoadItemsCatalog": "Failed to load items catalog",
     "failedToCreateItem": "Failed to create item",
     "failedToUpdateItem": "Failed to update item",
@@ -373,7 +375,14 @@
     "bulkRemoveSummary": "Removed {{success}} assignment(s). Failed: {{failed}}.",
     "noActiveAssignmentsSelected": "No active assignments selected",
     "myAssignmentsWorkflowHint": "Use the procurement workflow to send work forward; this page shows your assigned responsibility.",
-    "assign": "Assign"
+    "assign": "Assign",
+    "viewAssignedItems": "View assigned items",
+    "assignedItemsReadOnlyHint": "Read-only procurement view. Financial and project-management fields are not shown here.",
+    "failedToLoadAssignedItems": "Failed to load assigned items",
+    "noAssignedItemsInView": "No assigned items to display in this view",
+    "deliveryDates": "Delivery dates",
+    "itemFinalized": "Finalized",
+    "quantity": "Quantity"
   },
   "projects": {
     "title": "Projects",
