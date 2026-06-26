@@ -769,4 +769,29 @@ export const accessControlAPI = {
     api.put(`/access-control/users/${userId}/roles`, payload),
 };
 
+// Procurement Assignments API (Sprint 5D / 5E)
+export const procurementAssignmentsAPI = {
+  list: (params?: import('../types/procurementAssignments.ts').ProcurementAssignmentFilters) =>
+    api.get('/procurement-assignments', { params }),
+  get: (id: number) => api.get(`/procurement-assignments/${id}`),
+  create: (payload: import('../types/procurementAssignments.ts').ProcurementAssignmentCreate) =>
+    api.post('/procurement-assignments', payload),
+  bulkCreate: (payload: import('../types/procurementAssignments.ts').ProcurementAssignmentBulkCreate) =>
+    api.post('/procurement-assignments/bulk', payload),
+  update: (id: number, payload: import('../types/procurementAssignments.ts').ProcurementAssignmentUpdate) =>
+    api.put(`/procurement-assignments/${id}`, payload),
+  complete: (id: number) => api.post(`/procurement-assignments/${id}/complete`),
+  cancel: (id: number, payload: { cancelled_reason: string }) =>
+    api.post(`/procurement-assignments/${id}/cancel`, payload),
+  delete: (id: number) => api.delete(`/procurement-assignments/${id}`),
+  listByProject: (
+    projectId: number,
+    params?: { status?: string; assignment_scope?: string }
+  ) => api.get(`/projects/${projectId}/procurement-assignments`, { params }),
+  listByProjectItem: (projectItemId: number, params?: { status?: string }) =>
+    api.get(`/project-items/${projectItemId}/procurement-assignments`, { params }),
+  listByUser: (userId: number, params?: { status?: string }) =>
+    api.get(`/users/${userId}/procurement-assignments`, { params }),
+};
+
 export default api;

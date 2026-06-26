@@ -56,6 +56,8 @@ import { useMemo } from 'react';
 import { format as jalaliFormat, parseISO as jalaliParseISO } from 'date-fns-jalali';
 import { format as gregorianFormat, parseISO as gregorianParseISO } from 'date-fns';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
+import { MyProcurementAssignmentsPanel } from '../components/procurement/MyProcurementAssignmentsPanel.tsx';
+import { canViewProcurementAssignments } from '../utils/permissions.ts';
 import { RivarMetricCard } from '../components/ui/RivarMetricCard.tsx';
 import { RivarPanel } from '../components/ui/RivarPanel.tsx';
 import { RivarToolbar } from '../components/ui/RivarToolbar.tsx';
@@ -736,6 +738,8 @@ export const ProcurementPage: React.FC = () => {
           </>
         ) : undefined}
       />
+
+      {canViewProcurementAssignments(user) && <MyProcurementAssignmentsPanel />}
 
       {notice && (
         <Alert severity="success" sx={{ mb: 3 }} onClose={() => setNotice('')}>

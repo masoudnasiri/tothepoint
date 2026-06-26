@@ -173,4 +173,5 @@ If a sprint changes code but does not update `docs/restart-audit`, that sprint i
 - Sprint 5C-R4-Fix-2 RBAC Labels & Master Data Access Leakage (`PASS WITH MINOR ISSUES`, `67_*`): branch `restart/sprint5c-r4-fix2-rbac-labels-masterdata-leakage` @ `94fa823`; Access Control badges; nav leakage fix; Payment Methods/Cost Components backend gap documented
 - Sprint 5C-R4-Fix-3 Master Data Backend Enforcement (`PASS`, `68_*`): branch `restart/sprint5c-r4-fix3-masterdata-backend-enforcement`; Payment Methods/Cost Components backend RBAC 403; badge labels enforced; DEPLOYED_COMMIT.txt corrected
 - Sprint 5D Procurement Assignment Backend (`PASS WITH MINOR ISSUES`, `69_*`): branch `restart/sprint5d-procurement-assignment-backend`; procurement_assignments table, RBAC assignment APIs, scope helpers for 5E/5F; no frontend; no broad procurement enforcement
-- Next planned work: Sprint 5E Procurement Assignment Frontend and Scoped Procurement UX
+- Sprint 5E Procurement Assignment Frontend and Scoped UX (`PASS WITH MINOR ISSUES`, `70_*`): branch `restart/sprint5e-procurement-assignment-frontend-scoped-ux`; assignment tab on Project Items, My Assignments on Procurement page, API client, i18n EN/FA; no backend scope enforcement
+- Next planned work: Sprint 5F Procurement Assignment Scope Enforcement and Procurement Workflow Filtering

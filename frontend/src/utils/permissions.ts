@@ -238,7 +238,72 @@ export function usePermissions(user: User | null | undefined) {
       canViewCostComponents: () => canViewCostComponents(user),
       canWriteCostComponents: () => canWriteCostComponents(user),
       canSeeBaseInformationNav: () => canSeeBaseInformationNav(user),
+      canViewProcurementAssignments: () => canViewProcurementAssignments(user),
+      canCreateProcurementAssignments: () => canCreateProcurementAssignments(user),
+      canEditProcurementAssignments: () => canEditProcurementAssignments(user),
+      canCompleteProcurementAssignments: () => canCompleteProcurementAssignments(user),
+      canCancelProcurementAssignments: () => canCancelProcurementAssignments(user),
+      canDeleteProcurementAssignments: () => canDeleteProcurementAssignments(user),
+      canManageProcurementAssignments: () => canManageProcurementAssignments(user),
+      canViewAllProcurementAssignments: () => canViewAllProcurementAssignments(user),
     }),
     [user]
   );
+}
+
+/** Sprint 5E: procurement assignment permissions (RBAC-first, admin bypass). */
+function hasProcurementAssignmentPermission(
+  user: User | null | undefined,
+  permissionKey: string
+): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, permissionKey);
+}
+
+export function canViewProcurementAssignments(user: User | null | undefined): boolean {
+  return hasProcurementAssignmentPermission(user, 'procurement.assignments.view');
+}
+
+export function canCreateProcurementAssignments(user: User | null | undefined): boolean {
+  return hasProcurementAssignmentPermission(user, 'procurement.assignments.create');
+}
+
+export function canEditProcurementAssignments(user: User | null | undefined): boolean {
+  return hasProcurementAssignmentPermission(user, 'procurement.assignments.edit');
+}
+
+export function canCompleteProcurementAssignments(user: User | null | undefined): boolean {
+  return hasProcurementAssignmentPermission(user, 'procurement.assignments.complete');
+}
+
+export function canCancelProcurementAssignments(user: User | null | undefined): boolean {
+  return hasProcurementAssignmentPermission(user, 'procurement.assignments.cancel');
+}
+
+export function canDeleteProcurementAssignments(user: User | null | undefined): boolean {
+  return hasProcurementAssignmentPermission(user, 'procurement.assignments.delete');
+}
+
+export function canManageProcurementAssignments(user: User | null | undefined): boolean {
+  return (
+    canCreateProcurementAssignments(user) ||
+    canEditProcurementAssignments(user) ||
+    canCompleteProcurementAssignments(user) ||
+    canCancelProcurementAssignments(user) ||
+    canDeleteProcurementAssignments(user)
+  );
+}
+
+/** Managers with create/edit/complete/cancel can list all assignments; view-only users see own rows. */
+export function canViewAllProcurementAssignments(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasAnyPermission(user, [
+    'procurement.assignments.create',
+    'procurement.assignments.edit',
+    'procurement.assignments.delete',
+    'procurement.assignments.complete',
+    'procurement.assignments.cancel',
+  ]);
 }
