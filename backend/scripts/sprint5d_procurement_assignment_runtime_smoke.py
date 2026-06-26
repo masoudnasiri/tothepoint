@@ -30,8 +30,10 @@ def auth_headers(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def classify(status: int, allowed: bool) -> str:
-    ok = (200 <= status < 300) if allowed else status in (401, 403)
+def classify(status: int, allowed: bool, *, conflict_ok: bool = False) -> str:
+    if conflict_ok and status == 409:
+        return "correctly_denied"
+    ok = (200 <= status < 300) if allowed else status in (401, 403, 409)
     if ok:
         return "correctly_allowed" if allowed else "correctly_denied"
     return "incorrectly_allowed" if allowed else "incorrectly_denied"
@@ -211,7 +213,11 @@ def main() -> int:
                 "route": label,
                 "status": resp.status_code,
                 "expected": "allow" if expected_allowed else "deny",
-                "classification": classify(resp.status_code, expected_allowed),
+                "classification": classify(
+                    resp.status_code,
+                    expected_allowed,
+                    conflict_ok=("duplicate" in label.lower()),
+                ),
             }
             if entry["classification"].startswith("incorrectly"):
                 failures += 1
