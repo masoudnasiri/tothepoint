@@ -108,6 +108,9 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
       <Alert severity="info" sx={{ mb: 2 }}>
         {t('procurementAssignments.scopeDisclaimer')}
       </Alert>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        {t('procurementAssignments.myAssignmentsWorkflowHint')}
+      </Alert>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
