@@ -1,6 +1,6 @@
 # Sprint 5E — Procurement Assignment Frontend and Scoped Procurement UX
 
-**Status:** PASS WITH MINOR ISSUES (pending runtime closure)  
+**Status:** PASS WITH MINOR ISSUES  
 **Date:** 2026-06-26  
 **Sprint name:** Sprint 5E — Procurement Assignment Frontend and Scoped Procurement UX
 
@@ -11,6 +11,8 @@
 | Starting branch | `restart/sprint5d-procurement-assignment-backend` |
 | Starting commit | `43bb62e6e0da9e21c99d1e4b4294d51c4272b43f` |
 | New branch | `restart/sprint5e-procurement-assignment-frontend-scoped-ux` |
+| Feature commit | `4e8c4149699926a2842d89f2dd08aa45d86b497f` |
+| Deployed to demo | `/opt/rivar-demo` @ `4e8c414` (sprint=5E) |
 
 ## UI placement decision
 
@@ -87,13 +89,30 @@ Project items tab: `projectItems.itemsTab`
 | `procurementAssignmentPermissions.test.ts` | RBAC helper matrix |
 | `procurementAssigneeUtils.test.ts` | Assignee filter/label |
 
-Local Jest cannot parse TypeScript in this workspace (pre-existing toolchain limitation). **Frontend production build PASS** (`npm run build`). Runtime smoke uses Sprint 5D API smoke + verify.sh.
+Local Jest cannot parse TypeScript in this workspace (pre-existing toolchain limitation; same failure on existing `permissions.test.ts`). **Frontend production build PASS** (`npm run build`).
+
+## Runtime smoke (2026-06-26)
+
+| Check | Result |
+|-------|--------|
+| `deploy_update_5e.sh` frontend rebuild | PASS |
+| `DEPLOYED_COMMIT.txt` | `branch=restart/sprint5e-procurement-assignment-frontend-scoped-ux`, `commit=4e8c414`, `sprint=5E` |
+| `run_sprint5d_smoke.sh` | PASS (13 checks, 0 failures) |
+| `verify.sh` | PASS (frontend routes, backend health, OpenAPI, R3 fixture, Sprint 3A-R3 runtime) |
+| `/health` | 200 |
+| `/openapi.json` | 200 |
+| Assignment APIs (create/duplicate/complete/cancel/view own) | PASS via 5D smoke |
+| Master Data RBAC regression (AC denied payment-methods) | PASS via 5D smoke |
+| Frontend HTTP `:3000` | 200 |
+
+UI flows validated via deployed frontend rebuild + assignment API smoke (project/item create, duplicate 409, complete/cancel, proc view own). Manual browser walkthrough recommended for dialog UX polish.
 
 ## Deployment
 
 - Script: `deployment/rivar-installer/deploy_update_5e.sh`
 - Target: `/opt/rivar-demo`, compose `rivar-demo`
 - Backend unchanged in 5E (frontend-only rebuild)
+- Note: initial Windows CRLF on deploy script required `dos2unix` on server; harmless BOM warning on shebang line during first run
 
 ## Out of scope (explicit)
 

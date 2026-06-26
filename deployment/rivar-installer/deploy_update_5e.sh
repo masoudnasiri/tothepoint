@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # Sprint 5E: rebuild /opt/rivar-demo frontend (backend unchanged unless needed).
 set -euo pipefail
 
