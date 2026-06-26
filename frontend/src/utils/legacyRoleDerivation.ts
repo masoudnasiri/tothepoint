@@ -1,6 +1,6 @@
 /**
  * Derives hidden users.role compatibility value from selected RBAC system role codes.
- * Custom-only selections use pm (least-privilege legacy slot); effective access comes from RBAC grants.
+ * Custom-only selections use pm as a legacy DB slot only; master-data nav uses effective RBAC grants.
  */
 const SYSTEM_ROLE_TO_LEGACY: Record<string, string> = {
   system_admin: 'admin',

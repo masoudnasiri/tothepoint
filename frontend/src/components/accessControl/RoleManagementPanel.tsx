@@ -470,7 +470,7 @@ export const RoleManagementPanel: React.FC<RoleManagementPanelProps> = ({ onNoti
                         <TableCell sx={{ minWidth: 160 }}>
                           <Typography variant="body2">{labelForFeature(featureKey)}</Typography>
                           {(() => {
-                            const badge = getFeatureEnforcementBadge(featurePerms);
+                            const badge = getFeatureEnforcementBadge(featurePerms, featureKey);
                             if (badge === 'pilot') {
                               return (
                                 <Chip

@@ -38,7 +38,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { canAccessUsersAccessControlSection } from '../utils/permissions.ts';
+import { canAccessUsersAccessControlSection, canSeeBaseInformationNav, canSeeItemsMasterNav, canSeeSuppliersNav } from '../utils/permissions.ts';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
 import { BRAND_NAME, PRODUCER_NAME, PRODUCT_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
@@ -58,6 +58,7 @@ interface NavigationItem {
   children?: NavigationItem[];
   accessControlOnly?: boolean;
   usersAccessControlOnly?: boolean;
+  masterDataPilotNav?: boolean;
 }
 
 const navigationItems: NavigationItem[] = [
@@ -91,8 +92,8 @@ const navigationItems: NavigationItem[] = [
     roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'],
     children: [
       { textKey: 'navigation.weights', icon: <Tune />, path: '/weights', roles: ['admin'] },
-      { textKey: 'navigation.itemsMaster', icon: <Inventory />, path: '/items-master', roles: ['admin', 'pmo', 'pm', 'finance'] },
-      { textKey: 'navigation.suppliers', icon: <Business />, path: '/suppliers', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'] },
+      { textKey: 'navigation.itemsMaster', icon: <Inventory />, path: '/items-master', roles: ['admin', 'pmo', 'pm', 'finance'], masterDataPilotNav: true },
+      { textKey: 'navigation.suppliers', icon: <Business />, path: '/suppliers', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'], masterDataPilotNav: true },
     ],
   },
 ];
@@ -143,6 +144,18 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
     if (item.accessControlOnly) {
       return canAccessUsersAccessControlSection(user);
+    }
+    if (item.textKey === 'navigation.baseInformation') {
+      if (item.children?.some((child) => canSeeNavItem(child))) {
+        return true;
+      }
+      return canSeeBaseInformationNav(user);
+    }
+    if (item.masterDataPilotNav && item.path === '/items-master') {
+      return canSeeItemsMasterNav(user);
+    }
+    if (item.masterDataPilotNav && item.path === '/suppliers') {
+      return canSeeSuppliersNav(user);
     }
     return Boolean(user?.role && item.roles.includes(user.role));
   };

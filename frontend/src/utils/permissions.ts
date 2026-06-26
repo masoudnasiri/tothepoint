@@ -122,6 +122,99 @@ export function canDeleteSuppliers(user: User | null | undefined): boolean {
   return hasPilotPermission(user, 'master_data.suppliers.delete');
 }
 
+/** True when effective RBAC grants exist — legacy role must not override pilot/master-data nav. */
+export function userHasExplicitRbacGrants(user: User | null | undefined): boolean {
+  return Boolean(user?.permissions?.length);
+}
+
+export function hasAnyMasterDataPermission(user: User | null | undefined): boolean {
+  if (!user?.permissions?.length) return false;
+  return user.permissions.some((key) => key.startsWith('master_data'));
+}
+
+export function canViewPaymentMethods(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return hasAnyPermission(user, [
+      'master_data.payment_methods.view',
+      'master_data.payment_methods.create',
+      'master_data.payment_methods.edit',
+      'master_data.payment_methods.delete',
+    ]);
+  }
+  return Boolean(user.role && ['admin', 'finance', 'pmo', 'procurement', 'pm'].includes(user.role));
+}
+
+export function canWritePaymentMethods(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return hasAnyPermission(user, [
+      'master_data.payment_methods.create',
+      'master_data.payment_methods.edit',
+      'master_data.payment_methods.delete',
+    ]);
+  }
+  return user.role === 'admin' || user.role === 'finance';
+}
+
+export function canViewCostComponents(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return hasAnyPermission(user, [
+      'master_data.cost_components.view',
+      'master_data.cost_components.create',
+      'master_data.cost_components.edit',
+      'master_data.cost_components.delete',
+    ]);
+  }
+  return Boolean(user.role && ['admin', 'finance', 'pmo', 'procurement', 'pm'].includes(user.role));
+}
+
+export function canWriteCostComponents(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return hasAnyPermission(user, [
+      'master_data.cost_components.create',
+      'master_data.cost_components.edit',
+      'master_data.cost_components.delete',
+    ]);
+  }
+  return user.role === 'admin' || user.role === 'finance' || user.role === 'procurement';
+}
+
+export function canSeeItemsMasterNav(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasRbacContext(user)) return canViewItemsMaster(user);
+  return Boolean(user.role && ['admin', 'pmo', 'pm', 'finance'].includes(user.role));
+}
+
+export function canSeeSuppliersNav(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasRbacContext(user)) return canViewSuppliers(user);
+  return Boolean(user.role && ['admin', 'pmo', 'pm', 'procurement', 'finance'].includes(user.role));
+}
+
+export function canSeeBaseInformationNav(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  if (userHasExplicitRbacGrants(user)) {
+    return (
+      canViewItemsMaster(user) ||
+      canViewSuppliers(user) ||
+      canViewPaymentMethods(user) ||
+      canViewCostComponents(user) ||
+      hasPermission(user, 'master_data.view')
+    );
+  }
+  return Boolean(user.role && ['admin', 'pmo', 'pm', 'procurement', 'finance'].includes(user.role));
+}
+
 export function usePermissions(user: User | null | undefined) {
   return useMemo(
     () => ({
@@ -140,6 +233,11 @@ export function usePermissions(user: User | null | undefined) {
       canCreateSuppliers: () => canCreateSuppliers(user),
       canEditSuppliers: () => canEditSuppliers(user),
       canDeleteSuppliers: () => canDeleteSuppliers(user),
+      canViewPaymentMethods: () => canViewPaymentMethods(user),
+      canWritePaymentMethods: () => canWritePaymentMethods(user),
+      canViewCostComponents: () => canViewCostComponents(user),
+      canWriteCostComponents: () => canWriteCostComponents(user),
+      canSeeBaseInformationNav: () => canSeeBaseInformationNav(user),
     }),
     [user]
   );

@@ -1192,7 +1192,7 @@
     "unifiedSubtitle": "Manage users, roles, permissions, and role assignments in one place.",
     "sectionAccessDeniedMessage": "You do not have permission to access Users & Access Control.",
     "featureAccessDenied": "Access denied for this feature.",
-    "enforcementPilotNotice": "Some permissions are registered for future enforcement. Current sprint enforces Access Control, Users visibility, Items Master, and Suppliers only.",
+    "enforcementPilotNotice": "Some permissions are registered for future enforcement. Access Control and Users visibility are fully enforced. Items Master and Suppliers are pilot-enforced in this sprint.",
     "searchRoles": "Search roles…",
     "noRolesMatch": "No roles match your search.",
     "assignedUsers": "Assigned users",

@@ -1,6 +1,8 @@
 import {
   getFeatureEnforcementBadge,
+  isEnforcedFeatureKey,
   isPilotEnforcedPermission,
+  isPilotFeatureKey,
   isEnforcedPermission,
 } from './permissionLabels.ts';
 
@@ -20,11 +22,50 @@ describe('permissionLabels enforcement badges', () => {
     expect(isEnforcedPermission('procurement.view')).toBe(false);
   });
 
+  it('uses feature keys so access_control rows are enforced not pilot', () => {
+    expect(isEnforcedFeatureKey('access_control.roles')).toBe(true);
+    expect(isEnforcedFeatureKey('access_control.permissions')).toBe(true);
+    expect(isEnforcedFeatureKey('access_control.user_roles')).toBe(true);
+    expect(isPilotFeatureKey('access_control.roles')).toBe(false);
+
+    expect(
+      getFeatureEnforcementBadge(
+        [{ permission_key: 'access_control.roles.view' }],
+        'access_control.roles'
+      )
+    ).toBe('enforced');
+    expect(
+      getFeatureEnforcementBadge(
+        [{ permission_key: 'access_control.permissions.manage' }],
+        'access_control.permissions'
+      )
+    ).toBe('enforced');
+  });
+
   it('returns pilot badge for master data pilot features only', () => {
     expect(
-      getFeatureEnforcementBadge([{ permission_key: 'master_data.items.view' }])
+      getFeatureEnforcementBadge(
+        [{ permission_key: 'master_data.items.view' }],
+        'master_data.items'
+      )
     ).toBe('pilot');
-    expect(getFeatureEnforcementBadge([{ permission_key: 'users.view' }])).toBe('enforced');
-    expect(getFeatureEnforcementBadge([{ permission_key: 'projects.view' }])).toBe(null);
+    expect(
+      getFeatureEnforcementBadge([{ permission_key: 'users.view' }], 'users')
+    ).toBe('enforced');
+    expect(
+      getFeatureEnforcementBadge([{ permission_key: 'projects.view' }], 'projects')
+    ).toBe(null);
+    expect(
+      getFeatureEnforcementBadge(
+        [{ permission_key: 'master_data.payment_methods.view' }],
+        'master_data.payment_methods'
+      )
+    ).toBe(null);
+  });
+
+  it('Persian label keys exist for enforced and pilot badges', () => {
+    const fa = require('../i18n/fa.json');
+    expect(fa.accessControl.enforced).toBe('اعمال‌شده');
+    expect(fa.accessControl.pilotEnforced).toBe('پایلوت اجراشده');
   });
 });

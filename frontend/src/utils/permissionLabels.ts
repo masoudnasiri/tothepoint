@@ -69,13 +69,48 @@ export function isEnforcedPermission(permissionKey: string): boolean {
   return ENFORCED_PREFIXES.some((prefix) => permissionKey.startsWith(prefix));
 }
 
-/** Badge for permission matrix feature rows — at most one badge per feature group. */
-export function getFeatureEnforcementBadge(featurePermissions: { permission_key: string }[]): PermissionEnforcementBadge {
-  if (featurePermissions.some((p) => isPilotEnforcedPermission(p.permission_key))) {
+/** Feature keys with verified non-pilot enforcement (backend + frontend guards). */
+export const ENFORCED_FEATURE_KEYS = [
+  'access_control.roles',
+  'access_control.permissions',
+  'access_control.user_roles',
+  'users',
+] as const;
+
+/** Feature keys in the master-data RBAC pilot (Items Master / Suppliers). */
+export const PILOT_FEATURE_KEYS = [
+  'master_data.items',
+  'master_data.suppliers',
+] as const;
+
+export function isEnforcedFeatureKey(featureKey: string): boolean {
+  return ENFORCED_FEATURE_KEYS.some(
+    (key) => featureKey === key || featureKey.startsWith(`${key}.`)
+  );
+}
+
+export function isPilotFeatureKey(featureKey: string): boolean {
+  return PILOT_FEATURE_KEYS.some(
+    (key) => featureKey === key || featureKey.startsWith(`${key}.`)
+  );
+}
+
+/** Badge for permission matrix feature rows — enforced takes precedence over pilot. */
+export function getFeatureEnforcementBadge(
+  featurePermissions: { permission_key: string }[],
+  featureKey?: string
+): PermissionEnforcementBadge {
+  if (featureKey && isEnforcedFeatureKey(featureKey)) {
+    return 'enforced';
+  }
+  if (featureKey && isPilotFeatureKey(featureKey)) {
     return 'pilot';
   }
   if (featurePermissions.some((p) => isEnforcedPermission(p.permission_key))) {
     return 'enforced';
+  }
+  if (featurePermissions.some((p) => isPilotEnforcedPermission(p.permission_key))) {
+    return 'pilot';
   }
   return null;
 }
