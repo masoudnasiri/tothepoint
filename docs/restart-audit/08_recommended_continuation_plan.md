@@ -158,5 +158,6 @@ If a sprint changes code but does not update `docs/restart-audit`, that sprint i
 - Sprint 3A-R3: Cost-Level Payment Schedule + Save/Verify Stability (`PASS`, original closure `23be386`; superseded as live baseline by hotfix chain `743a19b` + `6f9e944` + closure provenance in `53_sprint3a_r3_hotfix_closure_router_i18n_runtime.md`)
 - Sprint 3A-R3 terminology follow-up (`743a19b`): schedule-oriented Step 3 labels; no enum/persistence/logic change
 - Sprint 3A-R3 hotfix router registration (`6f9e944`): `procurement_financials.router` registered in `main.py`
-- Sprint 3A-R3 hotfix closure (`PASS`, `53_*`): R3 `verify_runtime_r3.py`, installer `verify.sh` SPA Accept fix, `/opt/rivar-demo` runtime verify PASS; **new accepted baseline for Sprint 4A = hotfix closure HEAD on `recovery/sprint3a-r3-cost-level-payment-schedule`**
-- Next planned work: Sprint 4A Workspace Organization from hotfix baseline (not `23be386` alone)
+- Sprint 3A-R3 hotfix closure (`PASS`, `53_*`): R3 `verify_runtime_r3.py`, installer `verify.sh` SPA Accept fix, `/opt/rivar-demo` runtime verify PASS; **accepted R3 baseline = `07b56f24` on `recovery/sprint3a-r3-cost-level-payment-schedule`**
+- Sprint 4A Workspace Organization from R3 hotfix baseline (`PASS WITH MINOR ISSUES`, `54_*` / `55_*`): branch `restart/workspace-organization-after-sprint3a-r3-hotfix`; root `.tmp_*` scratch archived to gitignored `oldfiles/qa-temp/`; no product code changes
+- Next planned work: Sprint 5 Optimization UX Decision Room
