@@ -4,6 +4,7 @@ Project items management endpoints
 
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, require_pm, require_pmo, require_pm_or_pmo, require_role, get_user_projects
@@ -12,7 +13,16 @@ from app.crud import (
     update_project_item, delete_project_item, finalize_project_item, log_audit
 )
 from app.models import User, FinalizedDecision, ProjectItemSubItem, ItemSubItem
-from app.schemas import ProjectItem, ProjectItemCreate, ProjectItemUpdate, ProjectItemFinalize
+from app.schemas import (
+    ProjectItem,
+    ProjectItemCreate,
+    ProjectItemUpdate,
+    ProjectItemFinalize,
+    ProjectItemProcurementEligibility,
+)
+from app.services.procurement_eligibility_service import (
+    validate_project_item_procurement_eligibility,
+)
 from app.services.package_combination_service import (
     SUBMISSION_STATE_ROLLED_BACK,
     SUBMISSION_STATE_SENT,
@@ -21,6 +31,24 @@ from app.services.package_combination_service import (
 )
 
 router = APIRouter(prefix="/items", tags=["project-items"])
+
+
+def _build_procurement_eligibility_http_detail(
+    *,
+    code: str,
+    message: str,
+    eligibility: dict,
+    status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
+):
+    detail_payload = {
+        "code": code,
+        "message": message,
+        "eligibility": eligibility,
+    }
+    raise HTTPException(
+        status_code=status_code,
+        detail=jsonable_encoder(detail_payload),
+    )
 
 
 @router.get("/project/{project_id}")
@@ -148,6 +176,11 @@ async def list_project_items(
             # Sub-items breakdown
             "sub_items": sub_list,
         }
+        item_dict["procurement_eligibility"] = await validate_project_item_procurement_eligibility(
+            db,
+            item.id,
+            project_item=item,
+        )
         enriched_items.append(item_dict)
     
     return {
@@ -408,8 +441,44 @@ async def get_project_item_by_id(
         "updated_at": item.updated_at.isoformat() if item.updated_at else None,
         "sub_items": sub_list,
     }
+    item_dict["procurement_eligibility"] = await validate_project_item_procurement_eligibility(
+        db,
+        item.id,
+        project_item=item,
+    )
     
     return item_dict
+
+
+@router.get(
+    "/{item_id}/procurement-eligibility",
+    response_model=ProjectItemProcurementEligibility,
+)
+async def get_project_item_procurement_eligibility(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Read-only eligibility diagnostics for send-to-procurement gate."""
+    item = await get_project_item(db, item_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project item not found",
+        )
+
+    user_projects = await get_user_projects(db, current_user)
+    if current_user.role == "pm" and item.project_id not in user_projects:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this project item",
+        )
+
+    return await validate_project_item_procurement_eligibility(
+        db,
+        item_id,
+        project_item=item,
+    )
 
 
 @router.get("/{item_id}/subitems")
@@ -590,22 +659,15 @@ async def finalize_project_item_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Finalize a project item (PMO or Admin only) - makes it visible in procurement"""
-    # Guard: Require at least one delivery & invoice option for this project item
-    # A delivery option inherently includes invoice configuration (amount/timing)
-    from sqlalchemy import select, func
-    from app.models import DeliveryOption as DeliveryOptionModel
-
-    delivery_count_result = await db.execute(
-        select(func.count(DeliveryOptionModel.id)).where(
-            DeliveryOptionModel.project_item_id == item_id,
-            DeliveryOptionModel.is_active == True
-        )
-    )
-    has_delivery_and_invoice = (delivery_count_result.scalar() or 0) > 0
-    if not has_delivery_and_invoice:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot finalize: add at least one Delivery & Invoice option first."
+    eligibility = await validate_project_item_procurement_eligibility(db, item_id)
+    if not eligibility.get("is_eligible", False):
+        _build_procurement_eligibility_http_detail(
+            code="PROCUREMENT_ELIGIBILITY_FAILED",
+            message=(
+                "Project item is not eligible to send to procurement. "
+                "Resolve eligibility blockers first."
+            ),
+            eligibility=eligibility,
         )
 
     item = await finalize_project_item(db, item_id, current_user.id, finalize_data)
@@ -733,6 +795,41 @@ async def finalize_all_project_items(
     
     if not items:
         return {"message": "No items to finalize", "finalized_count": 0}
+
+    eligibility_reports = []
+    for item in items:
+        eligibility = await validate_project_item_procurement_eligibility(
+            db,
+            item.id,
+            project_item=item,
+        )
+        if not eligibility.get("is_eligible", False):
+            eligibility_reports.append(
+                {
+                    "project_item_id": int(item.id),
+                    "item_code": item.item_code,
+                    "blockers": eligibility.get("blockers", []),
+                    "warnings": eligibility.get("warnings", []),
+                    "messages": eligibility.get("messages", []),
+                }
+            )
+
+    if eligibility_reports:
+        detail_payload = {
+            "code": "BULK_PROCUREMENT_ELIGIBILITY_FAILED",
+            "message": (
+                "One or more project items are not eligible to send to procurement. "
+                "No items were finalized."
+            ),
+            "project_id": project_id,
+            "invalid_items": eligibility_reports,
+            "invalid_count": len(eligibility_reports),
+            "candidate_count": len(items),
+        }
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=jsonable_encoder(detail_payload),
+        )
     
     # Finalize all items
     await db.execute(

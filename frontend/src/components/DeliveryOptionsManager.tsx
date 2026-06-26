@@ -60,12 +60,14 @@ interface DeliveryOptionsManagerProps {
   projectItemId: number;
   itemCode: string;
   availableDeliveryDates: string[]; // Array of ISO date strings from ProjectItem.delivery_options
+  onOptionsChanged?: () => void;
 }
 
 export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
   projectItemId,
   itemCode,
   availableDeliveryDates,
+  onOptionsChanged,
 }) => {
   const { i18n } = useTranslation();
   
@@ -243,6 +245,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
         setSuccess('');
         fetchOptions(false); // Silent refresh - errors won't show to user
       }, 2000);
+      onOptionsChanged?.();
     } catch (err: any) {
       // Handle specific error cases
       if (err.response?.status === 404) {
@@ -257,6 +260,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
           resetForm();
           setSuccess('Delivery option saved successfully (verified)');
           setTimeout(() => setSuccess(''), 2000);
+          onOptionsChanged?.();
         } catch (refreshErr: any) {
           // Both save and refresh failed
           setError(formatApiError(err, 'save'));
@@ -274,6 +278,7 @@ export const DeliveryOptionsManager: React.FC<DeliveryOptionsManagerProps> = ({
       await deliveryOptionsAPI.delete(id);
       setSuccess('Delivery option deleted successfully');
       fetchOptions();
+      onOptionsChanged?.();
     } catch (err: any) {
       setError(formatApiError(err, 'Failed to delete delivery option'));
     }

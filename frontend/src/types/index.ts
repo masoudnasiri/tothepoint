@@ -437,6 +437,35 @@ export type ProcurementCostComponentType =
   | 'BANK_FEE'
   | 'OTHER';
 
+export type ProcurementCostComponentPayeeType =
+  | 'SUPPLIER'
+  | 'LOGISTICS_PROVIDER'
+  | 'INSURANCE_PROVIDER'
+  | 'CUSTOMS_OR_CLEARANCE'
+  | 'BANK_OR_EXCHANGE'
+  | 'OTHER';
+
+export type ProcurementCostComponentPaymentType = 'CASH' | 'INSTALLMENTS';
+
+export interface ProcurementCostComponentPaymentScheduleRow {
+  due_offset_days?: number;
+  due_date?: string;
+  percent?: number;
+  amount_value?: number;
+  derived_effective_receipt_date?: string;
+}
+
+export interface ProcurementCostComponentPaymentMetadata {
+  inherit_option_payment_schedule: boolean;
+  payee_type: ProcurementCostComponentPayeeType;
+  payee_label?: string | null;
+  payment_method_id?: number | null;
+  payment_type: ProcurementCostComponentPaymentType;
+  planned_payment_date?: string | null;
+  payment_schedule?: ProcurementCostComponentPaymentScheduleRow[];
+  notes?: string | null;
+}
+
 export interface ProcurementCostComponent {
   id: number;
   procurement_option_id: number;
@@ -446,6 +475,7 @@ export interface ProcurementCostComponent {
   amount_currency: string;
   amount_irr?: number | null;
   exchange_rate_date?: string | null;
+  payment_metadata?: ProcurementCostComponentPaymentMetadata | null;
   is_active: boolean;
   created_at: string;
   updated_at?: string | null;
@@ -458,6 +488,7 @@ export interface ProcurementCostComponentCreate {
   amount_currency: string;
   amount_irr?: number;
   exchange_rate_date?: string;
+  payment_metadata?: ProcurementCostComponentPaymentMetadata;
   is_active?: boolean;
 }
 
@@ -468,6 +499,7 @@ export interface ProcurementCostComponentUpdate {
   amount_currency?: string;
   amount_irr?: number;
   exchange_rate_date?: string;
+  payment_metadata?: ProcurementCostComponentPaymentMetadata;
   is_active?: boolean;
 }
 

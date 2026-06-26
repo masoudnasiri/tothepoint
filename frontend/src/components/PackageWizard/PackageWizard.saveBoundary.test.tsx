@@ -395,6 +395,57 @@ describe('PackageWizard save-boundary behavior', () => {
     expect(payload.discount_bundle_percent).toBe(5);
   });
 
+  it('sanitizes blank cost-component payment dates before API save', async () => {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <PackageWizard
+          open={true}
+          onClose={() => {}}
+          projectItemId={1}
+          itemCode="ITM-1"
+          mainItemRequiredQuantity={1}
+          subItemRequirements={[]}
+          existingPackages={[]}
+          editingPackageId={99}
+          initialData={buildInitialData([
+            {
+              component_type: 'BASE_PRICE',
+              description: '',
+              amount_value: 1000,
+              amount_currency: 'IRR',
+              payment_metadata: {
+                inherit_option_payment_schedule: true,
+                payee_type: 'SUPPLIER',
+                payment_method_id: null,
+                payment_type: 'CASH',
+                planned_payment_date: '',
+                payment_schedule: [
+                  {
+                    due_offset_days: 0,
+                    due_date: '',
+                    percent: 100,
+                  },
+                ],
+                notes: '',
+              },
+            },
+          ])}
+        />
+      );
+    });
+
+    await clickButton('Next');
+    await clickButton('Next');
+    await clickButton('Update');
+    await flush();
+
+    expect(mockCreateCostComponent).toHaveBeenCalled();
+    const payload = mockCreateCostComponent.mock.calls[0][1];
+    expect(payload.payment_metadata.planned_payment_date).toBeUndefined();
+    expect(payload.payment_metadata.payment_schedule[0].due_date).toBeUndefined();
+  });
+
   it('blocks save when amount is present but currency is missing', async () => {
     await act(async () => {
       root = createRoot(container);

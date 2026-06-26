@@ -47,7 +47,8 @@ async def log_audit(
             user_agent=user_agent,
         )
         db.add(log_row)
-        await db.commit()
+        # Keep audit writes inside caller transaction scope.
+        await db.flush()
     except Exception as e:
         # Don't break main flow due to audit failures
         logger.warning(f"Audit log write failed: {e}")
@@ -356,6 +357,10 @@ async def create_procurement_option(db: AsyncSession, option: ProcurementOptionC
         log_feature_flag_usage
     )
     from app.services.audit_service import log_phase3_operation
+    from app.services.procurement_financials_service import (
+        apply_procurement_option_persistence_contract,
+        synchronize_procurement_option_legacy_pricing_fields,
+    )
     from app.config import settings
     from app.models import User
     
@@ -428,8 +433,16 @@ async def create_procurement_option(db: AsyncSession, option: ProcurementOptionC
     
     db_option = ProcurementOption(**option_data)
     db.add(db_option)
+    await db.flush()
+    await synchronize_procurement_option_legacy_pricing_fields(
+        option_id=db_option.id,
+        db=db,
+        require_base_price=False,
+    )
+    await apply_procurement_option_persistence_contract(option_id=db_option.id, db=db)
     await db.commit()
     await db.refresh(db_option)
+    created_option_id = int(db_option.id)
     
     # Phase 3: Log operation
     try:
@@ -445,8 +458,9 @@ async def create_procurement_option(db: AsyncSession, option: ProcurementOptionC
         )
     except Exception:
         pass
-    
-    return db_option
+
+    # Reload after telemetry write to avoid returning an expired ORM row.
+    return await get_procurement_option(db, created_option_id)
 
 
 async def get_procurement_option(db: AsyncSession, option_id: int) -> Optional[ProcurementOption]:
@@ -455,6 +469,7 @@ async def get_procurement_option(db: AsyncSession, option_id: int) -> Optional[P
     
     result = await db.execute(
         select(ProcurementOption)
+        .execution_options(populate_existing=True)
         .options(joinedload(ProcurementOption.supplier))
         .where(ProcurementOption.id == option_id)
     )
@@ -497,6 +512,10 @@ async def update_procurement_option(db: AsyncSession, option_id: int,
         resolve_package_from_project_item
     )
     from app.services.audit_service import log_phase3_operation
+    from app.services.procurement_financials_service import (
+        apply_procurement_option_persistence_contract,
+        synchronize_procurement_option_legacy_pricing_fields,
+    )
     from app.config import settings
     
     # Get existing option to preserve current values
@@ -554,6 +573,12 @@ async def update_procurement_option(db: AsyncSession, option_id: int,
     await db.execute(
         update(ProcurementOption).where(ProcurementOption.id == option_id).values(**update_data)
     )
+    await synchronize_procurement_option_legacy_pricing_fields(
+        option_id=option_id,
+        db=db,
+        require_base_price=False,
+    )
+    await apply_procurement_option_persistence_contract(option_id=option_id, db=db)
     await db.commit()
     
     updated = await get_procurement_option(db, option_id)
@@ -571,8 +596,9 @@ async def update_procurement_option(db: AsyncSession, option_id: int,
         )
     except Exception:
         pass
-    
-    return updated
+
+    # Reload after audit telemetry write to avoid returning an expired ORM row.
+    return await get_procurement_option(db, option_id)
 
 
 async def delete_procurement_option(db: AsyncSession, option_id: int) -> bool:

@@ -366,6 +366,39 @@ class ProjectItemFinalize(BaseModel):
     finalized_at: Optional[datetime] = None  # Will be set by backend
 
 
+class ProcurementEligibilityIssue(BaseModel):
+    code: str
+    message: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ProcurementEligibilityDeliveryOptionInspection(BaseModel):
+    delivery_option_id: Optional[int] = None
+    source: str = "delivery_option"
+    delivery_date: Optional[date] = None
+    has_delivery_date: bool = False
+    delivery_price_amount: Optional[Decimal] = None
+    has_delivery_price: bool = False
+    is_positive_delivery_price: bool = False
+    delivery_price_currency: Optional[str] = None
+    has_delivery_currency: bool = False
+    is_valid: bool = False
+
+
+class ProjectItemProcurementEligibility(BaseModel):
+    project_item_id: int
+    is_eligible: bool
+    blockers: List[ProcurementEligibilityIssue] = Field(default_factory=list)
+    warnings: List[ProcurementEligibilityIssue] = Field(default_factory=list)
+    messages: List[str] = Field(default_factory=list)
+    delivery_option_count: int = 0
+    valid_delivery_option_count: int = 0
+    has_delivery_schedule_dates: bool = False
+    inspected_delivery_options: List[ProcurementEligibilityDeliveryOptionInspection] = Field(
+        default_factory=list
+    )
+
+
 # Procurement Option Schemas
 class PaymentTermsCash(BaseModel):
     type: Literal["cash"] = "cash"
@@ -393,6 +426,10 @@ class PaymentTermsInstallments(BaseModel):
         return v
 
 
+DeliveryDateSource = Literal["PROJECT_OPTION", "SUPPLIER_ACTUAL", "MANUAL"]
+ForecastDateSource = Literal["SYSTEM_DEFAULT", "MANUAL_OVERRIDE"]
+
+
 class ProcurementOptionBase(BaseModel):
     item_code: str = Field(..., min_length=1, max_length=100)  # Match model: String(100)
     supplier_name: str = Field(..., min_length=1)  # Legacy field - will be deprecated
@@ -407,7 +444,52 @@ class ProcurementOptionBase(BaseModel):
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
     payment_terms: Union[PaymentTermsCash, PaymentTermsInstallments]
+    payment_method_id: Optional[int] = Field(
+        None,
+        description="Selected payment method ID from master data",
+    )
+    planned_supplier_payment_date: Optional[date] = Field(
+        None,
+        description="Planned supplier payment date",
+    )
+    supplier_effective_receipt_date: Optional[date] = Field(
+        None,
+        description="Derived supplier effective receipt date (payment + settlement delay)",
+    )
     is_finalized: Optional[bool] = Field(False, description="Mark option as finalized during creation")
+    project_requested_delivery_date: Optional[date] = Field(
+        None, description="Project requested/planned delivery date snapshot"
+    )
+    supplier_actual_delivery_date: Optional[date] = Field(
+        None, description="Supplier-provided actual available delivery date"
+    )
+    selected_delivery_date: Optional[date] = Field(
+        None, description="Delivery date selected for financial defaulting"
+    )
+    delivery_date_source: Optional[DeliveryDateSource] = Field(
+        None, description="Source of selected delivery date"
+    )
+    delivery_date_variance_days: Optional[int] = Field(
+        None, description="supplier_actual_delivery_date - project_requested_delivery_date"
+    )
+    forecast_customer_invoice_date: Optional[date] = Field(
+        None, description="Defaulted/overridden customer invoice date"
+    )
+    forecast_customer_invoice_date_source: Optional[ForecastDateSource] = Field(
+        None, description="Source of forecast_customer_invoice_date"
+    )
+    forecast_customer_receipt_date: Optional[date] = Field(
+        None, description="Defaulted/overridden customer receipt date"
+    )
+    forecast_customer_receipt_date_source: Optional[ForecastDateSource] = Field(
+        None, description="Source of forecast_customer_receipt_date"
+    )
+    forecast_customer_receipt_delay_days: Optional[int] = Field(
+        None, description="Invoice-to-receipt delay in days when inferable"
+    )
+    date_calculation_trace: Optional[List[str]] = Field(
+        None, description="Trace lines for delivery/invoice/receipt date defaults"
+    )
 
 
 class ProcurementOptionCreate(ProcurementOptionBase):
@@ -432,12 +514,28 @@ class ProcurementOptionUpdate(BaseModel):
     discount_bundle_threshold: Optional[int] = Field(None, gt=0)
     discount_bundle_percent: Optional[Decimal] = Field(None, ge=0, le=100)
     payment_terms: Optional[Union[PaymentTermsCash, PaymentTermsInstallments]] = None
+    payment_method_id: Optional[int] = None
+    planned_supplier_payment_date: Optional[date] = None
+    supplier_effective_receipt_date: Optional[date] = None
     is_active: Optional[bool] = None
     is_finalized: Optional[bool] = None
+    project_requested_delivery_date: Optional[date] = None
+    supplier_actual_delivery_date: Optional[date] = None
+    selected_delivery_date: Optional[date] = None
+    delivery_date_source: Optional[DeliveryDateSource] = None
+    delivery_date_variance_days: Optional[int] = None
+    forecast_customer_invoice_date: Optional[date] = None
+    forecast_customer_invoice_date_source: Optional[ForecastDateSource] = None
+    forecast_customer_receipt_date: Optional[date] = None
+    forecast_customer_receipt_date_source: Optional[ForecastDateSource] = None
+    forecast_customer_receipt_delay_days: Optional[int] = None
+    date_calculation_trace: Optional[List[str]] = None
 
 
 class ProcurementOption(ProcurementOptionBase):
     id: int
+    package_id: Optional[int] = None
+    project_item_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     is_active: bool
@@ -461,6 +559,566 @@ class ProcurementOptionWithSupplier(ProcurementOption):
     supplier: Optional[SupplierSummary] = None  # Include supplier details
     
     model_config = {"from_attributes": True}
+
+
+class PaymentMethodBase(BaseModel):
+    code: str = Field(..., min_length=1, max_length=50)
+    name_en: str = Field(..., min_length=1, max_length=200)
+    name_fa: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    settlement_delay_days: int = Field(0, ge=0)
+    is_active: bool = True
+
+
+class PaymentMethodCreate(PaymentMethodBase):
+    pass
+
+
+class PaymentMethodUpdate(BaseModel):
+    code: Optional[str] = Field(None, min_length=1, max_length=50)
+    name_en: Optional[str] = Field(None, min_length=1, max_length=200)
+    name_fa: Optional[str] = Field(None, min_length=1, max_length=200)
+    description: Optional[str] = None
+    settlement_delay_days: Optional[int] = Field(None, ge=0)
+    is_active: Optional[bool] = None
+
+
+class PaymentMethod(PaymentMethodBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ProcurementCostComponentType(str, Enum):
+    BASE_PRICE = "BASE_PRICE"
+    SHIPPING = "SHIPPING"
+    VAT = "VAT"
+    CUSTOMS = "CUSTOMS"
+    CLEARANCE = "CLEARANCE"
+    INSURANCE = "INSURANCE"
+    BANK_FEE = "BANK_FEE"
+    OTHER = "OTHER"
+
+
+class ProcurementCostComponentPayeeType(str, Enum):
+    SUPPLIER = "SUPPLIER"
+    LOGISTICS_PROVIDER = "LOGISTICS_PROVIDER"
+    INSURANCE_PROVIDER = "INSURANCE_PROVIDER"
+    CUSTOMS_OR_CLEARANCE = "CUSTOMS_OR_CLEARANCE"
+    BANK_OR_EXCHANGE = "BANK_OR_EXCHANGE"
+    OTHER = "OTHER"
+
+
+class ProcurementCostComponentPaymentType(str, Enum):
+    CASH = "CASH"
+    INSTALLMENTS = "INSTALLMENTS"
+
+
+class ProcurementCostComponentPaymentScheduleRow(BaseModel):
+    due_offset_days: Optional[int] = Field(None, ge=0)
+    due_date: Optional[date] = None
+    percent: Optional[Decimal] = Field(None, gt=0, le=100)
+    amount_value: Optional[Decimal] = Field(None, gt=0)
+    derived_effective_receipt_date: Optional[date] = None
+
+    @validator("due_date", always=True)
+    def validate_due_reference(cls, v, values):
+        if v is None and values.get("due_offset_days") is None:
+            raise ValueError(
+                "Each payment schedule row must include due_offset_days or due_date"
+            )
+        return v
+
+
+class ProcurementCostComponentPaymentMetadata(BaseModel):
+    inherit_option_payment_schedule: bool = True
+    payee_type: ProcurementCostComponentPayeeType = ProcurementCostComponentPayeeType.SUPPLIER
+    payee_label: Optional[str] = None
+    payment_method_id: Optional[int] = Field(None, gt=0)
+    payment_type: ProcurementCostComponentPaymentType = ProcurementCostComponentPaymentType.CASH
+    planned_payment_date: Optional[date] = None
+    payment_schedule: List[ProcurementCostComponentPaymentScheduleRow] = Field(
+        default_factory=list
+    )
+    notes: Optional[str] = None
+
+    @validator("payment_method_id", always=True)
+    def validate_payment_method_requirement(cls, v, values):
+        if values.get("inherit_option_payment_schedule", True):
+            return v
+        if v is None:
+            raise ValueError(
+                "payment_method_id is required when inherit_option_payment_schedule is false"
+            )
+        return v
+
+    @validator("planned_payment_date", always=True)
+    def validate_planned_payment_date_for_cash(cls, v, values):
+        if values.get("inherit_option_payment_schedule", True):
+            return v
+        payment_type = values.get("payment_type")
+        if payment_type == ProcurementCostComponentPaymentType.CASH and v is None:
+            raise ValueError(
+                "planned_payment_date is required for CASH component payment metadata when inheritance is disabled"
+            )
+        return v
+
+    @validator("payment_schedule", always=True)
+    def validate_installment_schedule(cls, v, values):
+        if values.get("inherit_option_payment_schedule", True):
+            return v or []
+
+        payment_type = values.get("payment_type")
+        schedule = v or []
+        if payment_type != ProcurementCostComponentPaymentType.INSTALLMENTS:
+            return schedule
+
+        if len(schedule) == 0:
+            raise ValueError(
+                "payment_schedule is required for INSTALLMENTS component payment metadata"
+            )
+
+        has_amount_values = any(row.amount_value is not None for row in schedule)
+        if has_amount_values:
+            total_amount = sum(
+                Decimal(str(row.amount_value or 0)) for row in schedule
+            )
+            if total_amount <= 0:
+                raise ValueError(
+                    "INSTALLMENTS payment_schedule amount_value total must be greater than zero"
+                )
+        else:
+            total_percent = sum(Decimal(str(row.percent or 0)) for row in schedule)
+            if abs(total_percent - Decimal("100")) > Decimal("0.01"):
+                raise ValueError(
+                    "INSTALLMENTS payment_schedule percent total must equal 100"
+                )
+        return schedule
+
+
+class ProcurementCostComponentBase(BaseModel):
+    component_type: ProcurementCostComponentType
+    description: Optional[str] = None
+    amount_value: Decimal = Field(..., gt=0)
+    amount_currency: str = Field(..., min_length=3, max_length=3)
+    amount_irr: Optional[Decimal] = Field(None, ge=0)
+    exchange_rate_date: Optional[date] = None
+    payment_metadata: Optional[ProcurementCostComponentPaymentMetadata] = None
+    is_active: bool = True
+
+    @validator("description", always=True)
+    def validate_other_description(cls, v, values):
+        component_type = values.get("component_type")
+        if component_type == ProcurementCostComponentType.OTHER and not (v or "").strip():
+            raise ValueError("description is required when component_type is OTHER")
+        return v
+
+
+class ProcurementCostComponentCreate(ProcurementCostComponentBase):
+    pass
+
+
+class ProcurementCostComponentUpdate(BaseModel):
+    component_type: Optional[ProcurementCostComponentType] = None
+    description: Optional[str] = None
+    amount_value: Optional[Decimal] = Field(None, gt=0)
+    amount_currency: Optional[str] = Field(None, min_length=3, max_length=3)
+    amount_irr: Optional[Decimal] = Field(None, ge=0)
+    exchange_rate_date: Optional[date] = None
+    payment_metadata: Optional[ProcurementCostComponentPaymentMetadata] = None
+    is_active: Optional[bool] = None
+
+    @validator("description", always=True)
+    def validate_other_description_on_update(cls, v, values):
+        component_type = values.get("component_type")
+        if component_type == ProcurementCostComponentType.OTHER and not (v or "").strip():
+            raise ValueError("description is required when component_type is OTHER")
+        return v
+
+
+class ProcurementCostComponent(ProcurementCostComponentBase):
+    id: int
+    procurement_option_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class LandedCostComponentLine(BaseModel):
+    component_id: Optional[int] = None
+    component_type: str
+    amount_value: Decimal
+    amount_currency: str
+    amount_irr: Optional[Decimal] = None
+    source: str
+    description: Optional[str] = None
+
+
+class ProcurementOptionLandedCostPreview(BaseModel):
+    option_id: int
+    base_amount: Dict[str, Any]
+    component_lines: List[LandedCostComponentLine]
+    totals_by_currency: Dict[str, Decimal]
+    total_irr: Optional[Decimal] = None
+    missing_exchange_rates: List[Dict[str, Any]] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class ProcurementOptionDeliveryFinancialPreviewRequest(BaseModel):
+    delivery_date_source: Optional[DeliveryDateSource] = None
+    supplier_actual_delivery_date: Optional[date] = None
+    selected_delivery_date: Optional[date] = None
+    manual_invoice_date: Optional[date] = None
+    manual_receipt_date: Optional[date] = None
+
+
+class ProcurementOptionDeliveryFinancialPreview(BaseModel):
+    project_requested_delivery_date: Optional[date] = None
+    supplier_actual_delivery_date: Optional[date] = None
+    selected_delivery_date: Optional[date] = None
+    delivery_date_source: Optional[DeliveryDateSource] = None
+    delivery_date_variance_days: Optional[int] = None
+    forecast_customer_invoice_date: Optional[date] = None
+    forecast_customer_invoice_date_source: Optional[ForecastDateSource] = None
+    forecast_customer_receipt_date: Optional[date] = None
+    forecast_customer_receipt_date_source: Optional[ForecastDateSource] = None
+    forecast_customer_receipt_delay_days: Optional[int] = None
+    missing_inputs: List[str] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class ProcurementOptionReadinessSummary(BaseModel):
+    option_id: int
+    is_ready_for_candidate_builder: bool
+    missing_required_fields: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    cost_summary: Dict[str, Any] = Field(default_factory=dict)
+    delivery_summary: Dict[str, Any] = Field(default_factory=dict)
+    payment_summary: Dict[str, Any] = Field(default_factory=dict)
+    derived_customer_schedule_summary: Dict[str, Any] = Field(default_factory=dict)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class AtomicCandidateCoveredSubitem(BaseModel):
+    subitem_id: Optional[int] = None
+    subitem_name: Optional[str] = None
+    requested_quantity: Optional[Decimal] = None
+    covered_quantity: Optional[Decimal] = None
+    unit: Optional[str] = None
+
+
+class AtomicOptimizationCandidate(BaseModel):
+    candidate_id: str
+    project_id: Optional[int] = None
+    project_code: Optional[str] = None
+    project_name: Optional[str] = None
+    project_item_id: Optional[int] = None
+    project_item_name: Optional[str] = None
+    package_id: Optional[int] = None
+    package_name: Optional[str] = None
+    package_type: Optional[str] = None
+    procurement_option_id: int
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+
+    covered_main_quantity: Optional[Decimal] = None
+    requested_main_quantity: Optional[Decimal] = None
+    coverage_ratio: Optional[Decimal] = None
+    covered_subitems: List[AtomicCandidateCoveredSubitem] = Field(default_factory=list)
+    coverage_trace_lines: List[str] = Field(default_factory=list)
+
+    landed_cost_amount: Optional[Decimal] = None
+    landed_cost_currency: Optional[str] = None
+    base_price_amount: Optional[Decimal] = None
+    base_price_currency: Optional[str] = None
+    shipping_cost_amount: Optional[Decimal] = None
+    cost_components_summary: List[Dict[str, Any]] = Field(default_factory=list)
+    cost_trace_lines: List[str] = Field(default_factory=list)
+
+    payment_method_id: Optional[int] = None
+    payment_method_code: Optional[str] = None
+    payment_method_name: Optional[str] = None
+    planned_supplier_payment_date: Optional[date] = None
+    supplier_effective_receipt_date: Optional[date] = None
+    payment_trace_lines: List[str] = Field(default_factory=list)
+
+    project_requested_delivery_date: Optional[date] = None
+    supplier_actual_delivery_date: Optional[date] = None
+    selected_delivery_date: Optional[date] = None
+    delivery_date_variance_days: Optional[int] = None
+    delivery_trace_lines: List[str] = Field(default_factory=list)
+
+    forecast_customer_invoice_date: Optional[date] = None
+    forecast_customer_receipt_date: Optional[date] = None
+    customer_schedule_trace_lines: List[str] = Field(default_factory=list)
+
+    gross_margin_amount: Optional[Decimal] = None
+    gross_margin_ratio: Optional[Decimal] = None
+    cash_gap_days: Optional[int] = None
+    working_capital_exposure_amount: Optional[Decimal] = None
+    metrics_trace_lines: List[str] = Field(default_factory=list)
+
+    is_ready_for_candidate_builder: bool
+    readiness_missing_required_fields: List[str] = Field(default_factory=list)
+    readiness_warnings: List[str] = Field(default_factory=list)
+    readiness_trace_lines: List[str] = Field(default_factory=list)
+
+    blocking_issues: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class AtomicOptimizationCandidateCollectionResponse(BaseModel):
+    project_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    total_candidates: int = 0
+    ready_candidates: int = 0
+    not_ready_candidates: int = 0
+    candidates: List[AtomicOptimizationCandidate] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class CoverageValidationIssue(BaseModel):
+    code: str
+    severity: Literal["BLOCKING", "WARNING", "INFO"]
+    message: str
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    candidate_id: Optional[str] = None
+    coverage_key: Optional[str] = None
+    field: Optional[str] = None
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class CoverageLine(BaseModel):
+    coverage_key: str
+    coverage_type: Literal["MAIN_ITEM", "SUBITEM", "PACKAGE", "UNKNOWN"]
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    subitem_id: Optional[int] = None
+    package_id: Optional[int] = None
+    requested_quantity: Optional[Decimal] = None
+    covered_quantity: Optional[Decimal] = None
+    remaining_quantity: Optional[Decimal] = None
+    over_covered_quantity: Optional[Decimal] = None
+    unit: Optional[str] = None
+    candidate_ids: List[str] = Field(default_factory=list)
+    supplier_ids: List[int] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class CandidateCoverageConstraintRow(BaseModel):
+    coverage_key: str
+    required_quantity: Optional[Decimal] = None
+    candidate_contributions: List[Dict[str, Any]] = Field(default_factory=list)
+    relation: Literal["EQUAL_OR_GREATER", "LESS_OR_EQUAL", "EXACT"] = "EQUAL_OR_GREATER"
+
+
+class CandidateCoverageValidationResult(BaseModel):
+    scope_type: Literal["PROJECT", "PACKAGE", "OPTION"]
+    scope_id: int
+    is_valid_for_solver_input: bool
+    total_candidates: int = 0
+    ready_candidates: int = 0
+    not_ready_candidates: int = 0
+    validated_candidates: List[str] = Field(default_factory=list)
+    excluded_candidates: List[str] = Field(default_factory=list)
+    coverage_lines: List[CoverageLine] = Field(default_factory=list)
+    constraint_rows: List[CandidateCoverageConstraintRow] = Field(default_factory=list)
+    blocking_issues: List[CoverageValidationIssue] = Field(default_factory=list)
+    warnings: List[CoverageValidationIssue] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class FinancialProjectionIssue(BaseModel):
+    code: str
+    severity: Literal["BLOCKING", "WARNING", "INFO"]
+    message: str
+    candidate_id: Optional[str] = None
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    event_type: Optional[str] = None
+    field: Optional[str] = None
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class FinancialProjectionEvent(BaseModel):
+    projection_event_id: str
+    candidate_id: str
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    supplier_id: Optional[int] = None
+    event_type: Literal[
+        "SUPPLIER_PAYMENT_OUTFLOW",
+        "PURCHASE_COST_OUTFLOW",
+        "SHIPPING_OUTFLOW",
+        "VAT_OUTFLOW",
+        "CUSTOMS_OUTFLOW",
+        "CLEARANCE_OUTFLOW",
+        "INSURANCE_OUTFLOW",
+        "BANK_FEE_OUTFLOW",
+        "OTHER_COST_OUTFLOW",
+        "CUSTOMER_INVOICE_INFLOW",
+        "CUSTOMER_RECEIPT_INFLOW",
+        "UNKNOWN_OUTFLOW",
+        "UNKNOWN_INFLOW",
+    ]
+    direction: Literal["INFLOW", "OUTFLOW"]
+    forecast_or_actual: Literal["FORECAST"] = "FORECAST"
+    event_date: Optional[date] = None
+    period_key: Optional[str] = None
+    calendar_system: Literal["GREGORIAN", "JALALI"] = "GREGORIAN"
+    amount: Optional[Decimal] = None
+    currency: Optional[str] = None
+    source_type: Literal[
+        "ATOMIC_CANDIDATE",
+        "COST_COMPONENT",
+        "COST_COMPONENT_PAYMENT",
+        "CUSTOMER_SCHEDULE",
+        "DERIVED",
+    ]
+    source_id: Optional[str] = None
+    is_cash_effective: bool = False
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class FinancialProjectionPeriodSummary(BaseModel):
+    period_key: str
+    currency: str
+    total_inflow: Decimal = Decimal("0")
+    total_outflow: Decimal = Decimal("0")
+    net_cash_impact: Decimal = Decimal("0")
+    candidate_ids: List[str] = Field(default_factory=list)
+    event_count: int = 0
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class FinancialProjectionCandidateSummary(BaseModel):
+    candidate_id: str
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    supplier_id: Optional[int] = None
+    currency: Optional[str] = None
+    total_forecast_inflow: Decimal = Decimal("0")
+    total_forecast_outflow: Decimal = Decimal("0")
+    net_forecast_cash_impact: Decimal = Decimal("0")
+    cash_gap_days: Optional[int] = None
+    working_capital_exposure_amount: Optional[Decimal] = None
+    gross_margin_amount: Optional[Decimal] = None
+    gross_margin_ratio: Optional[Decimal] = None
+    first_outflow_date: Optional[date] = None
+    first_inflow_date: Optional[date] = None
+    last_cash_event_date: Optional[date] = None
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class FinancialProjectionResult(BaseModel):
+    scope_type: Literal["PROJECT", "PACKAGE", "OPTION"]
+    scope_id: int
+    is_projection_complete: bool
+    total_candidates: int = 0
+    projected_candidates: int = 0
+    excluded_candidates: List[str] = Field(default_factory=list)
+    projection_events: List[FinancialProjectionEvent] = Field(default_factory=list)
+    period_summaries: List[FinancialProjectionPeriodSummary] = Field(default_factory=list)
+    candidate_summaries: List[FinancialProjectionCandidateSummary] = Field(default_factory=list)
+    blocking_issues: List[FinancialProjectionIssue] = Field(default_factory=list)
+    warnings: List[FinancialProjectionIssue] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class OptimizationScenarioIssue(BaseModel):
+    code: str
+    severity: Literal["BLOCKING", "WARNING", "INFO"]
+    message: str
+    scenario_key: Optional[str] = None
+    candidate_id: Optional[str] = None
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    field: Optional[str] = None
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class OptimizationScenarioCandidateSelection(BaseModel):
+    candidate_id: str
+    project_id: Optional[int] = None
+    project_item_id: Optional[int] = None
+    package_id: Optional[int] = None
+    procurement_option_id: Optional[int] = None
+    supplier_id: Optional[int] = None
+    supplier_name: Optional[str] = None
+    selected: bool = False
+    selection_reason: Optional[str] = None
+    exclusion_reason: Optional[str] = None
+    coverage_keys: List[str] = Field(default_factory=list)
+    landed_cost_amount: Optional[Decimal] = None
+    landed_cost_currency: Optional[str] = None
+    selected_delivery_date: Optional[date] = None
+    delivery_date_variance_days: Optional[int] = None
+    planned_supplier_payment_date: Optional[date] = None
+    forecast_customer_receipt_date: Optional[date] = None
+    company_cash_gap_days: Optional[int] = None
+    working_capital_exposure_amount: Optional[Decimal] = None
+    gross_margin_amount: Optional[Decimal] = None
+    gross_margin_ratio: Optional[Decimal] = None
+    projection_summary: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class OptimizationScenarioSummary(BaseModel):
+    scenario_key: str
+    scenario_name: str
+    scenario_type: Literal[
+        "CHEAPEST",
+        "FASTEST_DELIVERY",
+        "BEST_CASHFLOW",
+        "HIGHEST_MARGIN",
+        "BALANCED",
+        "FEASIBILITY_ONLY",
+    ]
+    is_feasible: bool
+    selected_candidate_count: int = 0
+    excluded_candidate_count: int = 0
+    total_selected_cost_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    total_projected_inflow_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    total_projected_outflow_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    net_projected_cash_impact_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    worst_company_cash_gap_days: Optional[int] = None
+    total_working_capital_exposure_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    total_gross_margin_by_currency: Dict[str, Decimal] = Field(default_factory=dict)
+    max_delivery_delay_days: Optional[int] = None
+    coverage_status: str
+    candidate_selections: List[OptimizationScenarioCandidateSelection] = Field(default_factory=list)
+    blocking_issues: List[OptimizationScenarioIssue] = Field(default_factory=list)
+    warnings: List[OptimizationScenarioIssue] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
+
+
+class OptimizationScenarioPreviewResult(BaseModel):
+    scope_type: Literal["PROJECT", "PACKAGE"]
+    scope_id: int
+    scenario_count: int = 0
+    feasible_scenario_count: int = 0
+    scenarios: List[OptimizationScenarioSummary] = Field(default_factory=list)
+    blocking_issues: List[OptimizationScenarioIssue] = Field(default_factory=list)
+    warnings: List[OptimizationScenarioIssue] = Field(default_factory=list)
+    trace_lines: List[str] = Field(default_factory=list)
 
 
 # Procurement Package Schemas (Phase 3)

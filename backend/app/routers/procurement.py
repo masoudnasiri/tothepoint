@@ -4,6 +4,7 @@ Procurement options management endpoints
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
@@ -226,7 +227,10 @@ async def create_new_procurement_option(
             if package_info:
                 result.package_name = package_info.get('package_name')
                 result.package_type = package_info.get('package_type')
-        
+
+        # Materialize response while session is active to prevent MissingGreenlet
+        response_payload = ProcurementOption.model_validate(result)
+
         # Audit
         try:
             client_host = request.client.host if request and request.client else None
@@ -238,10 +242,10 @@ async def create_new_procurement_option(
                 entity_type="procurement_option",
                 entity_id=result.id,
                 details={
-                    "item_code": result.item_code,
-                    "supplier_name": result.supplier_name,
-                    "package_id": result.package_id,
-                    "project_item_id": result.project_item_id
+                    "item_code": response_payload.item_code,
+                    "supplier_name": response_payload.supplier_name,
+                    "package_id": response_payload.package_id,
+                    "project_item_id": response_payload.project_item_id
                 },
                 ip_address=client_host,
                 user_agent=ua,
@@ -250,7 +254,7 @@ async def create_new_procurement_option(
             pass
         
         logger.info(f"Successfully created procurement option with ID: {result.id}")
-        return result
+        return response_payload
         
     except ValueError as e:
         logger.warning(f"Validation error creating procurement option: {str(e)}")
@@ -363,9 +367,16 @@ async def update_procurement_option_by_id(
             ),
         )
 
-    option = await update_procurement_option(db, option_id, option_update)
+    try:
+        option = await update_procurement_option(db, option_id, option_update)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
     if not option:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Procurement option not found")
+    response_payload = ProcurementOption.model_validate(option)
     try:
         await log_audit(
             db,
@@ -373,11 +384,11 @@ async def update_procurement_option_by_id(
             action="PROCUREMENT_OPTION_UPDATE",
             entity_type="procurement_option",
             entity_id=option_id,
-            details=option_update.dict(exclude_unset=True),
+            details=jsonable_encoder(option_update.model_dump(exclude_unset=True)),
         )
     except Exception:
         pass
-    return option
+    return response_payload
 
 
 @router.delete("/option/{option_id}")

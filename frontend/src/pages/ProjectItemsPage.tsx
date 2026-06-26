@@ -57,9 +57,23 @@ import { itemsAPI, itemsMasterAPI, excelAPI, deliveryOptionsAPI, packagesAPI } f
 import { useFeatureFlags } from '../hooks/useFeatureFlags.tsx';
 import { ProcurementPackage } from '../types/packages.ts';
 import { formatApiError } from '../utils/errorUtils.ts';
-import { ProjectItem, ProjectItemCreate, ItemMaster, ItemSubItem } from '../types/index.ts';
+import {
+  ProjectItem,
+  ProjectItemCreate,
+  ItemMaster,
+  ItemSubItem,
+  ProcurementEligibilityIssue,
+  ProjectItemProcurementEligibility,
+} from '../types/index.ts';
 import { useAuth } from '../contexts/AuthContext.tsx';
 import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
+
+interface BulkEligibilityItemReport {
+  project_item_id: number;
+  item_code?: string;
+  blockers?: ProcurementEligibilityIssue[];
+  messages?: string[];
+}
 
 export const ProjectItemsPage: React.FC = () => {
   const { t, i18n } = useTranslation();
@@ -109,6 +123,8 @@ export const ProjectItemsPage: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<ProjectItem | null>(null);
   const [viewItemDeliveryOptions, setViewItemDeliveryOptions] = useState<any[]>([]);
   const [itemPackages, setItemPackages] = useState<Record<number, ProcurementPackage[]>>({});
+  const [bulkEligibilityReportOpen, setBulkEligibilityReportOpen] = useState(false);
+  const [bulkEligibilityReportItems, setBulkEligibilityReportItems] = useState<BulkEligibilityItemReport[]>([]);
   
   const { flags, isPackageMode } = useFeatureFlags();
   
@@ -191,6 +207,57 @@ export const ProjectItemsPage: React.FC = () => {
     setPage(0);
   };
 
+  const resolveEligibilityMessage = (issue: ProcurementEligibilityIssue): string => {
+    const translated = t(`projectItems.eligibilityBlockers.${issue.code}`);
+    if (translated && translated !== `projectItems.eligibilityBlockers.${issue.code}`) {
+      return translated;
+    }
+    return issue.message || issue.code;
+  };
+
+  const getItemEligibility = (item: ProjectItem): ProjectItemProcurementEligibility | null => {
+    return item.procurement_eligibility || null;
+  };
+
+  const getItemEligibilityMessages = (item: ProjectItem): string[] => {
+    const eligibility = getItemEligibility(item);
+    if (!eligibility || eligibility.is_eligible) return [];
+    const blockers = eligibility.blockers || [];
+    if (blockers.length > 0) {
+      return blockers.map(resolveEligibilityMessage);
+    }
+    return (eligibility.messages || []).filter(Boolean);
+  };
+
+  const formatEligibilityMessages = (issues: ProcurementEligibilityIssue[] = []): string[] => {
+    return issues.map(resolveEligibilityMessage);
+  };
+
+  const extractEligibilityErrorText = (err: any): string | null => {
+    const detail = err?.response?.data?.detail;
+    if (!detail || typeof detail !== 'object') return null;
+
+    if (detail.code === 'PROCUREMENT_ELIGIBILITY_FAILED' && detail.eligibility) {
+      const blockers = formatEligibilityMessages(detail.eligibility.blockers || []);
+      if (blockers.length > 0) {
+        return `${t('projectItems.procurementBlocked')}: ${blockers.join(' | ')}`;
+      }
+      const fallbackMessages = (detail.eligibility.messages || []).filter(Boolean);
+      if (fallbackMessages.length > 0) {
+        return `${t('projectItems.procurementBlocked')}: ${fallbackMessages.join(' | ')}`;
+      }
+    }
+
+    if (detail.code === 'BULK_PROCUREMENT_ELIGIBILITY_FAILED') {
+      const invalidItems = Array.isArray(detail.invalid_items) ? detail.invalid_items : [];
+      setBulkEligibilityReportItems(invalidItems);
+      setBulkEligibilityReportOpen(true);
+      return t('projectItems.bulkFinalizeBlocked');
+    }
+
+    return null;
+  };
+
   const fetchMasterItems = async () => {
     try {
       const response = await itemsMasterAPI.list({ active_only: true });
@@ -250,7 +317,8 @@ export const ProjectItemsPage: React.FC = () => {
       await itemsAPI.finalize(itemId, { is_finalized: true });
       fetchItems();
     } catch (err: any) {
-      setError(formatApiError(err, t('projectItems.failedToFinalizeItem')));
+      const eligibilityText = extractEligibilityErrorText(err);
+      setError(eligibilityText || formatApiError(err, t('projectItems.failedToFinalizeItem')));
     }
   };
 
@@ -271,17 +339,26 @@ export const ProjectItemsPage: React.FC = () => {
     if (!window.confirm(t('projectItems.areYouSureFinalizeAll'))) return;
     
     try {
+      setBulkEligibilityReportItems([]);
+      setBulkEligibilityReportOpen(false);
       const response = await itemsAPI.finalizeAll(parseInt(projectId));
       fetchItems();
       setSuccess(`Successfully finalized ${response.data.finalized_count} items`);
     } catch (err: any) {
-      setError(formatApiError(err, t('projectItems.failedToFinalizeAllItems')));
+      const eligibilityText = extractEligibilityErrorText(err);
+      setError(eligibilityText || formatApiError(err, t('projectItems.failedToFinalizeAllItems')));
     }
   };
 
   const openDeliveryOptionsDialog = (item: ProjectItem) => {
     setSelectedItem(item);
     setDeliveryOptionsDialogOpen(true);
+  };
+
+  const closeDeliveryOptionsDialog = () => {
+    setDeliveryOptionsDialogOpen(false);
+    // Re-evaluate procurement eligibility and table chips after delivery/invoice edits.
+    fetchItems();
   };
 
   const handleMasterItemSelect = (masterItemId: number) => {
@@ -808,7 +885,14 @@ export const ProjectItemsPage: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {items.map((item) => (
+            {items.map((item) => {
+              const eligibilityMessages = getItemEligibilityMessages(item);
+              const isEligibleForProcurement = eligibilityMessages.length === 0;
+              const finalizeBlockedTitle = isEligibleForProcurement
+                ? t('projectItems.finalizeItem')
+                : `${t('projectItems.procurementBlocked')}: ${eligibilityMessages.join(' | ')}`;
+
+              return (
               <TableRow key={item.id}>
                 <TableCell>
                   <Typography variant="body2" fontWeight="medium">
@@ -861,6 +945,15 @@ export const ProjectItemsPage: React.FC = () => {
                         variant="filled"
                         icon={<FinalizeIcon />}
                       />
+                    )}
+                    {!item.is_finalized && !isEligibleForProcurement && (
+                      <Typography
+                        variant="caption"
+                        color="error"
+                        sx={{ maxWidth: 260, textAlign: 'center', lineHeight: 1.4 }}
+                      >
+                        {eligibilityMessages[0] || t('projectItems.procurementBlocked')}
+                      </Typography>
                     )}
                   </Box>
                 </TableCell>
@@ -977,8 +1070,9 @@ export const ProjectItemsPage: React.FC = () => {
                         <IconButton
                           size="small"
                           onClick={() => handleFinalizeItem(item.id)}
-                          title={t('projectItems.finalizeItem')}
+                          title={finalizeBlockedTitle}
                           color="success"
+                          disabled={!isEligibleForProcurement}
                         >
                           <FinalizeIcon />
                         </IconButton>
@@ -1001,7 +1095,8 @@ export const ProjectItemsPage: React.FC = () => {
                   )}
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
@@ -1106,7 +1201,7 @@ export const ProjectItemsPage: React.FC = () => {
       {/* Delivery & Invoice Options Dialog */}
       <Dialog 
         open={deliveryOptionsDialogOpen} 
-        onClose={() => setDeliveryOptionsDialogOpen(false)} 
+        onClose={closeDeliveryOptionsDialog}
         maxWidth="lg" 
         fullWidth
       >
@@ -1119,11 +1214,53 @@ export const ProjectItemsPage: React.FC = () => {
               projectItemId={selectedItem.id} 
               itemCode={selectedItem.item_code}
               availableDeliveryDates={selectedItem.delivery_options || []}
+              onOptionsChanged={fetchItems}
             />
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeliveryOptionsDialogOpen(false)}>Close</Button>
+          <Button onClick={closeDeliveryOptionsDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={bulkEligibilityReportOpen}
+        onClose={() => setBulkEligibilityReportOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{t('projectItems.bulkFinalizeBlockedTitle')}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 1.5 }}>
+            {t('projectItems.bulkFinalizeBlockedDescription')}
+          </Typography>
+          {bulkEligibilityReportItems.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              {t('projectItems.bulkFinalizeNoDetails')}
+            </Typography>
+          ) : (
+            <List dense>
+              {bulkEligibilityReportItems.map((report) => {
+                const blockers = Array.isArray(report.blockers) ? report.blockers : [];
+                const reasonLines = blockers.length > 0
+                  ? blockers.map((issue) => resolveEligibilityMessage(issue))
+                  : (report.messages || []).filter(Boolean);
+                return (
+                  <ListItem key={report.project_item_id} divider>
+                    <ListItemText
+                      primary={`${report.item_code || t('projectItems.item')} #${report.project_item_id}`}
+                      secondary={reasonLines.join(' | ') || t('projectItems.procurementBlocked')}
+                    />
+                  </ListItem>
+                );
+              })}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkEligibilityReportOpen(false)}>
+            {t('projectItems.close')}
+          </Button>
         </DialogActions>
       </Dialog>
 

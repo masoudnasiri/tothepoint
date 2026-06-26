@@ -28,6 +28,10 @@ import type {
   DeliveryDateSource,
   PaymentMethod,
   PaymentTerms,
+  ProcurementCostComponentPaymentMetadata,
+  ProcurementCostComponentPaymentScheduleRow,
+  ProcurementCostComponentPaymentType,
+  ProcurementCostComponentPayeeType,
   ProcurementCostComponentType,
 } from '../../types/index.ts';
 import { formatApiError } from '../../utils/errorUtils.ts';
@@ -80,6 +84,7 @@ interface CostComponentDraft {
   amount_currency: string;
   amount_irr?: number;
   exchange_rate_date?: string;
+  payment_metadata?: ProcurementCostComponentPaymentMetadata;
 }
 
 interface DeliveryOption {
@@ -91,6 +96,90 @@ interface PaymentScheduleRow {
   due_offset: number;
   percent: number;
 }
+
+const DEFAULT_COMPONENT_PAYEE_BY_TYPE: Record<
+  ProcurementCostComponentType,
+  ProcurementCostComponentPayeeType
+> = {
+  BASE_PRICE: 'SUPPLIER',
+  SHIPPING: 'LOGISTICS_PROVIDER',
+  VAT: 'SUPPLIER',
+  CUSTOMS: 'CUSTOMS_OR_CLEARANCE',
+  CLEARANCE: 'CUSTOMS_OR_CLEARANCE',
+  INSURANCE: 'INSURANCE_PROVIDER',
+  BANK_FEE: 'BANK_OR_EXCHANGE',
+  OTHER: 'OTHER',
+};
+
+const buildDefaultComponentPaymentMetadata = (
+  componentType: ProcurementCostComponentType | ''
+): ProcurementCostComponentPaymentMetadata => ({
+  inherit_option_payment_schedule: true,
+  payee_type:
+    componentType && componentType in DEFAULT_COMPONENT_PAYEE_BY_TYPE
+      ? DEFAULT_COMPONENT_PAYEE_BY_TYPE[componentType as ProcurementCostComponentType]
+      : 'SUPPLIER',
+  payee_label: '',
+  payment_method_id: null,
+  payment_type: 'CASH',
+  planned_payment_date: '',
+  payment_schedule: [],
+  notes: '',
+});
+
+const normalizeComponentPaymentMetadata = (
+  componentType: ProcurementCostComponentType | '',
+  metadata: unknown
+): ProcurementCostComponentPaymentMetadata => {
+  const raw = (metadata || {}) as Record<string, any>;
+  const paymentType = String(raw.payment_type || 'CASH').toUpperCase();
+  const schedule: ProcurementCostComponentPaymentScheduleRow[] = Array.isArray(raw.payment_schedule)
+    ? raw.payment_schedule
+        .map((row: any) => ({
+          due_offset_days:
+            row?.due_offset_days === undefined || row?.due_offset_days === null
+              ? undefined
+              : Math.max(0, Number(row.due_offset_days) || 0),
+          due_date: row?.due_date || '',
+          percent:
+            row?.percent === undefined || row?.percent === null
+              ? undefined
+              : Number(row.percent),
+          amount_value:
+            row?.amount_value === undefined || row?.amount_value === null
+              ? undefined
+              : Number(row.amount_value),
+          derived_effective_receipt_date: row?.derived_effective_receipt_date || '',
+        }))
+        .filter(
+          (row: ProcurementCostComponentPaymentScheduleRow) =>
+            row.due_offset_days !== undefined || !!row.due_date
+        )
+    : [];
+
+  const fallbackPayeeType =
+    componentType && componentType in DEFAULT_COMPONENT_PAYEE_BY_TYPE
+      ? DEFAULT_COMPONENT_PAYEE_BY_TYPE[componentType as ProcurementCostComponentType]
+      : 'SUPPLIER';
+
+  return {
+    inherit_option_payment_schedule: raw.inherit_option_payment_schedule !== false,
+    payee_type: (String(raw.payee_type || fallbackPayeeType).toUpperCase() ||
+      fallbackPayeeType) as ProcurementCostComponentPayeeType,
+    payee_label: raw.payee_label || '',
+    payment_method_id:
+      raw.payment_method_id === undefined || raw.payment_method_id === null
+        ? null
+        : Number(raw.payment_method_id),
+    payment_type:
+      paymentType === 'INSTALLMENTS'
+        ? ('INSTALLMENTS' as ProcurementCostComponentPaymentType)
+        : ('CASH' as ProcurementCostComponentPaymentType),
+    planned_payment_date: raw.planned_payment_date || '',
+    payment_schedule: schedule,
+    notes: raw.notes || '',
+  };
+};
 
 export const calculateSupplierEffectiveReceiptDate = (
   paymentDate: string,
@@ -243,6 +332,10 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
               ? Number(component.amount_irr)
               : undefined,
           exchange_rate_date: component.exchange_rate_date || undefined,
+          payment_metadata: normalizeComponentPaymentMetadata(
+            component.component_type,
+            component.payment_metadata
+          ),
         }));
         onChange({ cost_components: mappedComponents });
         setLoadedCostComponentsOptionId(data.option_id);
@@ -323,6 +416,10 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
           component.amount_value === '' || component.amount_value === null
             ? ''
             : Number(component.amount_value),
+        payment_metadata: normalizeComponentPaymentMetadata(
+          String(component.component_type || '').trim().toUpperCase() as ProcurementCostComponentType | '',
+          component.payment_metadata
+        ),
       })),
     [data.cost_components]
   );
@@ -340,6 +437,22 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
       }),
     [normalizedCostComponents]
   );
+
+  const componentPaymentSummary = useMemo(() => {
+    const summary = { inheritsDefault: 0, custom: 0 };
+    (normalizedCostComponents || []).forEach((component) => {
+      const metadata = normalizeComponentPaymentMetadata(
+        component.component_type || '',
+        component.payment_metadata
+      );
+      if (metadata.inherit_option_payment_schedule) {
+        summary.inheritsDefault += 1;
+      } else {
+        summary.custom += 1;
+      }
+    });
+    return summary;
+  }, [normalizedCostComponents]);
 
   const mappedBaseComponent = useMemo(
     () => validCostComponents.find((component) => component.component_type === 'BASE_PRICE') || null,
@@ -548,6 +661,7 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
           description: '',
           amount_value: '',
           amount_currency: defaultCostComponentCurrency,
+          payment_metadata: buildDefaultComponentPaymentMetadata('BASE_PRICE'),
         },
         ...current,
       ],
@@ -557,7 +671,26 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
 
   const updateCostComponentAt = (index: number, updates: Partial<CostComponentDraft>) => {
     const nextComponents = [...(data.cost_components || [])];
-    nextComponents[index] = { ...nextComponents[index], ...updates };
+    const currentComponent = nextComponents[index];
+    const nextComponent = { ...currentComponent, ...updates };
+    const nextType = (nextComponent.component_type || '') as ProcurementCostComponentType | '';
+    nextComponent.payment_metadata = normalizeComponentPaymentMetadata(
+      nextType,
+      nextComponent.payment_metadata
+    );
+    if (
+      updates.component_type !== undefined &&
+      nextComponent.payment_metadata.inherit_option_payment_schedule
+    ) {
+      nextComponent.payment_metadata = {
+        ...nextComponent.payment_metadata,
+        payee_type:
+          nextType && nextType in DEFAULT_COMPONENT_PAYEE_BY_TYPE
+            ? DEFAULT_COMPONENT_PAYEE_BY_TYPE[nextType as ProcurementCostComponentType]
+            : nextComponent.payment_metadata.payee_type,
+      };
+    }
+    nextComponents[index] = nextComponent;
     onChange({ cost_components: nextComponents });
   };
 
@@ -575,6 +708,7 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
         description: '',
         amount_value: '',
         amount_currency: defaultCostComponentCurrency,
+        payment_metadata: buildDefaultComponentPaymentMetadata(''),
       },
     ];
     onChange({ cost_components: nextComponents });
@@ -602,6 +736,99 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
     setPaymentTerms({
       type: 'installments',
       schedule: [...installmentSchedule, { due_offset: 30, percent: 0 }],
+    });
+  };
+
+  const getComponentPaymentMethod = (component: CostComponentDraft): PaymentMethod | null => {
+    const metadata = normalizeComponentPaymentMetadata(
+      component.component_type || '',
+      component.payment_metadata
+    );
+    const methodId = metadata.inherit_option_payment_schedule
+      ? data.payment_method_id
+      : metadata.payment_method_id;
+    return paymentMethods.find((method) => method.id === methodId) || null;
+  };
+
+  const getComponentPaymentType = (component: CostComponentDraft): 'CASH' | 'INSTALLMENTS' => {
+    const metadata = normalizeComponentPaymentMetadata(
+      component.component_type || '',
+      component.payment_metadata
+    );
+    if (metadata.inherit_option_payment_schedule) {
+      return normalizedPaymentTerms.type === 'installments' ? 'INSTALLMENTS' : 'CASH';
+    }
+    return metadata.payment_type;
+  };
+
+  const getComponentPlannedPaymentDate = (component: CostComponentDraft): string => {
+    const metadata = normalizeComponentPaymentMetadata(
+      component.component_type || '',
+      component.payment_metadata
+    );
+    if (metadata.inherit_option_payment_schedule) return data.payment_date || '';
+    return metadata.planned_payment_date || '';
+  };
+
+  const updateComponentPaymentMetadata = (
+    index: number,
+    updates: Partial<ProcurementCostComponentPaymentMetadata>
+  ) => {
+    const current = data.cost_components?.[index];
+    if (!current) return;
+    const normalized = normalizeComponentPaymentMetadata(
+      current.component_type || '',
+      current.payment_metadata
+    );
+    updateCostComponentAt(index, {
+      payment_metadata: {
+        ...normalized,
+        ...updates,
+      },
+    });
+  };
+
+  const updateComponentInstallmentAt = (
+    componentIndex: number,
+    scheduleIndex: number,
+    updates: Partial<ProcurementCostComponentPaymentScheduleRow>
+  ) => {
+    const component = data.cost_components?.[componentIndex];
+    if (!component) return;
+    const metadata = normalizeComponentPaymentMetadata(
+      component.component_type || '',
+      component.payment_metadata
+    );
+    const schedule = [...(metadata.payment_schedule || [])];
+    schedule[scheduleIndex] = { ...schedule[scheduleIndex], ...updates };
+    updateComponentPaymentMetadata(componentIndex, { payment_schedule: schedule });
+  };
+
+  const addComponentInstallment = (componentIndex: number) => {
+    const component = data.cost_components?.[componentIndex];
+    if (!component) return;
+    const metadata = normalizeComponentPaymentMetadata(
+      component.component_type || '',
+      component.payment_metadata
+    );
+    const schedule = [...(metadata.payment_schedule || [])];
+    schedule.push({
+      due_offset_days: 30,
+      percent: 0,
+    });
+    updateComponentPaymentMetadata(componentIndex, { payment_schedule: schedule });
+  };
+
+  const removeComponentInstallment = (componentIndex: number, scheduleIndex: number) => {
+    const component = data.cost_components?.[componentIndex];
+    if (!component) return;
+    const metadata = normalizeComponentPaymentMetadata(
+      component.component_type || '',
+      component.payment_metadata
+    );
+    const schedule = (metadata.payment_schedule || []).filter((_, idx) => idx !== scheduleIndex);
+    updateComponentPaymentMetadata(componentIndex, {
+      payment_schedule: schedule.length > 0 ? schedule : [{ due_offset_days: 0, percent: 100 }],
     });
   };
 
@@ -666,6 +893,21 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
           ).length;
           const isPrimaryBaseRow =
             component.component_type === 'BASE_PRICE' && index === primaryBaseIndex;
+          const componentPaymentMetadata = normalizeComponentPaymentMetadata(
+            component.component_type || '',
+            component.payment_metadata
+          );
+          const componentPaymentType = getComponentPaymentType(component);
+          const componentPlannedPaymentDate = getComponentPlannedPaymentDate(component);
+          const componentPaymentMethod = getComponentPaymentMethod(component);
+          const componentInstallmentSchedule =
+            componentPaymentMetadata.payment_schedule && componentPaymentMetadata.payment_schedule.length > 0
+              ? componentPaymentMetadata.payment_schedule
+              : [{ due_offset_days: 0, percent: 100 }];
+          const componentInstallmentPercentTotal = componentInstallmentSchedule.reduce(
+            (sum, row) => sum + Number(row.percent || 0),
+            0
+          );
           const validationCode = validateCostComponentDraft(component);
           const validationError = validationCode
             ? getCostComponentValidationMessage(validationCode, t)
@@ -753,6 +995,269 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
                   >
                     <DeleteIcon fontSize="small" />
                   </IconButton>
+                </Grid>
+                <Grid item xs={12}>
+                  <Paper variant="outlined" sx={{ p: 1.5, backgroundColor: 'grey.50' }}>
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      {t('procurement.componentPaymentPanelTitle')}
+                    </Typography>
+                    <Grid container spacing={1.5}>
+                      <Grid item xs={12} sm={4}>
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={componentPaymentMetadata.inherit_option_payment_schedule}
+                              onChange={(event) =>
+                                updateComponentPaymentMetadata(index, {
+                                  inherit_option_payment_schedule: event.target.checked,
+                                  payment_method_id: event.target.checked
+                                    ? null
+                                    : componentPaymentMetadata.payment_method_id || data.payment_method_id || null,
+                                  payment_type: event.target.checked
+                                    ? ('CASH' as ProcurementCostComponentPaymentType)
+                                    : componentPaymentMetadata.payment_type,
+                                  planned_payment_date: event.target.checked
+                                    ? ''
+                                    : componentPaymentMetadata.planned_payment_date || data.payment_date || '',
+                                  payment_schedule: event.target.checked
+                                    ? []
+                                    : componentPaymentMetadata.payment_schedule || [{ due_offset_days: 0, percent: 100 }],
+                                })
+                              }
+                            />
+                          }
+                          label={t('procurement.useDefaultPaymentSchedule')}
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={4}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>{t('procurement.paymentPayeeType')}</InputLabel>
+                          <Select
+                            value={componentPaymentMetadata.payee_type}
+                            label={t('procurement.paymentPayeeType')}
+                            onChange={(event) =>
+                              updateComponentPaymentMetadata(index, {
+                                payee_type: event.target.value as ProcurementCostComponentPayeeType,
+                              })
+                            }
+                          >
+                            <MenuItem value="SUPPLIER">{t('procurement.payeeTypeSupplier')}</MenuItem>
+                            <MenuItem value="LOGISTICS_PROVIDER">
+                              {t('procurement.payeeTypeLogisticsProvider')}
+                            </MenuItem>
+                            <MenuItem value="INSURANCE_PROVIDER">
+                              {t('procurement.payeeTypeInsuranceProvider')}
+                            </MenuItem>
+                            <MenuItem value="CUSTOMS_OR_CLEARANCE">
+                              {t('procurement.payeeTypeCustomsOrClearance')}
+                            </MenuItem>
+                            <MenuItem value="BANK_OR_EXCHANGE">
+                              {t('procurement.payeeTypeBankOrExchange')}
+                            </MenuItem>
+                            <MenuItem value="OTHER">{t('procurement.payeeTypeOther')}</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                      <Grid item xs={12} sm={4}>
+                        <TextField
+                          size="small"
+                          fullWidth
+                          label={t('procurement.paymentPayeeLabel')}
+                          value={componentPaymentMetadata.payee_label || ''}
+                          onChange={(event) =>
+                            updateComponentPaymentMetadata(index, {
+                              payee_label: event.target.value,
+                            })
+                          }
+                        />
+                      </Grid>
+
+                      {!componentPaymentMetadata.inherit_option_payment_schedule && (
+                        <>
+                          <Grid item xs={12} sm={4}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>{t('procurement.paymentMethod')}</InputLabel>
+                              <Select
+                                value={componentPaymentMetadata.payment_method_id || ''}
+                                label={t('procurement.paymentMethod')}
+                                onChange={(event) =>
+                                  updateComponentPaymentMetadata(index, {
+                                    payment_method_id: Number(event.target.value) || null,
+                                  })
+                                }
+                              >
+                                <MenuItem value="">{t('common.select')}</MenuItem>
+                                {paymentMethods.map((paymentMethod) => (
+                                  <MenuItem key={paymentMethod.id} value={paymentMethod.id}>
+                                    {isFa ? paymentMethod.name_fa : paymentMethod.name_en}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <FormControl fullWidth size="small">
+                              <InputLabel>{t('procurement.paymentType')}</InputLabel>
+                              <Select
+                                value={componentPaymentType}
+                                label={t('procurement.paymentType')}
+                                onChange={(event) =>
+                                  updateComponentPaymentMetadata(index, {
+                                    payment_type: event.target.value as ProcurementCostComponentPaymentType,
+                                    payment_schedule:
+                                      event.target.value === 'INSTALLMENTS'
+                                        ? componentPaymentMetadata.payment_schedule?.length
+                                          ? componentPaymentMetadata.payment_schedule
+                                          : [{ due_offset_days: 0, percent: 100 }]
+                                        : [],
+                                  })
+                                }
+                              >
+                                <MenuItem value="CASH">{t('procurement.cash')}</MenuItem>
+                                <MenuItem value="INSTALLMENTS">{t('procurement.installments')}</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </Grid>
+                          <Grid item xs={12} sm={4}>
+                            <LocalizedDateProvider>
+                              <DatePicker
+                                label={t('procurement.firstPaymentDate')}
+                                value={toDatePickerValue(componentPlannedPaymentDate || '')}
+                                onChange={(newValue) =>
+                                  updateComponentPaymentMetadata(index, {
+                                    planned_payment_date: toIsoDate(newValue),
+                                  })
+                                }
+                                slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+                              />
+                            </LocalizedDateProvider>
+                          </Grid>
+                          {componentPaymentType === 'INSTALLMENTS' && (
+                            <Grid item xs={12}>
+                              <Typography variant="body2" sx={{ mb: 1 }}>
+                                {t('procurement.componentInstallmentSchedule')}
+                              </Typography>
+                              {componentInstallmentSchedule.map((row, scheduleIndex) => (
+                                <Grid
+                                  container
+                                  spacing={1}
+                                  alignItems="center"
+                                  sx={{ mb: 1 }}
+                                  key={`component-${index}-installment-${scheduleIndex}`}
+                                >
+                                  <Grid item xs={12} sm={3}>
+                                    <TextField
+                                      size="small"
+                                      fullWidth
+                                      type="number"
+                                      label={t('procurement.nextPaymentOffsetDays')}
+                                      value={
+                                        row.due_offset_days === undefined ? '' : row.due_offset_days
+                                      }
+                                      onChange={(event) =>
+                                        updateComponentInstallmentAt(index, scheduleIndex, {
+                                          due_offset_days:
+                                            event.target.value === ''
+                                              ? undefined
+                                              : Math.max(0, Number(event.target.value) || 0),
+                                        })
+                                      }
+                                      inputProps={{ min: 0, step: 1 }}
+                                    />
+                                  </Grid>
+                                  <Grid item xs={12} sm={3}>
+                                    <LocalizedDateProvider>
+                                      <DatePicker
+                                        label={t('procurement.exactPaymentDate')}
+                                        value={toDatePickerValue(row.due_date || '')}
+                                        onChange={(newValue) =>
+                                          updateComponentInstallmentAt(index, scheduleIndex, {
+                                            due_date: toIsoDate(newValue),
+                                          })
+                                        }
+                                        slotProps={{ textField: { fullWidth: true, size: 'small' } }}
+                                      />
+                                    </LocalizedDateProvider>
+                                  </Grid>
+                                  <Grid item xs={12} sm={3}>
+                                    <TextField
+                                      size="small"
+                                      fullWidth
+                                      type="number"
+                                      label={t('procurement.percentage')}
+                                      value={row.percent === undefined ? '' : row.percent}
+                                      onChange={(event) =>
+                                        updateComponentInstallmentAt(index, scheduleIndex, {
+                                          percent:
+                                            event.target.value === ''
+                                              ? undefined
+                                              : Number(event.target.value || 0),
+                                        })
+                                      }
+                                      inputProps={{ min: 0, max: 100, step: 0.01 }}
+                                    />
+                                  </Grid>
+                                  <Grid item xs={12} sm={2}>
+                                    <TextField
+                                      size="small"
+                                      fullWidth
+                                      disabled
+                                      label={t('procurement.payeeEffectiveReceiptDate')}
+                                      value={
+                                        row.derived_effective_receipt_date
+                                          ? formatDisplayDate(row.derived_effective_receipt_date)
+                                          : '-'
+                                      }
+                                    />
+                                  </Grid>
+                                  <Grid item xs={12} sm={1}>
+                                    <IconButton
+                                      color="error"
+                                      onClick={() => removeComponentInstallment(index, scheduleIndex)}
+                                      disabled={componentInstallmentSchedule.length <= 1}
+                                    >
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Grid>
+                                </Grid>
+                              ))}
+                              <Button
+                                size="small"
+                                startIcon={<AddIcon />}
+                                onClick={() => addComponentInstallment(index)}
+                              >
+                                {t('procurement.addInstallment')}
+                              </Button>
+                              <Typography
+                                variant="caption"
+                                sx={{ display: 'block', mt: 0.75 }}
+                                color={
+                                  Math.abs(componentInstallmentPercentTotal - 100) <= 0.01
+                                    ? 'success.main'
+                                    : 'error.main'
+                                }
+                              >
+                                {t('procurement.percentage')}: {componentInstallmentPercentTotal.toFixed(2)}%
+                              </Typography>
+                            </Grid>
+                          )}
+                          {componentPaymentMethod && componentPlannedPaymentDate && (
+                            <Grid item xs={12}>
+                              <Alert severity="info">
+                                {t('procurement.payeeEffectiveReceiptDate')}: {' '}
+                                {formatDisplayDate(
+                                  calculateSupplierEffectiveReceiptDate(
+                                    componentPlannedPaymentDate,
+                                    componentPaymentMethod.settlement_delay_days || 0
+                                  )
+                                )}
+                              </Alert>
+                            </Grid>
+                          )}
+                        </>
+                      )}
+                    </Grid>
+                  </Paper>
                 </Grid>
                 {validationError && (
           <Grid item xs={12}>
@@ -966,6 +1471,18 @@ export const PackageWizardStep3: React.FC<PackageWizardStep3Props> = ({
         <Typography variant="h6" sx={{ mb: 1.5 }}>
           {t('procurement.payment')}
         </Typography>
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          {t('procurement.defaultPaymentSchedule')}
+        </Typography>
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Typography variant="body2">
+            {t('procurement.defaultPaymentScheduleDescription')}
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+            {t('procurement.componentsUsingDefaultSchedule')}: {componentPaymentSummary.inheritsDefault} |{' '}
+            {t('procurement.componentsUsingCustomSchedule')}: {componentPaymentSummary.custom}
+          </Typography>
+        </Alert>
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6}>
             <FormControl fullWidth>

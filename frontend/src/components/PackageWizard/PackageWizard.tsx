@@ -18,6 +18,8 @@ import { ProcurementPackage } from '../../types/packages.ts';
 import type {
   DeliveryDateSource,
   ForecastDateSource,
+  ProcurementCostComponentPaymentMetadata,
+  ProcurementCostComponentPaymentScheduleRow,
   PaymentTerms,
   ProcurementCostComponentType,
 } from '../../types/index.ts';
@@ -96,9 +98,59 @@ interface CostComponentDraft {
   amount_currency: string;
   amount_irr?: number;
   exchange_rate_date?: string;
+  payment_metadata?: ProcurementCostComponentPaymentMetadata;
 }
 
 const steps = ['Metadata', 'Quantities', 'Pricing & Delivery'];
+
+const normalizeOptionalDateForApi = (
+  value?: string | null
+): string | undefined => {
+  const trimmed = (value || '').trim();
+  return trimmed || undefined;
+};
+
+const normalizeComponentPaymentScheduleForApi = (
+  schedule?: ProcurementCostComponentPaymentScheduleRow[] | null
+): ProcurementCostComponentPaymentScheduleRow[] => {
+  if (!Array.isArray(schedule)) return [];
+  return schedule
+    .map((row) => ({
+      ...row,
+      due_offset_days:
+        row.due_offset_days === undefined || row.due_offset_days === null
+          ? undefined
+          : Number(row.due_offset_days),
+      due_date: normalizeOptionalDateForApi(row.due_date),
+      percent:
+        row.percent === undefined || row.percent === null
+          ? undefined
+          : Number(row.percent),
+      amount_value:
+        row.amount_value === undefined || row.amount_value === null
+          ? undefined
+          : Number(row.amount_value),
+      derived_effective_receipt_date: normalizeOptionalDateForApi(
+        row.derived_effective_receipt_date
+      ),
+    }))
+    .filter((row) => row.due_offset_days !== undefined || !!row.due_date);
+};
+
+const normalizeComponentPaymentMetadataForApi = (
+  metadata?: ProcurementCostComponentPaymentMetadata
+): ProcurementCostComponentPaymentMetadata | undefined => {
+  if (!metadata) return undefined;
+  return {
+    ...metadata,
+    payee_label: (metadata.payee_label || '').trim() || undefined,
+    planned_payment_date: normalizeOptionalDateForApi(metadata.planned_payment_date),
+    payment_schedule: normalizeComponentPaymentScheduleForApi(
+      metadata.payment_schedule
+    ),
+    notes: (metadata.notes || '').trim() || undefined,
+  };
+};
 
 export const PackageWizard: React.FC<PackageWizardProps> = ({
   open,
@@ -426,6 +478,9 @@ export const PackageWizard: React.FC<PackageWizardProps> = ({
                 ? Number(component.amount_irr)
                 : undefined,
             exchange_rate_date: component.exchange_rate_date || undefined,
+            payment_metadata: normalizeComponentPaymentMetadataForApi(
+              component.payment_metadata
+            ),
             is_active: true,
           };
 

@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: rivar-demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - rivar_demo_postgres_data:/var/lib/postgresql/data
+      - ../../backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - rivar_demo_network
+
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    container_name: rivar-demo-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SECRET_KEY: ${SECRET_KEY}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: ${DEBUG:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      ENABLE_PACKAGE_PROCUREMENT: ${ENABLE_PACKAGE_PROCUREMENT:-true}
+      LEGACY_PROJECT_ITEM_FALLBACK: ${LEGACY_PROJECT_ITEM_FALLBACK:-true}
+      SUPPLIER_NORMALIZATION_ENFORCED: ${SUPPLIER_NORMALIZATION_ENFORCED:-false}
+      ENABLE_PACKAGE_BASED_OPTIMIZATION: ${ENABLE_PACKAGE_BASED_OPTIMIZATION:-true}
+      REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS: ${REQUIRE_PACKAGE_ID_FOR_NEW_OPTIONS:-false}
+      ENFORCE_PACKAGE_COVERAGE_ON_LOCK: ${ENFORCE_PACKAGE_COVERAGE_ON_LOCK:-false}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - rivar_demo_network
+
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL}
+    container_name: rivar-demo-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - rivar_demo_network
+
+volumes:
+  rivar_demo_postgres_data:
+    name: rivar_demo_postgres_data
+
+networks:
+  rivar_demo_network:
+    name: rivar_demo_network

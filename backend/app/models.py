@@ -317,6 +317,14 @@ class ProcurementOption(Base):
     cost_amount = Column(Numeric(15, 2), nullable=False)  # Cost amount in original currency
     cost_currency = Column(String(3), nullable=False, default='IRR')  # Currency of cost (e.g., 'USD', 'IRR')
     shipping_cost = Column(Numeric(15, 2), nullable=True, default=0)  # Shipping cost in same currency as cost_amount
+    payment_method_id = Column(
+        Integer,
+        ForeignKey("payment_methods.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    planned_supplier_payment_date = Column(Date, nullable=True)
+    supplier_effective_receipt_date = Column(Date, nullable=True)
     
     # Legacy field for backward compatibility (will be deprecated)
     base_cost = Column(Numeric(15, 2), nullable=True)  # Keep for migration
@@ -326,6 +334,17 @@ class ProcurementOption(Base):
     purchase_date = Column(Date, nullable=True)  # When to place the order (purchase date)
     expected_delivery_date = Column(Date, nullable=True)  # Expected delivery date from supplier
     delivery_option_id = Column(Integer, ForeignKey("delivery_options.id"), nullable=True)  # Link to project item's delivery option
+    project_requested_delivery_date = Column(Date, nullable=True)
+    supplier_actual_delivery_date = Column(Date, nullable=True)
+    selected_delivery_date = Column(Date, nullable=True)
+    delivery_date_source = Column(String(20), nullable=True)
+    delivery_date_variance_days = Column(Integer, nullable=True)
+    forecast_customer_invoice_date = Column(Date, nullable=True)
+    forecast_customer_invoice_date_source = Column(String(20), nullable=True)
+    forecast_customer_receipt_date = Column(Date, nullable=True)
+    forecast_customer_receipt_date_source = Column(String(20), nullable=True)
+    forecast_customer_receipt_delay_days = Column(Integer, nullable=True)
+    date_calculation_trace = Column(JSON, nullable=True)
     discount_bundle_threshold = Column(Integer)
     discount_bundle_percent = Column(Numeric(5, 2))
     payment_terms = Column(JSON, nullable=False)  # Structured JSON for payment terms
@@ -338,13 +357,31 @@ class ProcurementOption(Base):
     package = relationship("ProcurementPackage", foreign_keys=[package_id])
     currency = relationship("Currency")  # Keep for backward compatibility
     supplier = relationship("Supplier", foreign_keys=[supplier_id])  # Centralized supplier data
+    payment_method = relationship("PaymentMethod", foreign_keys=[payment_method_id])
     optimization_results = relationship("OptimizationResult", back_populates="procurement_option")
     project_item = relationship("ProjectItem", foreign_keys=[project_item_id])  # Link to specific project item
+    cost_components = relationship(
+        "ProcurementCostComponent",
+        back_populates="procurement_option",
+        cascade="all, delete-orphan",
+    )
     
     # Add check constraints
     __table_args__ = (
         CheckConstraint('cost_amount > 0', name='check_positive_cost'),
         CheckConstraint('package_id IS NOT NULL OR project_item_id IS NOT NULL OR item_code IS NOT NULL', name='check_procurement_option_reference'),
+        CheckConstraint(
+            "delivery_date_source IS NULL OR delivery_date_source IN ('PROJECT_OPTION', 'SUPPLIER_ACTUAL', 'MANUAL')",
+            name='check_procurement_option_delivery_date_source',
+        ),
+        CheckConstraint(
+            "forecast_customer_invoice_date_source IS NULL OR forecast_customer_invoice_date_source IN ('SYSTEM_DEFAULT', 'MANUAL_OVERRIDE')",
+            name='check_procurement_option_invoice_date_source',
+        ),
+        CheckConstraint(
+            "forecast_customer_receipt_date_source IS NULL OR forecast_customer_receipt_date_source IN ('SYSTEM_DEFAULT', 'MANUAL_OVERRIDE')",
+            name='check_procurement_option_receipt_date_source',
+        ),
     )
 
 
@@ -353,10 +390,63 @@ class BudgetData(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     budget_date = Column(Date, unique=True, nullable=False, index=True)
-    available_budget = Column(Numeric(15, 2), nullable=False)  # Kept for backward compatibility (in base currency IRR)
+    # Precision upgraded to support large IRR shortages surfaced by optimization analysis.
+    available_budget = Column(Numeric(18, 2), nullable=False)  # Kept for backward compatibility (in base currency IRR)
     multi_currency_budget = Column(JSON, nullable=True)  # New: {"USD": 1000000, "IRR": 1000000000000, "AED": 12000000000}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class PaymentMethod(Base):
+    """Master data for payment methods used in procurement/finance flows."""
+    __tablename__ = "payment_methods"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    name_en = Column(String(200), nullable=False)
+    name_fa = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    settlement_delay_days = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    __table_args__ = (
+        CheckConstraint("settlement_delay_days >= 0", name="check_payment_method_settlement_delay_non_negative"),
+    )
+
+
+class ProcurementCostComponent(Base):
+    """Normalized cost components linked to one procurement option."""
+    __tablename__ = "procurement_cost_components"
+
+    id = Column(Integer, primary_key=True, index=True)
+    procurement_option_id = Column(
+        Integer,
+        ForeignKey("procurement_options.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    component_type = Column(String(30), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    amount_value = Column(Numeric(18, 2), nullable=False)
+    amount_currency = Column(String(3), nullable=False, index=True)
+    amount_irr = Column(Numeric(18, 2), nullable=True)
+    exchange_rate_date = Column(Date, nullable=True)
+    payment_metadata = Column(JSON, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    procurement_option = relationship("ProcurementOption", back_populates="cost_components")
+
+    __table_args__ = (
+        CheckConstraint("amount_value > 0", name="check_procurement_cost_component_positive_amount"),
+        CheckConstraint(
+            "component_type IN ('BASE_PRICE', 'SHIPPING', 'VAT', 'CUSTOMS', 'CLEARANCE', 'INSURANCE', 'BANK_FEE', 'OTHER')",
+            name="check_procurement_cost_component_type",
+        ),
+    )
 
 
 class CashflowEvent(Base):
