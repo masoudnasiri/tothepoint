@@ -1,6 +1,6 @@
 # Sprint 5E-R1 — Procurement Assignment UX Relocation to Procurement Module
 
-**Status:** PASS WITH MINOR ISSUES (pending runtime closure)  
+**Status:** PASS WITH MINOR ISSUES  
 **Date:** 2026-06-26  
 **Sprint name:** Sprint 5E-R1 — Procurement Assignment UX Relocation to Procurement Module
 
@@ -75,6 +75,16 @@ Added keys: `managementTitle`, `manageInProcurement`, `assignmentScope`, `projec
 | `procurementAssigneeUtils.test.ts` | PASS |
 | `ProcurementPage.assignmentsRelocation.test.ts` | PASS (source placement checks) |
 | `npm run build` | PASS |
+
+## Runtime smoke (2026-06-26)
+
+| Check | Result |
+|-------|--------|
+| Deploy | `/opt/rivar-demo` @ `551d2fc`, sprint=5E-R1 |
+| `run_sprint5d_smoke.sh` | PASS (13 checks, 0 failures) |
+| `verify.sh` | PASS |
+| `/health` | 200 |
+| Frontend `:3000` | 200 |
 
 ## Deployment
 
