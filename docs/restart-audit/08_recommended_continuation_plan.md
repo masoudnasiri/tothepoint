@@ -160,4 +160,5 @@ If a sprint changes code but does not update `docs/restart-audit`, that sprint i
 - Sprint 3A-R3 hotfix router registration (`6f9e944`): `procurement_financials.router` registered in `main.py`
 - Sprint 3A-R3 hotfix closure (`PASS`, `53_*`): R3 `verify_runtime_r3.py`, installer `verify.sh` SPA Accept fix, `/opt/rivar-demo` runtime verify PASS; **accepted R3 baseline = `07b56f24` on `recovery/sprint3a-r3-cost-level-payment-schedule`**
 - Sprint 4A Workspace Organization from R3 hotfix baseline (`PASS WITH MINOR ISSUES`, `54_*` / `55_*`): branch `restart/workspace-organization-after-sprint3a-r3-hotfix`; root `.tmp_*` scratch archived to gitignored `oldfiles/qa-temp/`; no product code changes
-- Next planned work: Sprint 5 Optimization UX Decision Room
+- Sprint 5A Access Control & Procurement Assignment Architecture (`PASS`, `56_*` / ADR-011): branch `restart/sprint5a-access-control-procurement-assignment-architecture`; docs-only; RBAC + assignment target model defined
+- Next planned work: Sprint 5B Backend RBAC Foundation
