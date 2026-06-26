@@ -9,7 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user, require_finance, require_procurement
+from app.auth import get_current_user, require_pilot_permission
 from app.database import get_db
 from app.models import PaymentMethod, ProcurementCostComponent, ProcurementOption, User
 from app.schemas import (
@@ -38,7 +38,7 @@ router = APIRouter(tags=["procurement-financials"])
 @router.get("/payment-methods", response_model=List[PaymentMethodSchema])
 async def list_payment_methods(
     active_only: bool = Query(True),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pilot_permission("master_data.payment_methods.view")),
     db: AsyncSession = Depends(get_db),
 ):
     query = select(PaymentMethod).order_by(PaymentMethod.code.asc())
@@ -51,7 +51,7 @@ async def list_payment_methods(
 @router.get("/payment-methods/{payment_method_id}", response_model=PaymentMethodSchema)
 async def get_payment_method(
     payment_method_id: int,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pilot_permission("master_data.payment_methods.view")),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -72,7 +72,7 @@ async def get_payment_method(
 )
 async def create_payment_method(
     payload: PaymentMethodCreate,
-    current_user: User = Depends(require_finance()),
+    current_user: User = Depends(require_pilot_permission("master_data.payment_methods.create")),
     db: AsyncSession = Depends(get_db),
 ):
     normalized_code = payload.code.strip().upper()
@@ -103,7 +103,7 @@ async def create_payment_method(
 async def update_payment_method(
     payment_method_id: int,
     payload: PaymentMethodUpdate,
-    current_user: User = Depends(require_finance()),
+    current_user: User = Depends(require_pilot_permission("master_data.payment_methods.edit")),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -145,7 +145,7 @@ async def update_payment_method(
 @router.delete("/payment-methods/{payment_method_id}")
 async def deactivate_payment_method(
     payment_method_id: int,
-    current_user: User = Depends(require_finance()),
+    current_user: User = Depends(require_pilot_permission("master_data.payment_methods.delete")),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -169,7 +169,7 @@ async def deactivate_payment_method(
 async def list_procurement_option_cost_components(
     option_id: int,
     active_only: bool = Query(True),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pilot_permission("master_data.cost_components.view")),
     db: AsyncSession = Depends(get_db),
 ):
     option_result = await db.execute(
@@ -199,7 +199,7 @@ async def list_procurement_option_cost_components(
 async def create_procurement_option_cost_component(
     option_id: int,
     payload: ProcurementCostComponentCreate,
-    current_user: User = Depends(require_procurement()),
+    current_user: User = Depends(require_pilot_permission("master_data.cost_components.create")),
     db: AsyncSession = Depends(get_db),
 ):
     option_result = await db.execute(
@@ -251,7 +251,7 @@ async def create_procurement_option_cost_component(
 async def update_procurement_cost_component(
     component_id: int,
     payload: ProcurementCostComponentUpdate,
-    current_user: User = Depends(require_procurement()),
+    current_user: User = Depends(require_pilot_permission("master_data.cost_components.edit")),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -317,7 +317,7 @@ async def update_procurement_cost_component(
 @router.delete("/procurement-cost-components/{component_id}")
 async def deactivate_procurement_cost_component(
     component_id: int,
-    current_user: User = Depends(require_procurement()),
+    current_user: User = Depends(require_pilot_permission("master_data.cost_components.delete")),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

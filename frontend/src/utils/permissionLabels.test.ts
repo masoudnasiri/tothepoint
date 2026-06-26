@@ -60,7 +60,13 @@ describe('permissionLabels enforcement badges', () => {
         [{ permission_key: 'master_data.payment_methods.view' }],
         'master_data.payment_methods'
       )
-    ).toBe(null);
+    ).toBe('enforced');
+    expect(
+      getFeatureEnforcementBadge(
+        [{ permission_key: 'master_data.cost_components.view' }],
+        'master_data.cost_components'
+      )
+    ).toBe('enforced');
   });
 
   it('Persian label keys exist for enforced and pilot badges', () => {

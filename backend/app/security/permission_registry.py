@@ -194,7 +194,7 @@ PROCUREMENT_SPECIALIST_PERMISSIONS = (
         "procurement.options.submit",
         "master_data.view", "master_data.payment_methods.view",
         "master_data.cost_components.view", "master_data.cost_components.create",
-        "master_data.cost_components.edit",
+        "master_data.cost_components.edit", "master_data.cost_components.delete",
         "master_data.items.view",
         "master_data.suppliers.view",
         "reports.view",
@@ -226,10 +226,12 @@ ACCESS_CONTROL_ADMIN_PERMISSIONS = _feature_actions(
     "access_control.user_roles", ["view", "edit"]
 ) | _keys("users.view", "users.create", "users.edit", "users.delete")
 
-# Sprint 5C-R1 pilot: always enforce RBAC for these permission prefixes (not legacy role).
+# Sprint 5C-R1/R4-Fix-3: RBAC-enforced master data prefixes (ignore legacy role except admin bypass).
 PILOT_PERMISSION_PREFIXES: Tuple[str, ...] = (
     "master_data.items.",
     "master_data.suppliers.",
+    "master_data.payment_methods.",
+    "master_data.cost_components.",
 )
 
 SYSTEM_ROLE_PERMISSION_KEYS: Dict[str, Set[str]] = {

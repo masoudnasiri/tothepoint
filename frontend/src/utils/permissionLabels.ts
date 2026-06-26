@@ -57,6 +57,8 @@ export const PILOT_ENFORCED_PREFIXES = [
 export const ENFORCED_PREFIXES = [
   'users.',
   'access_control.',
+  'master_data.payment_methods.',
+  'master_data.cost_components.',
 ] as const;
 
 export type PermissionEnforcementBadge = 'pilot' | 'enforced' | null;
@@ -75,6 +77,8 @@ export const ENFORCED_FEATURE_KEYS = [
   'access_control.permissions',
   'access_control.user_roles',
   'users',
+  'master_data.payment_methods',
+  'master_data.cost_components',
 ] as const;
 
 /** Feature keys in the master-data RBAC pilot (Items Master / Suppliers). */
