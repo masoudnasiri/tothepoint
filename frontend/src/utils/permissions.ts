@@ -189,14 +189,14 @@ export function canWriteCostComponents(user: User | null | undefined): boolean {
 export function canSeeItemsMasterNav(user: User | null | undefined): boolean {
   if (!user) return false;
   if (isLegacyAdmin(user)) return true;
-  if (userHasRbacContext(user)) return canViewItemsMaster(user);
+  if (userHasExplicitRbacGrants(user)) return canViewItemsMaster(user);
   return Boolean(user.role && ['admin', 'pmo', 'pm', 'finance'].includes(user.role));
 }
 
 export function canSeeSuppliersNav(user: User | null | undefined): boolean {
   if (!user) return false;
   if (isLegacyAdmin(user)) return true;
-  if (userHasRbacContext(user)) return canViewSuppliers(user);
+  if (userHasExplicitRbacGrants(user)) return canViewSuppliers(user);
   return Boolean(user.role && ['admin', 'pmo', 'pm', 'procurement', 'finance'].includes(user.role));
 }
 
