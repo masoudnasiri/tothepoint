@@ -139,6 +139,8 @@ export const UsersPage: React.FC<UsersPageProps> = ({ embedded = false }) => {
               ? t('users.rbacRolesAssignFailed', { detail })
               : t('users.rbacRolesAssignFailedGeneric')
           );
+          fetchUsers();
+          return;
         }
       }
       setCreateDialogOpen(false);
