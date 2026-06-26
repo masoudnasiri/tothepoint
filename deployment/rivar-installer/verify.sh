@@ -68,6 +68,8 @@ curl -fsS -o /dev/null "${BACKEND_URL}/openapi.json"
 echo "Checking compose services..."
 docker compose --project-name rivar-demo --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
 
+bash "${INSTALL_DIR}/deployment/rivar-installer/apply_r3_schema_migrations.sh"
+
 if [ "${ENSURE_FIXTURE}" -eq 1 ]; then
   echo "Seeding deterministic verification fixture..."
   docker compose \

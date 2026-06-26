@@ -197,9 +197,14 @@ wait_for_backend_health() {
   return 1
 }
 
+apply_r3_schema_migrations() {
+  bash "${INSTALL_DIR}/deployment/rivar-installer/apply_r3_schema_migrations.sh"
+}
+
 run_install() {
   run_compose up -d --build
   wait_for_backend_health
+  apply_r3_schema_migrations
 
   if [ "${FLAG_SEED_DEMO_DATA}" -eq 1 ]; then
     run_compose exec -T backend sh -lc "cd /app && PYTHONPATH=/app python scripts/create_sprint4a_demo_fixture.py --mode recreate"
