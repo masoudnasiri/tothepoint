@@ -1,8 +1,9 @@
 # Sprint 5D — Procurement Assignment Backend
 
-**Status:** PASS WITH MINOR ISSUES (pending runtime closure evidence)  
+**Status:** PASS WITH MINOR ISSUES  
 **Date:** 2026-06-26  
-**Sprint name:** Sprint 5D — Procurement Assignment Backend
+**Sprint name:** Sprint 5D — Procurement Assignment Backend  
+**Final commit:** `5289efe6022005a289b06d0a65c9660d8e788a97` (includes smoke 409 fix)
 
 ## Baseline
 
@@ -129,6 +130,9 @@ Module: `backend/app/services/procurement_assignment_scope_service.py`
 - Script: `deployment/rivar-installer/deploy_update_5d.sh`
 - Smoke: `deployment/rivar-installer/run_sprint5d_smoke.sh` → `backend/scripts/sprint5d_procurement_assignment_runtime_smoke.py`
 - Target: `/opt/rivar-demo`, compose `rivar-demo`
+- Deployed commit: `8549abf` (backend rebuild); smoke hotfix `5289efe`
+- `verify.sh`: **PASS** (R3 Step 3 runtime verification included)
+- `run_sprint5d_smoke.sh`: **PASS** (0 failures)
 
 ## Out of scope (explicit)
 
