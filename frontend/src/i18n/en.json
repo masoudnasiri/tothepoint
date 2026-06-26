@@ -1206,6 +1206,7 @@
     "viewOnlyGroup": "View only",
     "clearGroup": "Clear",
     "pilotEnforced": "Pilot enforced",
+    "enforced": "Enforced",
     "duplicateRole": "Duplicate role",
     "roleDuplicated": "Role duplicated successfully",
     "duplicateRoleFailed": "Failed to duplicate role",

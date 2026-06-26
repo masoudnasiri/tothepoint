@@ -51,7 +51,7 @@ import {
   PERMISSION_GROUP_ORDER,
   actionLabelKey,
   featureLabelKey,
-  isPilotEnforcedPermission,
+  getFeatureEnforcementBadge,
   resolvePermissionGroup,
 } from '../../utils/permissionLabels.ts';
 
@@ -469,15 +469,32 @@ export const RoleManagementPanel: React.FC<RoleManagementPanelProps> = ({ onNoti
                       <TableRow key={featureKey}>
                         <TableCell sx={{ minWidth: 160 }}>
                           <Typography variant="body2">{labelForFeature(featureKey)}</Typography>
-                          {featurePerms.some((p) => isPilotEnforcedPermission(p.permission_key)) && (
-                            <Chip
-                              size="small"
-                              label={t('accessControl.pilotEnforced')}
-                              color="warning"
-                              variant="outlined"
-                              sx={{ mt: 0.5 }}
-                            />
-                          )}
+                          {(() => {
+                            const badge = getFeatureEnforcementBadge(featurePerms);
+                            if (badge === 'pilot') {
+                              return (
+                                <Chip
+                                  size="small"
+                                  label={t('accessControl.pilotEnforced')}
+                                  color="warning"
+                                  variant="outlined"
+                                  sx={{ mt: 0.5 }}
+                                />
+                              );
+                            }
+                            if (badge === 'enforced') {
+                              return (
+                                <Chip
+                                  size="small"
+                                  label={t('accessControl.enforced')}
+                                  color="success"
+                                  variant="outlined"
+                                  sx={{ mt: 0.5 }}
+                                />
+                              );
+                            }
+                            return null;
+                          })()}
                           <Typography variant="caption" color="text.secondary" display="block">
                             {featureKey}
                           </Typography>

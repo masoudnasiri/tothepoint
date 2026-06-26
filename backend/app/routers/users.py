@@ -6,7 +6,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.auth import get_current_user, require_admin, require_pmo
+from app.auth import require_pmo, require_users_permission
 from app.crud import get_users, get_user, create_user, update_user, delete_user, log_audit
 from app.models import User
 from app.schemas import User as UserSchema, UserCreate, UserUpdate
@@ -17,10 +17,10 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.post("/", response_model=UserSchema)
 async def create_new_user(
     user: UserCreate,
-    current_user: User = Depends(require_admin()),
+    current_user: User = Depends(require_users_permission("users.create")),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new user (admin only)"""
+    """Create a new user (users.create)"""
     try:
         return await create_user(db, user)
     except Exception as e:
@@ -41,10 +41,10 @@ async def create_new_user(
 async def list_users(
     skip: int = 0,
     limit: int = 100,
-    current_user: User = Depends(require_admin()),
+    current_user: User = Depends(require_users_permission("users.view")),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get list of users (admin only)"""
+    """Get list of users (users.view)"""
     users = await get_users(db, skip=skip, limit=limit)
     return users
 
@@ -68,10 +68,10 @@ async def list_pm_users(
 @router.get("/{user_id}", response_model=UserSchema)
 async def get_user_by_id(
     user_id: int,
-    current_user: User = Depends(require_admin()),
+    current_user: User = Depends(require_users_permission("users.view")),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get user by ID (admin only)"""
+    """Get user by ID (users.view)"""
     user = await get_user(db, user_id)
     if not user:
         raise HTTPException(
@@ -85,10 +85,10 @@ async def get_user_by_id(
 async def update_user_by_id(
     user_id: int,
     user_update: UserUpdate,
-    current_user: User = Depends(require_admin()),
+    current_user: User = Depends(require_users_permission("users.edit")),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update user (admin only)"""
+    """Update user (users.edit)"""
     from app.services.rbac_service import AccessControlLockoutError, assert_user_may_be_deleted_or_deactivated
 
     if user_update.is_active is False:
@@ -133,10 +133,10 @@ async def update_user_by_id(
 @router.delete("/{user_id}")
 async def delete_user_by_id(
     user_id: int,
-    current_user: User = Depends(require_admin()),
+    current_user: User = Depends(require_users_permission("users.delete")),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete user (admin only)"""
+    """Delete user (users.delete)"""
     from app.services.rbac_service import AccessControlLockoutError, assert_user_may_be_deleted_or_deactivated
 
     try:

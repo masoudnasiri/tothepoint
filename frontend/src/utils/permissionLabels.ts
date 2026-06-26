@@ -47,14 +47,35 @@ export function actionLabelKey(action: string): string {
   return `permissionActions.${action}`;
 }
 
-/** Pilot-enforced permission prefixes (backend + frontend). */
+/** Pilot-enforced permission prefixes (backend + frontend verified). */
 export const PILOT_ENFORCED_PREFIXES = [
-  'access_control.',
-  'users.',
   'master_data.items.',
   'master_data.suppliers.',
 ] as const;
 
+/** Enforced (non-pilot) permission prefixes with verified backend + frontend guards. */
+export const ENFORCED_PREFIXES = [
+  'users.',
+  'access_control.',
+] as const;
+
+export type PermissionEnforcementBadge = 'pilot' | 'enforced' | null;
+
 export function isPilotEnforcedPermission(permissionKey: string): boolean {
   return PILOT_ENFORCED_PREFIXES.some((prefix) => permissionKey.startsWith(prefix));
+}
+
+export function isEnforcedPermission(permissionKey: string): boolean {
+  return ENFORCED_PREFIXES.some((prefix) => permissionKey.startsWith(prefix));
+}
+
+/** Badge for permission matrix feature rows — at most one badge per feature group. */
+export function getFeatureEnforcementBadge(featurePermissions: { permission_key: string }[]): PermissionEnforcementBadge {
+  if (featurePermissions.some((p) => isPilotEnforcedPermission(p.permission_key))) {
+    return 'pilot';
+  }
+  if (featurePermissions.some((p) => isEnforcedPermission(p.permission_key))) {
+    return 'enforced';
+  }
+  return null;
 }

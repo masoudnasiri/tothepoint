@@ -168,4 +168,5 @@ If a sprint changes code but does not update `docs/restart-audit`, that sprint i
 - Sprint 5C-R1-Fix Role Management Runtime Closure (`PASS WITH MINOR ISSUES`, `61_*`): branch `restart/sprint5c-r1-fix-role-management-runtime-closure` @ `65788fc`; UsersPage RBAC integration tests; `/opt/rivar-demo` deploy + `verify.sh` PASS; RBAC runtime smoke PASS
 - Sprint 5C-R2 Role UI / User Role / Provenance Fix (`PASS WITH MINOR ISSUES`, `62_*`): branch `restart/sprint5c-r2-role-ui-user-role-provenance-fix` @ `8876cba`; single Roles selector; GitHub provenance documented
 - Sprint 5C-R3 Role Management Usability & Safe Deletion (`PASS WITH MINOR ISSUES`, `63_*`): branch `restart/sprint5c-r3-role-management-usability-delete`; list + drawer UX, accordion permissions, custom role deactivate, resource-safe verification
-- Next planned work: Sprint 5D Procurement Assignment Backend
+- Sprint 5C-R4 Full RBAC Inventory & E2E Access Audit (`PASS WITH MINOR ISSUES`, `64_*` / `65_*`): branch `restart/sprint5c-r4-full-rbac-inventory-e2e-audit`; code-driven inventory (267 endpoints, 67 permissions), users.* backend enforcement fix, permission matrix badge correction; demo deploy pending for runtime closure
+- Next planned work: Deploy 5C-R4 to demo → Sprint 5C-R4-Fix runtime closure if needed → Sprint 5D Procurement Assignment Backend (only after RBAC smoke green)
