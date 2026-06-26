@@ -40,6 +40,10 @@ class Settings(BaseSettings):
 
     # Enforce full package/sub-item coverage before locking decisions
     enforce_package_coverage_on_lock: bool = os.getenv("ENFORCE_PACKAGE_COVERAGE_ON_LOCK", "false").lower() == "true"
+
+    # RBAC (Sprint 5B) — dual-read; broad enforcement deferred to Sprint 5F
+    enable_super_admin_bypass: bool = os.getenv("ENABLE_SUPER_ADMIN_BYPASS", "true").lower() == "true"
+    enable_permission_enforcement: bool = os.getenv("ENABLE_PERMISSION_ENFORCEMENT", "false").lower() == "true"
     
     class Config:
         env_file = ".env"

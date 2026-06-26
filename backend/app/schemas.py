@@ -192,6 +192,78 @@ class User(UserBase):
     model_config = {"from_attributes": True}
 
 
+class UserRoleSummary(BaseModel):
+    code: str
+    display_name: str
+    is_system: bool
+
+
+class UserMe(User):
+    permissions: List[str] = Field(default_factory=list)
+    roles: List[UserRoleSummary] = Field(default_factory=list)
+    permission_enforcement_enabled: bool = False
+
+
+class RoleBase(BaseModel):
+    code: str = Field(..., min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    display_name: str = Field(..., min_length=1, max_length=128)
+    description: Optional[str] = None
+
+
+class RoleCreate(RoleBase):
+    pass
+
+
+class RoleUpdate(BaseModel):
+    display_name: Optional[str] = Field(None, min_length=1, max_length=128)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class RoleResponse(BaseModel):
+    id: int
+    code: str
+    display_name: str
+    description: Optional[str] = None
+    is_system: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PermissionResponse(BaseModel):
+    id: int
+    permission_key: str
+    feature_key: str
+    action: str
+    description: Optional[str] = None
+    is_system: bool
+    sort_order: int
+
+    model_config = {"from_attributes": True}
+
+
+class RolePermissionsUpdate(BaseModel):
+    permission_keys: List[str] = Field(default_factory=list)
+
+
+class RolePermissionsResponse(BaseModel):
+    role_id: int
+    permission_keys: List[str] = Field(default_factory=list)
+
+
+class UserRolesUpdate(BaseModel):
+    role_ids: List[int] = Field(default_factory=list)
+
+
+class UserRolesResponse(BaseModel):
+    user_id: int
+    role_ids: List[int] = Field(default_factory=list)
+    roles: List[UserRoleSummary] = Field(default_factory=list)
+
+
 class UserLogin(BaseModel):
     username: str
     password: str

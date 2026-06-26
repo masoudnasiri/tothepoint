@@ -58,6 +58,8 @@ async def log_audit(
 # User CRUD operations
 async def create_user(db: AsyncSession, user: UserCreate) -> User:
     """Create a new user"""
+    from app.services.rbac_service import assign_user_system_role_for_legacy
+
     hashed_password = get_password_hash(user.password)
     db_user = User(
         username=user.username,
@@ -67,6 +69,8 @@ async def create_user(db: AsyncSession, user: UserCreate) -> User:
     db.add(db_user)
     await db.commit()
     await db.refresh(db_user)
+    await assign_user_system_role_for_legacy(db, db_user)
+    await db.commit()
     return db_user
 
 
@@ -86,6 +90,10 @@ async def get_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[U
 
 async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -> Optional[User]:
     """Update user"""
+    from app.models import Role, UserRole
+    from app.security.permission_registry import LEGACY_ROLE_TO_SYSTEM_ROLE
+    from app.services.rbac_service import assign_user_system_role_for_legacy
+
     update_data = user_update.dict(exclude_unset=True)
     if not update_data:
         return await get_user(db, user_id)
@@ -99,7 +107,17 @@ async def update_user(db: AsyncSession, user_id: int, user_update: UserUpdate) -
         update(User).where(User.id == user_id).values(**update_data)
     )
     await db.commit()
-    return await get_user(db, user_id)
+    user = await get_user(db, user_id)
+    if user and 'role' in update_data:
+        system_code = LEGACY_ROLE_TO_SYSTEM_ROLE.get(user.role)
+        if system_code:
+            role_result = await db.execute(select(Role).where(Role.code == system_code))
+            role = role_result.scalar_one_or_none()
+            if role:
+                await db.execute(delete(UserRole).where(UserRole.user_id == user_id))
+                await assign_user_system_role_for_legacy(db, user)
+                await db.commit()
+    return user
 
 
 async def delete_user(db: AsyncSession, user_id: int) -> bool:

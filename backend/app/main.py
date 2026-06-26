@@ -11,7 +11,7 @@ import logging
 from app.config import settings
 from app.database import init_db
 from app.app_metadata import APP_VERSION, PRODUCER_NAME, PRODUCT_NAME
-from app.routers import auth, users, projects, items, items_master, procurement, procurement_financials, procurement_plan, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies, invoice_payment_simple, supplier_payments, brs_api, suppliers, audit, config, packages  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
+from app.routers import auth, users, projects, items, items_master, procurement, procurement_financials, procurement_plan, finance, excel, phases, weights, decisions, dashboard, delivery_options, files, analytics, reports, currencies, invoice_payment_simple, supplier_payments, brs_api, suppliers, audit, config, packages, access_control  # , exchange_rates  # Temporarily disabled due to Pydantic recursion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +25,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting up {PRODUCT_NAME} API...")
     await init_db()
     logger.info("Database initialized successfully")
+
+    try:
+        from app.database import AsyncSessionLocal
+        from app.services.rbac_service import ensure_rbac_seeded
+
+        async with AsyncSessionLocal() as db:
+            await ensure_rbac_seeded(db)
+        logger.info("RBAC foundation seeded successfully")
+    except Exception as e:
+        logger.warning(f"Failed to seed RBAC foundation: {str(e)}")
     
     # Seed sample data
     try:
@@ -104,6 +114,7 @@ async def health_check():
 
 # Include routers
 app.include_router(auth.router)
+app.include_router(access_control.router)
 app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(items_master.router)

@@ -94,6 +94,71 @@ class User(Base):
     
     # Relationships
     project_assignments = relationship("ProjectAssignment", back_populates="user", cascade="all, delete-orphan")
+    user_roles = relationship(
+        "UserRole",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="UserRole.user_id",
+    )
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(64), unique=True, nullable=False, index=True)
+    display_name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=True)
+    is_system = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    role_permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
+    user_roles = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    permission_key = Column(String(128), unique=True, nullable=False, index=True)
+    feature_key = Column(String(64), nullable=False, index=True)
+    action = Column(String(32), nullable=False)
+    description = Column(Text, nullable=True)
+    is_system = Column(Boolean, default=True, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+
+    role_permissions = relationship("RolePermission", back_populates="permission", cascade="all, delete-orphan")
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    __table_args__ = (UniqueConstraint("role_id", "permission_id", name="uq_role_permission"),)
+
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    permission_id = Column(Integer, ForeignKey("permissions.id", ondelete="CASCADE"), primary_key=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now())
+    granted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    role = relationship("Role", back_populates="role_permissions")
+    permission = relationship("Permission", back_populates="role_permissions")
+    granted_by = relationship("User", foreign_keys=[granted_by_id])
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role_id = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True)
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    assigned_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    user = relationship("User", back_populates="user_roles", foreign_keys=[user_id])
+    role = relationship("Role", back_populates="user_roles")
+    assigned_by = relationship("User", foreign_keys=[assigned_by_id])
 
 
 class Project(Base):

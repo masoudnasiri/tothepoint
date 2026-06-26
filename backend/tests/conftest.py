@@ -14,7 +14,8 @@ from app.config import Settings
 # Import all models to ensure they're registered with Base
 from app.models import (
     User, Project, ProjectItem, Supplier, ProcurementPackage, Currency,
-    ProcurementOption, DeliveryOption, FinalizedDecision
+    ProcurementOption, DeliveryOption, FinalizedDecision,
+    Role, Permission, RolePermission, UserRole,
 )
 # Import invoice/payment models to ensure they're registered
 import app.models_invoice_payment

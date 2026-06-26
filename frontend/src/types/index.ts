@@ -5,6 +5,9 @@ export interface User {
   role: 'admin' | 'pmo' | 'pm' | 'procurement' | 'finance';
   created_at: string;
   is_active: boolean;
+  permissions?: string[];
+  roles?: Array<{ code: string; display_name: string; is_system: boolean }>;
+  permission_enforcement_enabled?: boolean;
 }
 
 // Currency Types

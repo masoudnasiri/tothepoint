@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, require_admin, require_pmo
-from app.crud import get_users, get_user, create_user, update_user, delete_user
+from app.crud import get_users, get_user, create_user, update_user, delete_user, log_audit
 from app.models import User
 from app.schemas import User as UserSchema, UserCreate, UserUpdate
 
@@ -89,6 +89,23 @@ async def update_user_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Update user (admin only)"""
+    from app.services.rbac_service import AccessControlLockoutError, assert_user_may_be_deleted_or_deactivated
+
+    if user_update.is_active is False:
+        try:
+            await assert_user_may_be_deleted_or_deactivated(db, user_id)
+        except AccessControlLockoutError as exc:
+            await log_audit(
+                db,
+                user_id=current_user.id,
+                action="USER_DELETE_BLOCKED_LAST_ADMIN",
+                entity_type="user",
+                entity_id=user_id,
+                details={"reason": str(exc), "operation": "deactivate"},
+            )
+            await db.commit()
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
     try:
         user = await update_user(db, user_id, user_update)
         if not user:
@@ -120,6 +137,22 @@ async def delete_user_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete user (admin only)"""
+    from app.services.rbac_service import AccessControlLockoutError, assert_user_may_be_deleted_or_deactivated
+
+    try:
+        await assert_user_may_be_deleted_or_deactivated(db, user_id)
+    except AccessControlLockoutError as exc:
+        await log_audit(
+            db,
+            user_id=current_user.id,
+            action="USER_DELETE_BLOCKED_LAST_ADMIN",
+            entity_type="user",
+            entity_id=user_id,
+            details={"reason": str(exc), "operation": "delete"},
+        )
+        await db.commit()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
     success = await delete_user(db, user_id)
     if not success:
         raise HTTPException(

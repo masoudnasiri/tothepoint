@@ -10,7 +10,7 @@ from app.database import get_db
 from app.crud import log_audit
 from app.auth import authenticate_user, create_access_token, get_current_user
 from app.crud import create_user
-from app.schemas import UserCreate, UserLogin, Token, User
+from app.schemas import UserCreate, UserLogin, Token, User, UserMe, UserRoleSummary
 from app.config import settings
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -68,10 +68,26 @@ async def login(user_credentials: UserLogin, request: Request, db: AsyncSession 
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.get("/me", response_model=User)
-async def read_users_me(current_user: User = Depends(get_current_user)):
-    """Get current user information"""
-    return current_user
+@router.get("/me", response_model=UserMe)
+async def read_users_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current user information including RBAC context."""
+    from app.services.rbac_service import get_effective_permissions, get_user_role_summaries
+
+    permissions = sorted(await get_effective_permissions(db, current_user))
+    role_summaries = await get_user_role_summaries(db, current_user.id)
+    return UserMe(
+        id=current_user.id,
+        username=current_user.username,
+        role=current_user.role,
+        created_at=current_user.created_at,
+        is_active=current_user.is_active,
+        permissions=permissions,
+        roles=[UserRoleSummary(**item) for item in role_summaries],
+        permission_enforcement_enabled=settings.enable_permission_enforcement,
+    )
 
 
 @router.post("/refresh", response_model=Token)

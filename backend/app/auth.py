@@ -150,6 +150,70 @@ def require_analytics_access():
     return require_role(["admin", "finance", "pmo", "procurement"])
 
 
+async def user_has_permission(
+    db: AsyncSession,
+    user: User,
+    permission_key: str,
+) -> bool:
+    from app.services.rbac_service import user_has_permission as _user_has_permission
+
+    return await _user_has_permission(db, user, permission_key)
+
+
+def require_permission(permission_key: str):
+    """Require a specific permission key (403). Legacy role checks remain primary until 5F."""
+
+    async def permission_checker(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        if not settings.enable_permission_enforcement:
+            return current_user
+        if await user_has_permission(db, current_user, permission_key):
+            return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient permissions: {permission_key}",
+        )
+
+    return permission_checker
+
+
+def require_any_permission(permission_keys: list[str]):
+    """Require any one of the given permission keys when enforcement is enabled."""
+
+    async def permission_checker(
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        if not settings.enable_permission_enforcement:
+            return current_user
+        for key in permission_keys:
+            if await user_has_permission(db, current_user, key):
+                return current_user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+
+    return permission_checker
+
+
+async def require_access_control_manager(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Guard access-control admin APIs during RBAC transition."""
+    from app.services.rbac_service import user_can_manage_access_control
+
+    if await user_can_manage_access_control(db, current_user):
+        return current_user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Insufficient permissions for access control management",
+    )
+
+
 async def get_user_projects(db: AsyncSession, user: User) -> list[int]:
     """Get list of project IDs that a user has access to"""
     if user.role in ["admin", "pmo"]:
