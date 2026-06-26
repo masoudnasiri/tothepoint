@@ -80,13 +80,13 @@ Local full Jest loops were **not** repeated after prior resource incident; verif
 
 ## Runtime smoke (`/opt/rivar-demo`)
 
-See deployment commit timestamp. Expected checks:
+Deployed 2026-06-26:
 
-- `verify.sh` PASS
-- `run_sprint5c_r1_smoke.sh` PASS
-- `/users-access` 200
-- `RoleManagementPanel` drawer pattern deployed in frontend container
-- Single role selector preserved in `UsersPage`
+- `verify.sh` → **PASS**
+- `run_sprint5c_r1_smoke.sh` → **PASS**
+- `/health` → 200, `/users-access` → 200
+- `RoleManagementPanel.tsx` present in frontend container
+- `assigned-users` endpoint and `permission_count` in backend container
 
 ## Files changed
 
