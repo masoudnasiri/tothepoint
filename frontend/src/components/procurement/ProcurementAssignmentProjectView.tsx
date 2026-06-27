@@ -27,6 +27,7 @@ import type { Project, ProjectItem, User } from '../../types/index.ts';
 import type { ProcurementAssignment } from '../../types/procurementAssignments.ts';
 import {
   assignmentsForProjectItem,
+  getAssignableProjectItemIds,
   isSelectableForRemoval,
   summarizeProjectAssignments,
 } from '../../utils/procurementAssignmentWorkbenchUtils.ts';
@@ -96,9 +97,10 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
         const summary = summarizeProjectAssignments(projectId, assignments);
         const project = projectsById[projectId];
         const expanded = expandedProjectId === projectId;
-        const selectableIds = summary.itemLevelAssignments
-          .filter(isSelectableForRemoval)
-          .map((a) => a.id);
+        const selectableIds = [
+          ...summary.projectLevelAssignments.filter(isSelectableForRemoval).map((a) => a.id),
+          ...summary.itemLevelAssignments.filter(isSelectableForRemoval).map((a) => a.id),
+        ];
 
         return (
           <Paper key={projectId} variant="outlined" sx={{ overflow: 'hidden' }}>
@@ -158,6 +160,13 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                         flexWrap="wrap"
                         mb={0.5}
                       >
+                        {canCancel && isSelectableForRemoval(assignment) && (
+                          <Checkbox
+                            size="small"
+                            checked={selectedAssignmentIds.includes(assignment.id)}
+                            onChange={() => onToggleAssignmentSelection(assignment.id)}
+                          />
+                        )}
                         <Chip
                           size="small"
                           label={`${userLabel(assignment.assignee_user_id)} · ${t(statusLabelKey(assignment.status))} · ${formatDate(assignment.created_at)}`}
@@ -233,6 +242,11 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                         {projectItems.map((item) => {
                           const itemAssignments = assignmentsForProjectItem(assignments, item.id);
                           const activeAssignments = itemAssignments.filter(isSelectableForRemoval);
+                          const assignableForAssignment = getAssignableProjectItemIds(
+                            projectId,
+                            [item.id],
+                            assignments
+                          ).includes(item.id);
                           const allSelected =
                             activeAssignments.length > 0 &&
                             activeAssignments.every((a) => selectedAssignmentIds.includes(a.id));
@@ -273,6 +287,7 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                                 <TableCell padding="checkbox">
                                   <Checkbox
                                     checked={selectedItemIdsForAssign.includes(item.id)}
+                                    disabled={!assignableForAssignment}
                                     onChange={() => onToggleItemForAssign(item.id)}
                                   />
                                 </TableCell>

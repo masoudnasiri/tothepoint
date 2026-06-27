@@ -50,6 +50,20 @@ const financeUser = {
   permissions: ['finance.view'],
 };
 
+const accessControlAdminUser = {
+  id: 5,
+  username: 'ac_admin',
+  role: 'pm',
+  created_at: '',
+  is_active: true,
+  permissions: [
+    'access_control.roles.view',
+    'access_control.roles.manage',
+    'access_control.permissions.manage',
+    'access_control.user_roles.edit',
+  ],
+};
+
 describe('procurement assignment permissions', () => {
   it('allows admin legacy bypass', () => {
     expect(canViewProcurementAssignments(adminUser)).toBe(true);
@@ -75,5 +89,11 @@ describe('procurement assignment permissions', () => {
     expect(canViewProcurementAssignments(financeUser)).toBe(false);
     expect(canDeleteProcurementAssignments(financeUser)).toBe(false);
     expect(canManageProcurementAssignments(financeUser)).toBe(false);
+  });
+
+  it('denies access-control admin from assignment actions without explicit assignment keys', () => {
+    expect(canViewProcurementAssignments(accessControlAdminUser)).toBe(false);
+    expect(canCancelProcurementAssignments(accessControlAdminUser)).toBe(false);
+    expect(canManageProcurementAssignments(accessControlAdminUser)).toBe(false);
   });
 });

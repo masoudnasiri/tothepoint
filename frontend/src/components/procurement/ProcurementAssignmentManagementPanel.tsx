@@ -48,6 +48,8 @@ import { ProcurementAssigneePicker } from './ProcurementAssigneePicker.tsx';
 import { filterProcurementCapableUsers } from '../../utils/procurementAssigneeUtils.ts';
 import {
   cancelAssignmentsInBulk,
+  getAssignableProjectItemIds,
+  isSelectableForRemoval,
   type WorkbenchViewMode,
 } from '../../utils/procurementAssignmentWorkbenchUtils.ts';
 import { ProcurementAssignmentProjectView } from './ProcurementAssignmentProjectView.tsx';
@@ -112,6 +114,14 @@ export const ProcurementAssignmentManagementPanel: React.FC<
     return map;
   }, [itemsByProjectId]);
 
+  const assignmentById = useMemo(() => {
+    const map: Record<number, ProcurementAssignment> = {};
+    assignments.forEach((assignment) => {
+      map[assignment.id] = assignment;
+    });
+    return map;
+  }, [assignments]);
+
   const assigneeOptions = useMemo(
     () => filterProcurementCapableUsers(Object.values(usersById)),
     [usersById]
@@ -121,6 +131,19 @@ export const ProcurementAssignmentManagementPanel: React.FC<
     if (createProjectId === '') return [];
     return itemsByProjectId[createProjectId] || [];
   }, [createProjectId, itemsByProjectId]);
+
+  const removableSelectedIds = useMemo(
+    () => {
+      return selectedAssignmentIds.filter((assignmentId) => {
+        const assignment = assignmentById[assignmentId];
+        return assignment ? isSelectableForRemoval(assignment) : false;
+      });
+    },
+    [assignmentById, selectedAssignmentIds]
+  );
+
+  const selectedAssignableCount = selectedItemIdsForAssign.length;
+  const selectedRemovableCount = removableSelectedIds.length;
 
   const formatDate = (value?: string | null) => {
     if (!value) return '—';
@@ -237,6 +260,19 @@ export const ProcurementAssignmentManagementPanel: React.FC<
     });
   }, [assignments, loadProjectItems, viewMode]);
 
+  useEffect(() => {
+    if (expandedProjectId == null || selectedItemIdsForAssign.length === 0) return;
+    const projectItems = itemsByProjectId[expandedProjectId] || [];
+    const assignableIds = new Set(
+      getAssignableProjectItemIds(
+        expandedProjectId,
+        projectItems.map((item) => item.id),
+        assignments
+      )
+    );
+    setSelectedItemIdsForAssign((prev) => prev.filter((id) => assignableIds.has(id)));
+  }, [assignments, expandedProjectId, itemsByProjectId, selectedItemIdsForAssign.length]);
+
   if (!canViewProcurementAssignments(user)) {
     return <Alert severity="warning">{t('procurementAssignments.accessDenied')}</Alert>;
   }
@@ -259,11 +295,19 @@ export const ProcurementAssignmentManagementPanel: React.FC<
   };
 
   const openRemoveDialog = (ids: number[]) => {
-    if (ids.length === 0) {
+    const removableIds = Array.from(
+      new Set(
+        ids.filter((assignmentId) => {
+          const assignment = assignmentById[assignmentId];
+          return assignment ? isSelectableForRemoval(assignment) : false;
+        })
+      )
+    );
+    if (removableIds.length === 0) {
       setError(t('procurementAssignments.noActiveAssignmentsSelected'));
       return;
     }
-    setRemoveTargetIds(ids);
+    setRemoveTargetIds(removableIds);
     setRemoveReason('');
     setBulkRemoveSummary('');
     setRemoveDialogOpen(true);
@@ -320,11 +364,21 @@ export const ProcurementAssignmentManagementPanel: React.FC<
         t('procurementAssignments.bulkRemoveSummary', {
           success: result.successCount,
           failed: result.failureCount,
-        })
+        }) +
+          (result.failedIds.length > 0
+            ? ` ${t('procurementAssignments.bulkRemoveFailedIds', {
+                ids: result.failedIds.join(', '),
+              })}`
+            : '')
       );
       if (result.failureCount === 0) {
         setRemoveDialogOpen(false);
-        setSuccess(t('procurementAssignments.assignmentRemoved'));
+        setSuccess(
+          t('procurementAssignments.bulkRemoveSummary', {
+            success: result.successCount,
+            failed: result.failureCount,
+          })
+        );
         clearSelection();
         await loadAssignments();
       } else if (result.successCount > 0) {
@@ -340,18 +394,36 @@ export const ProcurementAssignmentManagementPanel: React.FC<
 
   const handleAssignAllItems = (projectId: number) => {
     const items = itemsByProjectId[projectId] || [];
+    const assignableItemIds = getAssignableProjectItemIds(
+      projectId,
+      items.map((item) => item.id),
+      assignments
+    );
+    if (assignableItemIds.length === 0) {
+      setError(t('procurementAssignments.noAssignableItemsSelected'));
+      return;
+    }
     setCreateProjectId(projectId);
     setCreateScope('project_item');
-    setCreateItemIds(items.map((item) => item.id));
+    setCreateItemIds(assignableItemIds);
     setAssigneeIds([]);
     setNote('');
     setCreateDialogOpen(true);
   };
 
   const handleAssignSelectedItems = (projectId: number) => {
+    const assignableItemIds = getAssignableProjectItemIds(
+      projectId,
+      selectedItemIdsForAssign,
+      assignments
+    );
+    if (assignableItemIds.length === 0) {
+      setError(t('procurementAssignments.noAssignableItemsSelected'));
+      return;
+    }
     setCreateProjectId(projectId);
     setCreateScope('project_item');
-    setCreateItemIds([...selectedItemIdsForAssign]);
+    setCreateItemIds(assignableItemIds);
     setAssigneeIds([]);
     setNote('');
     setCreateDialogOpen(true);
@@ -363,6 +435,8 @@ export const ProcurementAssignmentManagementPanel: React.FC<
   };
 
   const toggleAssignmentSelection = (assignmentId: number) => {
+    const assignment = assignmentById[assignmentId];
+    if (!assignment || !isSelectableForRemoval(assignment)) return;
     setSelectedAssignmentIds((prev) =>
       prev.includes(assignmentId)
         ? prev.filter((id) => id !== assignmentId)
@@ -449,7 +523,10 @@ export const ProcurementAssignmentManagementPanel: React.FC<
           <Select
             value={assigneeFilter}
             label={t('procurementAssignments.assignedUser')}
-            onChange={(e) => setAssigneeFilter(e.target.value === '' ? '' : Number(e.target.value))}
+            onChange={(e) => {
+              setAssigneeFilter(e.target.value === '' ? '' : Number(e.target.value));
+              clearSelection();
+            }}
           >
             <MenuItem value="">{t('procurementAssignments.allAssignees')}</MenuItem>
             {assigneeOptions.map((assignee) => (
@@ -464,9 +541,12 @@ export const ProcurementAssignmentManagementPanel: React.FC<
           <Select
             value={scopeFilter}
             label={t('procurementAssignments.assignmentScope')}
-            onChange={(e) =>
-              setScopeFilter(e.target.value === '' ? '' : (e.target.value as ProcurementAssignmentScope))
-            }
+            onChange={(e) => {
+              setScopeFilter(
+                e.target.value === '' ? '' : (e.target.value as ProcurementAssignmentScope)
+              );
+              clearSelection();
+            }}
           >
             <MenuItem value="">{t('procurementAssignments.allScopes')}</MenuItem>
             <MenuItem value="project">{t('procurementAssignments.projectLevelResponsibility')}</MenuItem>
@@ -475,20 +555,33 @@ export const ProcurementAssignmentManagementPanel: React.FC<
         </FormControl>
       </Box>
 
-      {canCancel && selectedAssignmentIds.length > 0 && (
+      {(selectedAssignableCount > 0 || (canCancel && selectedRemovableCount > 0)) && (
         <Box display="flex" alignItems="center" gap={1} mb={2}>
-          <Typography variant="body2">
-            {t('procurementAssignments.selectedCount', { count: selectedAssignmentIds.length })}
-          </Typography>
-          <Button
-            size="small"
-            color="warning"
-            variant="outlined"
-            startIcon={<RemoveIcon />}
-            onClick={() => openRemoveDialog(selectedAssignmentIds)}
-          >
-            {t('procurementAssignments.removeSelectedAssignments')}
-          </Button>
+          {selectedAssignableCount > 0 && (
+            <Typography variant="body2">
+              {t('procurementAssignments.selectedAssignableItemsCount', {
+                count: selectedAssignableCount,
+              })}
+            </Typography>
+          )}
+          {canCancel && selectedRemovableCount > 0 && (
+            <>
+              <Typography variant="body2">
+                {t('procurementAssignments.selectedRemovableAssignmentsCount', {
+                  count: selectedRemovableCount,
+                })}
+              </Typography>
+              <Button
+                size="small"
+                color="warning"
+                variant="outlined"
+                startIcon={<RemoveIcon />}
+                onClick={() => openRemoveDialog(removableSelectedIds)}
+              >
+                {t('procurementAssignments.removeSelectedAssignments')}
+              </Button>
+            </>
+          )}
         </Box>
       )}
 
@@ -645,6 +738,11 @@ export const ProcurementAssignmentManagementPanel: React.FC<
             : t('procurementAssignments.removeAssignment')}
         </DialogTitle>
         <DialogContent>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            {t('procurementAssignments.removeSelectedConfirmCount', {
+              count: removeTargetIds.length,
+            })}
+          </Typography>
           <Typography variant="body2" sx={{ mb: 2 }}>
             {t('procurementAssignments.removeAssignmentHint')}
           </Typography>
@@ -673,7 +771,9 @@ export const ProcurementAssignmentManagementPanel: React.FC<
             onClick={handleBulkRemove}
             disabled={submitting || !removeReason.trim()}
           >
-            {t('procurementAssignments.removeAssignment')}
+            {removeTargetIds.length > 1
+              ? t('procurementAssignments.removeSelectedAssignments')
+              : t('procurementAssignments.removeAssignment')}
           </Button>
         </DialogActions>
       </Dialog>

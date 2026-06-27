@@ -38,15 +38,29 @@ describe('procurement assignment workbench UX (5E-R2)', () => {
 
   it('uses bulk cancel for remove selected assignments', () => {
     expect(managementSource).toContain('cancelAssignmentsInBulk');
+    expect(managementSource).toContain('canCancel && selectedRemovableCount > 0');
     expect(managementSource).toContain('removeSelectedAssignments');
     expect(managementSource).toContain('procurementAssignmentsAPI.cancel');
+    expect(managementSource).toContain('selectedAssignableItemsCount');
+    expect(managementSource).toContain('selectedRemovableAssignmentsCount');
+    expect(managementSource).toContain('bulkRemoveFailedIds');
+    expect(managementSource).toContain('removeSelectedConfirmCount');
   });
 
   it('supports assign all project items via bulk create', () => {
     expect(managementSource).toContain('handleAssignAllItems');
     expect(managementSource).toContain('bulkCreate');
+    expect(managementSource).toContain('getAssignableProjectItemIds');
+    expect(managementSource).toContain('noAssignableItemsSelected');
     expect(projectViewSource).toContain('assignAllProjectItems');
     expect(projectViewSource).toContain('projectLevelPartialRemovalHint');
+  });
+
+  it('supports project-level and item-level assignment removal selection', () => {
+    expect(projectViewSource).toContain('summary.projectLevelAssignments.filter(isSelectableForRemoval)');
+    expect(projectViewSource).toContain('onToggleAssignmentSelection(assignment.id)');
+    expect(projectViewSource).toContain('disabled={!assignableForAssignment}');
+    expect(itemViewSource).toContain('isSelectableForRemoval(row)');
   });
 
   it('keeps project items as summary-only surface', () => {

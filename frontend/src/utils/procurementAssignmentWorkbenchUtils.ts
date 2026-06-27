@@ -62,6 +62,39 @@ export function assignmentsForProjectItem(
   );
 }
 
+export function isProjectItemAssignableForAssignment(
+  projectId: number,
+  projectItemId: number,
+  assignments: ProcurementAssignment[]
+): boolean {
+  const hasActiveProjectLevelAssignment = assignments.some(
+    (assignment) =>
+      assignment.project_id === projectId &&
+      assignment.assignment_scope === 'project' &&
+      isActiveAssignment(assignment)
+  );
+  if (hasActiveProjectLevelAssignment) {
+    return false;
+  }
+  return !assignments.some(
+    (assignment) =>
+      assignment.project_id === projectId &&
+      assignment.assignment_scope === 'project_item' &&
+      assignment.project_item_id === projectItemId &&
+      isActiveAssignment(assignment)
+  );
+}
+
+export function getAssignableProjectItemIds(
+  projectId: number,
+  projectItemIds: number[],
+  assignments: ProcurementAssignment[]
+): number[] {
+  return projectItemIds.filter((projectItemId) =>
+    isProjectItemAssignableForAssignment(projectId, projectItemId, assignments)
+  );
+}
+
 export function itemLabel(item: ProjectItem): string {
   return `${item.item_code} — ${item.item_name}`;
 }

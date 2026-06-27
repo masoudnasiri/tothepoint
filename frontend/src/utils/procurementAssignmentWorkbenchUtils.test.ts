@@ -1,6 +1,8 @@
 import {
   cancelAssignmentsInBulk,
+  getAssignableProjectItemIds,
   groupAssignmentsByProject,
+  isProjectItemAssignableForAssignment,
   isSelectableForRemoval,
   summarizeProjectAssignments,
 } from './procurementAssignmentWorkbenchUtils.ts';
@@ -49,6 +51,47 @@ describe('procurementAssignmentWorkbenchUtils', () => {
     expect(isSelectableForRemoval(baseAssignment({ status: 'active' }))).toBe(true);
     expect(isSelectableForRemoval(baseAssignment({ status: 'completed' }))).toBe(false);
     expect(isSelectableForRemoval(baseAssignment({ status: 'cancelled' }))).toBe(false);
+  });
+
+  it('treats rows with active assignment as not assignable', () => {
+    const assignments: ProcurementAssignment[] = [
+      baseAssignment({
+        id: 10,
+        project_id: 50,
+        assignment_scope: 'project_item',
+        project_item_id: 501,
+        status: 'active',
+      }),
+      baseAssignment({
+        id: 11,
+        project_id: 50,
+        assignment_scope: 'project_item',
+        project_item_id: 502,
+        status: 'cancelled',
+      }),
+    ];
+    expect(isProjectItemAssignableForAssignment(50, 501, assignments)).toBe(false);
+    expect(isProjectItemAssignableForAssignment(50, 502, assignments)).toBe(true);
+  });
+
+  it('treats active project-level assignment as non-assignable for all rows', () => {
+    const assignments: ProcurementAssignment[] = [
+      baseAssignment({
+        id: 12,
+        project_id: 90,
+        assignment_scope: 'project',
+        project_item_id: null,
+        status: 'active',
+      }),
+      baseAssignment({
+        id: 13,
+        project_id: 90,
+        assignment_scope: 'project_item',
+        project_item_id: 901,
+        status: 'cancelled',
+      }),
+    ];
+    expect(getAssignableProjectItemIds(90, [901, 902], assignments)).toEqual([]);
   });
 
   it('cancels assignments in bulk with partial failure summary', async () => {
