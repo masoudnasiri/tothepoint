@@ -52,6 +52,7 @@
     "weights": "Decision Weights",
     "itemsMaster": "Items Master",
     "suppliers": "Suppliers",
+    "paymentMethods": "Payment Methods",
     "auditlog": "Audit Logs",
     "auditLogs": "Audit Logs",
     "accessControl": "Access Control",

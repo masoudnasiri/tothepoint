@@ -135,28 +135,33 @@ export function hasAnyMasterDataPermission(user: User | null | undefined): boole
 export function canViewPaymentMethods(user: User | null | undefined): boolean {
   if (!user) return false;
   if (isLegacyAdmin(user)) return true;
-  if (userHasExplicitRbacGrants(user)) {
-    return hasAnyPermission(user, [
-      'master_data.payment_methods.view',
-      'master_data.payment_methods.create',
-      'master_data.payment_methods.edit',
-      'master_data.payment_methods.delete',
-    ]);
-  }
-  return Boolean(user.role && ['admin', 'finance', 'pmo', 'procurement', 'pm'].includes(user.role));
+  return hasPermission(user, 'master_data.payment_methods.view');
+}
+
+export function canCreatePaymentMethods(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'master_data.payment_methods.create');
+}
+
+export function canEditPaymentMethods(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'master_data.payment_methods.edit');
+}
+
+export function canDeletePaymentMethods(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasPermission(user, 'master_data.payment_methods.delete');
 }
 
 export function canWritePaymentMethods(user: User | null | undefined): boolean {
-  if (!user) return false;
-  if (isLegacyAdmin(user)) return true;
-  if (userHasExplicitRbacGrants(user)) {
-    return hasAnyPermission(user, [
-      'master_data.payment_methods.create',
-      'master_data.payment_methods.edit',
-      'master_data.payment_methods.delete',
-    ]);
-  }
-  return user.role === 'admin' || user.role === 'finance';
+  return (
+    canCreatePaymentMethods(user) ||
+    canEditPaymentMethods(user) ||
+    canDeletePaymentMethods(user)
+  );
 }
 
 export function canViewCostComponents(user: User | null | undefined): boolean {
@@ -234,6 +239,9 @@ export function usePermissions(user: User | null | undefined) {
       canEditSuppliers: () => canEditSuppliers(user),
       canDeleteSuppliers: () => canDeleteSuppliers(user),
       canViewPaymentMethods: () => canViewPaymentMethods(user),
+      canCreatePaymentMethods: () => canCreatePaymentMethods(user),
+      canEditPaymentMethods: () => canEditPaymentMethods(user),
+      canDeletePaymentMethods: () => canDeletePaymentMethods(user),
       canWritePaymentMethods: () => canWritePaymentMethods(user),
       canViewCostComponents: () => canViewCostComponents(user),
       canWriteCostComponents: () => canWriteCostComponents(user),

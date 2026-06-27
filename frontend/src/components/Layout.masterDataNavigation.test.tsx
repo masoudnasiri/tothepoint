@@ -51,6 +51,7 @@ jest.mock('react-i18next', () => ({
               'navigation.weights': 'وزن‌های تصمیم',
               'navigation.itemsMaster': 'فهرست اقلام',
               'navigation.suppliers': 'تامین‌کنندگان',
+              'navigation.paymentMethods': 'روش‌های پرداخت',
               'auth.logout': 'خروج',
             }
           : {
@@ -70,6 +71,7 @@ jest.mock('react-i18next', () => ({
               'navigation.weights': 'Decision Weights',
               'navigation.itemsMaster': 'Items Master',
               'navigation.suppliers': 'Suppliers',
+              'navigation.paymentMethods': 'Payment Methods',
               'auth.logout': 'Logout',
             }
       )[key] || key,
@@ -80,6 +82,11 @@ jest.mock('react-i18next', () => ({
 describe('Layout master data navigation', () => {
   let container: HTMLDivElement;
   let root: Root;
+
+  const getBaseInformationButton = () =>
+    Array.from(container.querySelectorAll('[role="button"]')).find((btn) =>
+      btn.textContent?.includes('Base Information')
+    );
 
   beforeEach(() => {
     container = document.createElement('div');
@@ -110,6 +117,12 @@ describe('Layout master data navigation', () => {
     });
 
     expect(container.textContent).toContain('Base Information');
+    const baseInfoButton = getBaseInformationButton();
+    expect(baseInfoButton).toBeTruthy();
+    await act(async () => {
+      baseInfoButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('Payment Methods');
   });
 
   it('shows اطلاعات پایه entry in Persian', async () => {
@@ -155,5 +168,56 @@ describe('Layout master data navigation', () => {
     expect(container.textContent).not.toContain('Base Information');
     expect(container.textContent).not.toContain('Items Master');
     expect(container.textContent).not.toContain('Suppliers');
+    expect(container.textContent).not.toContain('Payment Methods');
+  });
+
+  it('shows Payment Methods nav for explicit payment methods view permission', async () => {
+    mockedLanguage = 'en';
+    mockUserHolder.user = {
+      role: 'pm',
+      username: 'payment_view_only',
+      permissions: ['master_data.payment_methods.view'],
+    };
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <Layout>
+            <div>Content</div>
+          </Layout>
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.textContent).toContain('Base Information');
+    const baseInfoButton = getBaseInformationButton();
+    expect(baseInfoButton).toBeTruthy();
+    await act(async () => {
+      baseInfoButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('Payment Methods');
+  });
+
+  it('hides Payment Methods nav for procurement assignment view-only user', async () => {
+    mockedLanguage = 'en';
+    mockUserHolder.user = {
+      role: 'procurement',
+      username: 'assignment_view_only',
+      permissions: ['procurement.assignments.view'],
+    };
+
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <MemoryRouter initialEntries={['/dashboard']}>
+          <Layout>
+            <div>Content</div>
+          </Layout>
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.textContent).not.toContain('Payment Methods');
   });
 });

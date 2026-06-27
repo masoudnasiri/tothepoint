@@ -38,7 +38,13 @@ import {
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.tsx';
-import { canAccessUsersAccessControlSection, canSeeBaseInformationNav, canSeeItemsMasterNav, canSeeSuppliersNav } from '../utils/permissions.ts';
+import {
+  canAccessUsersAccessControlSection,
+  canSeeBaseInformationNav,
+  canSeeItemsMasterNav,
+  canSeeSuppliersNav,
+  canViewPaymentMethods,
+} from '../utils/permissions.ts';
 import { LanguageSwitcher } from './LanguageSwitcher.tsx';
 import { useTranslation } from 'react-i18next';
 import { BRAND_NAME, PRODUCER_NAME, PRODUCT_NAME, getRuntimeVersion } from '../utils/appIdentity.ts';
@@ -94,6 +100,7 @@ const navigationItems: NavigationItem[] = [
       { textKey: 'navigation.weights', icon: <Tune />, path: '/weights', roles: ['admin'] },
       { textKey: 'navigation.itemsMaster', icon: <Inventory />, path: '/items-master', roles: ['admin', 'pmo', 'pm', 'finance'], masterDataPilotNav: true },
       { textKey: 'navigation.suppliers', icon: <Business />, path: '/suppliers', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'], masterDataPilotNav: true },
+      { textKey: 'navigation.paymentMethods', icon: <AccountBalance />, path: '/payment-methods', roles: ['admin', 'pmo', 'pm', 'procurement', 'finance'] },
     ],
   },
 ];
@@ -156,6 +163,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
     if (item.masterDataPilotNav && item.path === '/suppliers') {
       return canSeeSuppliersNav(user);
+    }
+    if (item.path === '/payment-methods') {
+      return canViewPaymentMethods(user);
     }
     return Boolean(user?.role && item.roles.includes(user.role));
   };

@@ -26,7 +26,12 @@ import {
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext.tsx';
-import { canViewPaymentMethods, canWritePaymentMethods } from '../../utils/permissions.ts';
+import {
+  canCreatePaymentMethods,
+  canDeletePaymentMethods,
+  canEditPaymentMethods,
+  canViewPaymentMethods,
+} from '../../utils/permissions.ts';
 import { procurementFinancialsAPI } from '../../services/api.ts';
 import type { PaymentMethod, PaymentMethodCreate } from '../../types/index.ts';
 import { formatApiError } from '../../utils/errorUtils.ts';
@@ -93,7 +98,9 @@ export const PaymentMethodsManager: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
   const canView = canViewPaymentMethods(user);
-  const canWrite = canWritePaymentMethods(user);
+  const canCreate = canCreatePaymentMethods(user);
+  const canEdit = canEditPaymentMethods(user);
+  const canDelete = canDeletePaymentMethods(user);
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -167,6 +174,11 @@ export const PaymentMethodsManager: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    if ((isEditMode && !canEdit) || (!isEditMode && !canCreate)) {
+      setError(t('accessControl.featureAccessDenied'));
+      return;
+    }
+
     const errors = validatePaymentMethodForm(formData, t);
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -193,6 +205,11 @@ export const PaymentMethodsManager: React.FC = () => {
   };
 
   const handleDeactivate = async (method: PaymentMethod) => {
+    if (!canDelete) {
+      setError(t('accessControl.featureAccessDenied'));
+      return;
+    }
+
     const confirmed = window.confirm(
       t('procurement.confirmDeactivatePaymentMethod') ||
         'Deactivate this payment method?'
@@ -225,7 +242,7 @@ export const PaymentMethodsManager: React.FC = () => {
         <Typography variant="h6">
           {t('procurement.paymentMethods') || 'Payment Methods'}
         </Typography>
-        {canWrite && (
+        {canCreate && (
           <Button
             variant="contained"
             size="small"
@@ -266,23 +283,27 @@ export const PaymentMethodsManager: React.FC = () => {
                   </TableCell>
                   <TableCell>{method.description || '-'}</TableCell>
                   <TableCell align="right">
-                    {canWrite && (
+                    {(canEdit || canDelete) && (
                       <>
-                        <IconButton
-                          size="small"
-                          onClick={() => openEditDialog(method)}
-                          title={t('procurement.editPaymentMethod') || 'Edit payment method'}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDeactivate(method)}
-                          title={t('procurement.deactivatePaymentMethod') || 'Deactivate payment method'}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
+                        {canEdit && (
+                          <IconButton
+                            size="small"
+                            onClick={() => openEditDialog(method)}
+                            title={t('procurement.editPaymentMethod') || 'Edit payment method'}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        )}
+                        {canDelete && (
+                          <IconButton
+                            size="small"
+                            color="error"
+                            onClick={() => handleDeactivate(method)}
+                            title={t('procurement.deactivatePaymentMethod') || 'Deactivate payment method'}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        )}
                       </>
                     )}
                   </TableCell>

@@ -17,6 +17,7 @@ import { FinalizedDecisionsPage } from './pages/FinalizedDecisionsPage.tsx';
 import { ProcurementPage } from './pages/ProcurementPage.tsx';
 import { ProcurementPlanPage } from './pages/ProcurementPlanPage.tsx';
 import { FinancePage } from './pages/FinancePage.tsx';
+import { PaymentMethodsPage } from './pages/PaymentMethodsPage.tsx';
 import { OptimizationPage } from './pages/OptimizationPage.tsx';
 import { OptimizationPageEnhanced } from './pages/OptimizationPage_enhanced.tsx';
 import { WeightsPage } from './pages/WeightsPage.tsx';
@@ -26,6 +27,7 @@ import { ReportsPage } from './pages/ReportsPage.tsx';
 import AuditLogsPage from './pages/AuditLogsPage.tsx';
 import { UsersAccessControlPage } from './pages/UsersAccessControlPage.tsx';
 import { UsersAccessControlRoute } from './components/UsersAccessControlRoute.tsx';
+import { PaymentMethodsRoute } from './components/PaymentMethodsRoute.tsx';
 import LocalizedDateProvider from './components/LocalizedDateProvider.tsx';
 import { PRODUCER_NAME, PRODUCT_NAME } from './utils/appIdentity.ts';
 import { createRivarTheme } from './theme/rivarTheme.ts';
@@ -68,6 +70,14 @@ function AppContent() {
                         <Route path="/procurement" element={<ProcurementPage />} />
                         <Route path="/procurement-plan" element={<ProcurementPlanPage />} />
                         <Route path="/finance" element={<FinancePage />} />
+                        <Route
+                          path="/payment-methods"
+                          element={
+                            <PaymentMethodsRoute>
+                              <PaymentMethodsPage />
+                            </PaymentMethodsRoute>
+                          }
+                        />
                         <Route path="/optimization" element={<OptimizationPage />} />
                         <Route path="/optimization-enhanced" element={<OptimizationPageEnhanced />} />
                         <Route path="/analytics" element={<AnalyticsDashboardPage />} />
