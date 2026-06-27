@@ -159,6 +159,56 @@ Executed without watch mode / coverage / broad loops:
 1. Frontend route curl checks for SPA deep links may report unauthenticated backend status when called without browser session context; route wiring is validated via source + focused tests.
 2. Runtime provenance commit field must be finalized with the sprint closure commit hash after git closure.
 
+## Compile hotfix: ProcurementPage Permission Helper Compile Fix
+
+### Error
+
+- Runtime frontend compile blocker after refresh:
+  - `export 'isAssignedOnlyProcurementScopeUser' was not found in '../utils/permissions.ts'`
+  - `export 'isGlobalProcurementScopeUser' was not found in '../utils/permissions.ts'`
+
+### Root cause
+
+- On deployed source under `/opt/rivar-demo`:
+  - `frontend/src/pages/ProcurementPage.tsx` imported `isAssignedOnlyProcurementScopeUser` and `isGlobalProcurementScopeUser`.
+  - `frontend/src/utils/permissions.ts` did not export these helpers.
+- This mismatch was introduced by earlier scope-enforcement branch history and caused webpack compile failure in runtime.
+
+### Minimal fix
+
+- Added back exports in `frontend/src/utils/permissions.ts` only:
+  - `isGlobalProcurementScopeUser(user)`
+  - `isAssignedOnlyProcurementScopeUser(user)`
+  - `GLOBAL_PROCUREMENT_SCOPE_PERMISSION_KEYS` constant
+  - corresponding `usePermissions()` accessors
+- Semantics preserved:
+  - admin bypass remains;
+  - global scope requires assignment-management/project-items grants;
+  - assigned-only requires `procurement.assignments.view` and not global;
+  - access-control-only users remain non-procurement-scope by default.
+- No package wizard / optimization / cashflow / decisions / master-data behavior changes in this hotfix.
+
+### Compile hotfix verification
+
+- Focused local tests:
+  - `src/utils/procurementAssignmentPermissions.test.ts` PASS
+  - `src/pages/ProcurementPage.workbenchUx.test.ts` PASS
+  - `src/pages/ProcurementPage.secureAssignedItems.test.ts` PASS
+  - `src/components/Layout.masterDataNavigation.test.tsx` PASS
+  - `src/components/PackageWizard/PackageWizardStep3.test.tsx` PASS
+- Local build:
+  - `npm run build` PASS (with existing pre-existing lint warnings; no missing-export compile errors)
+- Runtime deploy:
+  - frontend rebuilt on `/opt/rivar-demo` using installer deploy flow
+  - `verify.sh` PASS
+- Runtime smoke:
+  - `/health` 200, `/openapi.json` 200
+  - helper mismatch resolved on deployed source (`ProcurementPage` imports present and `permissions.ts` exports present)
+  - `/#/procurement` 200
+  - payment-method RBAC checks unchanged (admin/view user 200, AC-only/proc-view-only 403)
+  - safe assigned item endpoint 200 and direct project-items denial 403 for procurement view-only account
+  - Package Wizard readiness endpoint `/procurement-options/81/readiness` 200
+
 ## Git provenance
 
 - Branch: `restart/sprint5e-r3-fix-payment-methods-navigation`

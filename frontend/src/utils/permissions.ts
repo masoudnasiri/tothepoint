@@ -254,6 +254,8 @@ export function usePermissions(user: User | null | undefined) {
       canDeleteProcurementAssignments: () => canDeleteProcurementAssignments(user),
       canManageProcurementAssignments: () => canManageProcurementAssignments(user),
       canViewAllProcurementAssignments: () => canViewAllProcurementAssignments(user),
+      isGlobalProcurementScopeUser: () => isGlobalProcurementScopeUser(user),
+      isAssignedOnlyProcurementScopeUser: () => isAssignedOnlyProcurementScopeUser(user),
       canViewProjectItems: () => canViewProjectItems(user),
       canManageProjectItems: () => canManageProjectItems(user),
     }),
@@ -316,6 +318,27 @@ export function canViewAllProcurementAssignments(user: User | null | undefined):
     'procurement.assignments.complete',
     'procurement.assignments.cancel',
   ]);
+}
+
+const GLOBAL_PROCUREMENT_SCOPE_PERMISSION_KEYS = [
+  'procurement.assignments.create',
+  'procurement.assignments.edit',
+  'procurement.assignments.delete',
+  'procurement.assignments.complete',
+  'procurement.assignments.cancel',
+  'project_items.view',
+] as const;
+
+export function isGlobalProcurementScopeUser(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (isLegacyAdmin(user)) return true;
+  return hasAnyPermission(user, GLOBAL_PROCUREMENT_SCOPE_PERMISSION_KEYS);
+}
+
+export function isAssignedOnlyProcurementScopeUser(user: User | null | undefined): boolean {
+  if (!user) return false;
+  if (!canViewProcurementAssignments(user)) return false;
+  return !isGlobalProcurementScopeUser(user);
 }
 
 /** Sprint 5E-R2-Fix: full Project Items management page/API access. */

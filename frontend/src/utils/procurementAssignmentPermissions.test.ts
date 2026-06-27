@@ -3,6 +3,8 @@ import {
   canCreateProcurementAssignments,
   canDeleteProcurementAssignments,
   canEditProcurementAssignments,
+  isAssignedOnlyProcurementScopeUser,
+  isGlobalProcurementScopeUser,
   canManageProcurementAssignments,
   canViewAllProcurementAssignments,
   canViewProcurementAssignments,
@@ -95,5 +97,17 @@ describe('procurement assignment permissions', () => {
     expect(canViewProcurementAssignments(accessControlAdminUser)).toBe(false);
     expect(canCancelProcurementAssignments(accessControlAdminUser)).toBe(false);
     expect(canManageProcurementAssignments(accessControlAdminUser)).toBe(false);
+  });
+
+  it('classifies procurement scope correctly for manager vs view-only', () => {
+    expect(isGlobalProcurementScopeUser(pmoUser)).toBe(true);
+    expect(isAssignedOnlyProcurementScopeUser(pmoUser)).toBe(false);
+    expect(isGlobalProcurementScopeUser(procViewUser)).toBe(false);
+    expect(isAssignedOnlyProcurementScopeUser(procViewUser)).toBe(true);
+  });
+
+  it('does not classify access-control admin as procurement scope user', () => {
+    expect(isGlobalProcurementScopeUser(accessControlAdminUser)).toBe(false);
+    expect(isAssignedOnlyProcurementScopeUser(accessControlAdminUser)).toBe(false);
   });
 });
