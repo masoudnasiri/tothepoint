@@ -84,6 +84,7 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
 }) => {
   const { t } = useTranslation();
   const projectIds = Array.from(new Set(assignments.map((a) => a.project_id))).sort((a, b) => a - b);
+  const finalizedProjectItems = projectItems.filter((item) => Boolean(item.is_finalized));
 
   if (projectIds.length === 0) {
     return <Alert severity="info">{t('procurementAssignments.noAssignments')}</Alert>;
@@ -191,7 +192,7 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                   {canCreate && (
                     <>
                       <Button size="small" variant="outlined" onClick={() => onAssignAllItems(projectId)}>
-                        {t('procurementAssignments.assignAllProjectItems')}
+                        {t('procurementAssignments.assignAllFinalizedProjectItems')}
                       </Button>
                       <Button
                         size="small"
@@ -209,6 +210,10 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                   <Box display="flex" justifyContent="center" py={2}>
                     <CircularProgress size={24} />
                   </Box>
+                ) : finalizedProjectItems.length === 0 ? (
+                  <Alert severity="info">
+                    {t('procurementAssignments.noFinalizedItemsForItemAssignment')}
+                  </Alert>
                 ) : (
                   <TableContainer>
                     <Table size="small">
@@ -239,7 +244,7 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {projectItems.map((item) => {
+                        {finalizedProjectItems.map((item) => {
                           const itemAssignments = assignmentsForProjectItem(assignments, item.id);
                           const activeAssignments = itemAssignments.filter(isSelectableForRemoval);
                           const assignableForAssignment = getAssignableProjectItemIds(

@@ -121,7 +121,17 @@ export const itemsMasterAPI = {
 
 // Project Items API
 export const itemsAPI = {
-  listByProject: (projectId: number, params?: { skip?: number; limit?: number }) =>
+  listByProject: (
+    projectId: number,
+    params?: {
+      skip?: number;
+      limit?: number;
+      search?: string;
+      status?: string;
+      is_finalized?: boolean;
+      external_purchase?: boolean;
+    }
+  ) =>
     api.get(`/items/project/${projectId}`, { params }),
   get: (id: number) => api.get(`/items/${id}`),
   create: (item: any) => api.post('/items/', item),

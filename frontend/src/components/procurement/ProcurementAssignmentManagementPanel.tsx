@@ -114,14 +114,6 @@ export const ProcurementAssignmentManagementPanel: React.FC<
     return map;
   }, [itemsByProjectId]);
 
-  const assignmentById = useMemo(() => {
-    const map: Record<number, ProcurementAssignment> = {};
-    assignments.forEach((assignment) => {
-      map[assignment.id] = assignment;
-    });
-    return map;
-  }, [assignments]);
-
   const assigneeOptions = useMemo(
     () => filterProcurementCapableUsers(Object.values(usersById)),
     [usersById]
@@ -129,8 +121,37 @@ export const ProcurementAssignmentManagementPanel: React.FC<
 
   const createDialogItems = useMemo(() => {
     if (createProjectId === '') return [];
-    return itemsByProjectId[createProjectId] || [];
+    return (itemsByProjectId[createProjectId] || []).filter((item) => Boolean(item.is_finalized));
   }, [createProjectId, itemsByProjectId]);
+
+  const finalizedItemIdsByProject = useMemo(() => {
+    const map: Record<number, Set<number>> = {};
+    Object.entries(itemsByProjectId).forEach(([projectId, items]) => {
+      map[Number(projectId)] = new Set(
+        (items || []).filter((item) => Boolean(item.is_finalized)).map((item) => item.id)
+      );
+    });
+    return map;
+  }, [itemsByProjectId]);
+
+  const displayAssignments = useMemo(
+    () =>
+      assignments.filter((assignment) => {
+        if (assignment.assignment_scope === 'project') return true;
+        if (assignment.project_item_id == null) return false;
+        const finalizedItemIds = finalizedItemIdsByProject[assignment.project_id];
+        return Boolean(finalizedItemIds?.has(assignment.project_item_id));
+      }),
+    [assignments, finalizedItemIdsByProject]
+  );
+
+  const assignmentById = useMemo(() => {
+    const map: Record<number, ProcurementAssignment> = {};
+    displayAssignments.forEach((assignment) => {
+      map[assignment.id] = assignment;
+    });
+    return map;
+  }, [displayAssignments]);
 
   const removableSelectedIds = useMemo(
     () => {
@@ -206,13 +227,17 @@ export const ProcurementAssignmentManagementPanel: React.FC<
   const loadProjectItems = useCallback(async (projectId: number) => {
     try {
       setItemsLoading(true);
-      const response = await itemsAPI.listByProject(projectId, { limit: 500 });
+      const response = await itemsAPI.listByProject(projectId, {
+        limit: 500,
+        is_finalized: true,
+      });
       const rows = response.data?.items || response.data || [];
+      const finalizedRows = (Array.isArray(rows) ? rows : []).filter((item) => Boolean(item.is_finalized));
       setItemsByProjectId((prev) => {
-        if (prev[projectId]?.length) return prev;
+        if (Object.prototype.hasOwnProperty.call(prev, projectId)) return prev;
         return {
           ...prev,
-          [projectId]: Array.isArray(rows) ? rows : [],
+          [projectId]: finalizedRows,
         };
       });
     } catch (err: unknown) {
@@ -253,12 +278,13 @@ export const ProcurementAssignmentManagementPanel: React.FC<
   }, [createDialogOpen, createProjectId, loadProjectItems]);
 
   useEffect(() => {
-    if (viewMode !== 'item') return;
     const projectIds = Array.from(new Set(assignments.map((a) => a.project_id)));
-    projectIds.forEach((projectId) => {
-      loadProjectItems(projectId);
-    });
-  }, [assignments, loadProjectItems, viewMode]);
+    projectIds
+      .filter((projectId) => !Object.prototype.hasOwnProperty.call(itemsByProjectId, projectId))
+      .forEach((projectId) => {
+        loadProjectItems(projectId);
+      });
+  }, [assignments, itemsByProjectId, loadProjectItems]);
 
   useEffect(() => {
     if (expandedProjectId == null || selectedItemIdsForAssign.length === 0) return;
@@ -272,6 +298,10 @@ export const ProcurementAssignmentManagementPanel: React.FC<
     );
     setSelectedItemIdsForAssign((prev) => prev.filter((id) => assignableIds.has(id)));
   }, [assignments, expandedProjectId, itemsByProjectId, selectedItemIdsForAssign.length]);
+
+  useEffect(() => {
+    setSelectedAssignmentIds((prev) => prev.filter((assignmentId) => Boolean(assignmentById[assignmentId])));
+  }, [assignmentById]);
 
   if (!canViewProcurementAssignments(user)) {
     return <Alert severity="warning">{t('procurementAssignments.accessDenied')}</Alert>;
@@ -471,6 +501,9 @@ export const ProcurementAssignmentManagementPanel: React.FC<
       <Alert severity="info" sx={{ mb: 2 }}>
         {t('procurementAssignments.finalizationHint')}
       </Alert>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        {t('procurementAssignments.finalizedOnlyItemAssignmentHint')}
+      </Alert>
 
       <ToggleButtonGroup
         exclusive
@@ -602,7 +635,7 @@ export const ProcurementAssignmentManagementPanel: React.FC<
         </Box>
       ) : viewMode === 'project' ? (
         <ProcurementAssignmentProjectView
-          assignments={assignments}
+          assignments={displayAssignments}
           projectsById={projectsById}
           usersById={usersById}
           expandedProjectId={expandedProjectId}
@@ -623,7 +656,7 @@ export const ProcurementAssignmentManagementPanel: React.FC<
         />
       ) : (
         <ProcurementAssignmentItemView
-          assignments={assignments}
+          assignments={displayAssignments}
           projectsById={projectsById}
           itemLabelById={itemLabelById}
           usersById={usersById}
@@ -675,27 +708,40 @@ export const ProcurementAssignmentManagementPanel: React.FC<
               </Select>
             </FormControl>
             {createScope === 'project_item' && (
-              <FormControl fullWidth disabled={createProjectId === '' || itemsLoading}>
-                <InputLabel>{t('procurementAssignments.selectProjectItems')}</InputLabel>
-                <Select
-                  multiple
-                  value={createItemIds}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setCreateItemIds(typeof value === 'string' ? value.split(',').map(Number) : value);
-                  }}
-                  input={<OutlinedInput label={t('procurementAssignments.selectProjectItems')} />}
-                  renderValue={(selected) =>
-                    selected.map((id) => itemLabelById[id] || `#${id}`).join(', ')
-                  }
-                >
-                  {createDialogItems.map((item) => (
-                    <MenuItem key={item.id} value={item.id}>
-                      <ListItemText primary={`${item.item_code} — ${item.item_name}`} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <>
+                <Alert severity="info">{t('procurementAssignments.finalizedOnlyItemAssignmentHint')}</Alert>
+                {createProjectId !== '' && createDialogItems.length === 0 && (
+                  <Alert severity="info">
+                    {t('procurementAssignments.noFinalizedItemsForItemAssignment')}
+                  </Alert>
+                )}
+                <FormControl fullWidth disabled={createProjectId === '' || itemsLoading}>
+                  <InputLabel>{t('procurementAssignments.selectProjectItems')}</InputLabel>
+                  <Select
+                    multiple
+                    value={createItemIds}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCreateItemIds(typeof value === 'string' ? value.split(',').map(Number) : value);
+                    }}
+                    input={<OutlinedInput label={t('procurementAssignments.selectProjectItems')} />}
+                    renderValue={(selected) =>
+                      selected.map((id) => itemLabelById[id] || `#${id}`).join(', ')
+                    }
+                  >
+                    {createDialogItems.map((item) => (
+                      <MenuItem key={item.id} value={item.id}>
+                        <ListItemText primary={`${item.item_code} — ${item.item_name}`} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </>
+            )}
+            {createScope === 'project' && (
+              <Alert severity="info">
+                {t('procurementAssignments.projectLevelAssignmentFutureFinalizedHint')}
+              </Alert>
             )}
             <ProcurementAssigneePicker
               value={assigneeIds}

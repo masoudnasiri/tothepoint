@@ -14,6 +14,8 @@ describe('procurement assignment workbench UX (5E-R2)', () => {
     path.join(__dirname, '../components/procurement/ProcurementAssignmentItemView.tsx'),
     'utf8'
   );
+  const enSource = fs.readFileSync(path.join(__dirname, '../i18n/en.json'), 'utf8');
+  const faSource = fs.readFileSync(path.join(__dirname, '../i18n/fa.json'), 'utf8');
   const projectItemsSource = fs.readFileSync(
     path.join(__dirname, 'ProjectItemsPage.tsx'),
     'utf8'
@@ -32,6 +34,7 @@ describe('procurement assignment workbench UX (5E-R2)', () => {
     expect(managementSource).toContain('viewByProject');
     expect(managementSource).toContain('viewByItem');
     expect(managementSource).toContain('finalizationHint');
+    expect(managementSource).toContain('finalizedOnlyItemAssignmentHint');
     expect(managementSource).toContain('ProcurementAssignmentProjectView');
     expect(managementSource).toContain('ProcurementAssignmentItemView');
   });
@@ -52,8 +55,10 @@ describe('procurement assignment workbench UX (5E-R2)', () => {
     expect(managementSource).toContain('bulkCreate');
     expect(managementSource).toContain('getAssignableProjectItemIds');
     expect(managementSource).toContain('noAssignableItemsSelected');
-    expect(projectViewSource).toContain('assignAllProjectItems');
+    expect(projectViewSource).toContain('assignAllFinalizedProjectItems');
     expect(projectViewSource).toContain('projectLevelPartialRemovalHint');
+    expect(projectViewSource).toContain('noFinalizedItemsForItemAssignment');
+    expect(managementSource).toContain('is_finalized: true');
   });
 
   it('supports project-level and item-level assignment removal selection', () => {
@@ -66,5 +71,18 @@ describe('procurement assignment workbench UX (5E-R2)', () => {
   it('keeps project items as summary-only surface', () => {
     expect(projectItemsSource).toContain('ProjectAssignmentSummaryPanel');
     expect(projectItemsSource).not.toContain('ProcurementAssignmentManagementPanel');
+  });
+
+  it('uses finalized-only assignment wording in both locales', () => {
+    expect(enSource).toContain('Assign all finalized project items');
+    expect(enSource).toContain(
+      'Only finalized project items are available for item-level procurement assignment.'
+    );
+    expect(enSource).toContain('No finalized items are available for item-level assignment yet.');
+    expect(faSource).toContain('تخصیص همه اقلام نهایی‌شده پروژه');
+    expect(faSource).toContain(
+      'فقط اقلام نهایی‌شده پروژه برای تخصیص آیتمی تأمین نمایش داده می‌شوند.'
+    );
+    expect(faSource).toContain('هنوز هیچ قلم نهایی‌شده‌ای برای تخصیص آیتمی وجود ندارد.');
   });
 });

@@ -38,6 +38,7 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [visibleAssignedItemIds, setVisibleAssignedItemIds] = useState<Set<number>>(new Set());
   const [assignedItemsProjectId, setAssignedItemsProjectId] = useState<number | null>(null);
   const [assignedItemsProjectLabel, setAssignedItemsProjectLabel] = useState('');
 
@@ -45,14 +46,23 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
     if (!user?.id || !canViewProcurementAssignments(user)) return;
     try {
       setLoading(true);
-      const response = await procurementAssignmentsAPI.list({
-        assignee_user_id: user.id,
-        status: showHistory ? undefined : 'active',
-      });
-      setAssignments(response.data || []);
+      const [assignmentResponse, assignedItemsResponse] = await Promise.all([
+        procurementAssignmentsAPI.list({
+          assignee_user_id: user.id,
+          status: showHistory ? undefined : 'active',
+        }),
+        procurementAssignmentsAPI.listMyAssignedItems({
+          status: showHistory ? undefined : 'active',
+        }),
+      ]);
+      setAssignments(assignmentResponse.data || []);
+      setVisibleAssignedItemIds(
+        new Set((assignedItemsResponse.data || []).map((row: { project_item_id: number }) => row.project_item_id))
+      );
       setError('');
     } catch (err: unknown) {
       setError(formatApiError(err, t('procurementAssignments.failedToLoad')));
+      setVisibleAssignedItemIds(new Set());
     } finally {
       setLoading(false);
     }
@@ -85,12 +95,12 @@ export const MyProcurementAssignmentsPanel: React.FC = () => {
       }
       if (a.assignment_scope === 'project') {
         byProject[a.project_id].project.push(a);
-      } else {
+      } else if (a.project_item_id != null && visibleAssignedItemIds.has(a.project_item_id)) {
         byProject[a.project_id].items.push(a);
       }
     });
     return byProject;
-  }, [assignments]);
+  }, [assignments, visibleAssignedItemIds]);
 
   if (!canViewProcurementAssignments(user)) {
     return null;

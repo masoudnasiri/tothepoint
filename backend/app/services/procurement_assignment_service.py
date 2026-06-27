@@ -52,7 +52,11 @@ async def _ensure_active_user(db: AsyncSession, user_id: int, label: str = "User
 
 
 async def _ensure_project_item_belongs(
-    db: AsyncSession, project_id: int, project_item_id: int
+    db: AsyncSession,
+    project_id: int,
+    project_item_id: int,
+    *,
+    require_finalized: bool = False,
 ) -> ProjectItem:
     result = await db.execute(
         select(ProjectItem).where(
@@ -65,6 +69,11 @@ async def _ensure_project_item_belongs(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Project item not found or does not belong to project",
+        )
+    if require_finalized and not bool(item.is_finalized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only finalized project items can be assigned at item level",
         )
     return item
 
@@ -213,7 +222,12 @@ async def create_procurement_assignment(
         scope = "project"
         project_item_id = None
     else:
-        await _ensure_project_item_belongs(db, payload.project_id, payload.project_item_id)
+        await _ensure_project_item_belongs(
+            db,
+            payload.project_id,
+            payload.project_item_id,
+            require_finalized=True,
+        )
         scope = "project_item"
         project_item_id = payload.project_item_id
 
@@ -290,7 +304,12 @@ async def bulk_create_procurement_assignments(
     targets: Sequence[tuple[str, Optional[int]]]
     if item_ids:
         for item_id in item_ids:
-            await _ensure_project_item_belongs(db, payload.project_id, item_id)
+            await _ensure_project_item_belongs(
+                db,
+                payload.project_id,
+                item_id,
+                require_finalized=True,
+            )
         targets = [("project_item", item_id) for item_id in item_ids]
     else:
         targets = [("project", None)]

@@ -56,7 +56,13 @@ async def _create_project(db_session) -> Project:
     return project
 
 
-async def _create_project_item(db_session, project: Project, code: str = "PA-FIX-ITEM") -> ProjectItem:
+async def _create_project_item(
+    db_session,
+    project: Project,
+    code: str = "PA-FIX-ITEM",
+    *,
+    is_finalized: bool = True,
+) -> ProjectItem:
     item = ProjectItem(
         project_id=project.id,
         item_code=code,
@@ -69,6 +75,7 @@ async def _create_project_item(db_session, project: Project, code: str = "PA-FIX
         expected_cash_in_date=None,
         actual_cash_in_date=None,
         description="Procurement-safe description",
+        is_finalized=is_finalized,
     )
     db_session.add(item)
     await db_session.commit()
@@ -263,8 +270,8 @@ async def test_project_level_assignment_expands_to_all_items(db_session, overrid
         admin,
     )
     project = await _create_project(db_session)
-    await _create_project_item(db_session, project, "ITEM-A")
-    await _create_project_item(db_session, project, "ITEM-B")
+    await _create_project_item(db_session, project, "ITEM-A", is_finalized=True)
+    await _create_project_item(db_session, project, "ITEM-B", is_finalized=False)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -283,5 +290,57 @@ async def test_project_level_assignment_expands_to_all_items(db_session, overrid
                 headers=_auth_header(assignee),
             )
         ).json()
-        assert len(rows) == 2
+        assert len(rows) == 1
         assert all(row["covered_by_project_assignment"] for row in rows)
+        assert rows[0]["is_finalized"] is True
+
+
+@pytest.mark.asyncio
+async def test_project_level_assignment_shows_newly_finalized_items(db_session, override_db):
+    admin = await _create_user(db_session, "fix_admin6", "admin")
+    assignee = await _create_user(db_session, "fix_proc_user7", "procurement")
+    await _assign_role_with_permissions(
+        db_session,
+        assignee,
+        "proc_view_only_fix6",
+        {"procurement.assignments.view"},
+        admin,
+    )
+    project = await _create_project(db_session)
+    await _create_project_item(db_session, project, "ITEM-C", is_finalized=True)
+    later_finalized = await _create_project_item(
+        db_session, project, "ITEM-D", is_finalized=False
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        create_resp = await client.post(
+            "/procurement-assignments",
+            headers=_auth_header(admin),
+            json={
+                "project_id": project.id,
+                "assignee_user_id": assignee.id,
+                "note": "Whole project",
+            },
+        )
+        assert create_resp.status_code == 201
+
+        first_rows = (
+            await client.get(
+                "/procurement-assignments/my-assigned-items",
+                headers=_auth_header(assignee),
+            )
+        ).json()
+        assert len(first_rows) == 1
+
+        later_finalized.is_finalized = True
+        await db_session.commit()
+
+        second_rows = (
+            await client.get(
+                "/procurement-assignments/my-assigned-items",
+                headers=_auth_header(assignee),
+            )
+        ).json()
+        assert len(second_rows) == 2
+        assert all(row["is_finalized"] for row in second_rows)

@@ -119,7 +119,10 @@ async def list_assigned_item_summaries(
     projects_needing_all_items: Set[int] = set(project_level_by_project.keys())
     if projects_needing_all_items:
         all_items_result = await db.execute(
-            select(ProjectItem).where(ProjectItem.project_id.in_(projects_needing_all_items))
+            select(ProjectItem).where(
+                ProjectItem.project_id.in_(projects_needing_all_items),
+                ProjectItem.is_finalized == True,  # noqa: E712
+            )
         )
         for item in all_items_result.scalars().all():
             item_ids_needed.add(item.id)
@@ -127,7 +130,12 @@ async def list_assigned_item_summaries(
     if not item_ids_needed:
         return []
 
-    items_result = await db.execute(select(ProjectItem).where(ProjectItem.id.in_(item_ids_needed)))
+    items_result = await db.execute(
+        select(ProjectItem).where(
+            ProjectItem.id.in_(item_ids_needed),
+            ProjectItem.is_finalized == True,  # noqa: E712
+        )
+    )
     items_by_id = {item.id: item for item in items_result.scalars().all()}
 
     summaries: List[ProcurementAssignedItemSummary] = []

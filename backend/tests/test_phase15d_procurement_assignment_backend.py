@@ -68,14 +68,21 @@ async def _create_project(db_session) -> Project:
     return project
 
 
-async def _create_project_item(db_session, project: Project) -> ProjectItem:
+async def _create_project_item(
+    db_session,
+    project: Project,
+    *,
+    code: str = "PA-ITEM-001",
+    is_finalized: bool = True,
+) -> ProjectItem:
     item = ProjectItem(
         project_id=project.id,
-        item_code="PA-ITEM-001",
+        item_code=code,
         item_name="Assignment Item",
         quantity=1,
         delivery_options=[],
         status="PENDING",
+        is_finalized=is_finalized,
     )
     db_session.add(item)
     await db_session.commit()
@@ -202,6 +209,29 @@ async def test_create_project_and_item_level_assignments(db_session, override_db
 
 
 @pytest.mark.asyncio
+async def test_project_level_assignment_allowed_with_no_finalized_items(db_session, override_db):
+    admin = await _create_user(db_session, "pa_project_only_admin", "admin")
+    assignee = await _create_user(db_session, "pa_project_only_proc", "procurement")
+    project = await _create_project(db_session)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/procurement-assignments",
+            headers=_auth_header(admin),
+            json={
+                "project_id": project.id,
+                "assignee_user_id": assignee.id,
+                "note": "Project-level assignment before item finalization",
+            },
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["assignment_scope"] == "project"
+        assert body["project_item_id"] is None
+
+
+@pytest.mark.asyncio
 async def test_bulk_assignment_and_duplicate_blocked(db_session, override_db):
     admin = await _create_user(db_session, "pa_bulk_admin", "admin")
     u1 = await _create_user(db_session, "pa_bulk_u1", "procurement")
@@ -235,6 +265,62 @@ async def test_bulk_assignment_and_duplicate_blocked(db_session, override_db):
             },
         )
         assert dup.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_item_level_assignment_rejects_non_finalized_item(db_session, override_db):
+    admin = await _create_user(db_session, "pa_nonfinal_admin", "admin")
+    assignee = await _create_user(db_session, "pa_nonfinal_proc", "procurement")
+    project = await _create_project(db_session)
+    non_finalized_item = await _create_project_item(
+        db_session, project, code="PA-ITEM-NONFINAL", is_finalized=False
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/procurement-assignments",
+            headers=_auth_header(admin),
+            json={
+                "project_id": project.id,
+                "project_item_id": non_finalized_item.id,
+                "assignee_user_id": assignee.id,
+            },
+        )
+        assert resp.status_code == 400
+        assert "Only finalized project items" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_bulk_item_assignment_rejects_non_finalized_item(db_session, override_db):
+    admin = await _create_user(db_session, "pa_bulk_nonfinal_admin", "admin")
+    assignee = await _create_user(db_session, "pa_bulk_nonfinal_proc", "procurement")
+    project = await _create_project(db_session)
+    finalized_item = await _create_project_item(
+        db_session, project, code="PA-ITEM-FINAL", is_finalized=True
+    )
+    non_finalized_item = await _create_project_item(
+        db_session, project, code="PA-ITEM-NONFINAL-BULK", is_finalized=False
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/procurement-assignments/bulk",
+            headers=_auth_header(admin),
+            json={
+                "project_id": project.id,
+                "assignee_user_ids": [assignee.id],
+                "project_item_ids": [finalized_item.id, non_finalized_item.id],
+            },
+        )
+        assert resp.status_code == 400
+        assert "Only finalized project items" in resp.text
+
+    created_rows = await db_session.execute(
+        select(ProcurementAssignment).where(ProcurementAssignment.project_id == project.id)
+    )
+    assert created_rows.scalars().all() == []
 
 
 @pytest.mark.asyncio
