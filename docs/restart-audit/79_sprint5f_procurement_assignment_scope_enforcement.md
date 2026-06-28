@@ -204,7 +204,7 @@ Sensitive finance/cash-in/payment fields are omitted for assigned-only users.
 - Official target path: `/opt/rivar-demo`
 - Deployed marker updated on server:
   - `branch=restart/sprint5f-procurement-assignment-scope-enforcement`
-  - `commit=c1e90b2c32035055e98bba90d0312fa8c98d353e`
+  - `commit=8d67efee3143950b8edd410dbd1415103a3aecbe`
   - `sprint=5F`
 - `verify.sh`: `PASS`
   - frontend route checks passed
@@ -233,5 +233,9 @@ Sensitive finance/cash-in/payment fields are omitted for assigned-only users.
 
 ## Git provenance
 
-- Commit hash: `c1e90b2c32035055e98bba90d0312fa8c98d353e`
+- Commit hash: `8d67efee3143950b8edd410dbd1415103a3aecbe`
 - Pushed branch: `restart/sprint5f-procurement-assignment-scope-enforcement`
+
+## Closure note
+
+- Final closure polish for table display/readability and repository hygiene is tracked in `80_sprint5f_fix_assignment_table_display_closure.md` (Sprint `5F-Fix`).

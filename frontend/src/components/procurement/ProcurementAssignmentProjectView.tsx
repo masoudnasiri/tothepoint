@@ -15,6 +15,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
@@ -82,7 +83,8 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
   onRemoveAssignment,
   formatDate,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const isFa = i18n.language?.startsWith('fa');
   const projectIds = Array.from(new Set(assignments.map((a) => a.project_id))).sort((a, b) => a - b);
   const finalizedProjectItems = projectItems.filter((item) => Boolean(item.is_finalized));
 
@@ -104,21 +106,21 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
         ];
 
         return (
-          <Paper key={projectId} variant="outlined" sx={{ overflow: 'hidden' }}>
+          <Paper key={projectId} variant="outlined" sx={{ overflow: 'hidden', borderRadius: 2 }}>
             <Box
               display="flex"
               alignItems="center"
               justifyContent="space-between"
               px={2}
-              py={1.5}
+              py={1}
               sx={{ cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
               onClick={() => onToggleProject(projectId)}
             >
               <Box>
-                <Typography variant="subtitle1" fontWeight={600}>
+                <Typography variant="subtitle2" fontWeight={700}>
                   {project ? `${project.project_code} — ${project.name}` : `#${projectId}`}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                <Typography variant="caption" color="text.secondary">
                   {t('procurementAssignments.assignmentCoverage')}:{' '}
                   {t('procurementAssignments.activeAssignmentCount', { count: summary.activeCount })}
                   {' · '}
@@ -128,7 +130,7 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                   {summary.projectLevelAssignments.some((a) => a.status === 'active') &&
                     ` · ${t('procurementAssignments.projectLevelResponsibility')}`}
                 </Typography>
-                <Box mt={0.5} display="flex" flexWrap="wrap" gap={0.5}>
+                <Box mt={0.5} display="flex" flexWrap="wrap" gap={0.5} justifyContent={isFa ? 'flex-end' : 'flex-start'}>
                   {summary.assigneeIds.map((id) => (
                     <Chip key={id} size="small" label={userLabel(id)} />
                   ))}
@@ -215,90 +217,122 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                     {t('procurementAssignments.noFinalizedItemsForItemAssignment')}
                   </Alert>
                 ) : (
-                  <TableContainer>
+                  <TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
                     <Table size="small">
                       <TableHead>
                         <TableRow>
                           {canCancel && (
                             <TableCell padding="checkbox">
-                              <Checkbox
-                                indeterminate={
-                                  selectableIds.length > 0 &&
-                                  selectableIds.some((id) => !selectedAssignmentIds.includes(id)) &&
-                                  selectableIds.some((id) => selectedAssignmentIds.includes(id))
-                                }
-                                checked={
-                                  selectableIds.length > 0 &&
-                                  selectableIds.every((id) => selectedAssignmentIds.includes(id))
-                                }
-                                onChange={(e) => {
-                                  onSelectAllVisibleAssignments(e.target.checked ? selectableIds : []);
-                                }}
-                              />
+                              <Tooltip title={t('procurementAssignments.removeSelectedAssignments')}>
+                                <Checkbox
+                                  indeterminate={
+                                    selectableIds.length > 0 &&
+                                    selectableIds.some((id) => !selectedAssignmentIds.includes(id)) &&
+                                    selectableIds.some((id) => selectedAssignmentIds.includes(id))
+                                  }
+                                  checked={
+                                    selectableIds.length > 0 &&
+                                    selectableIds.every((id) => selectedAssignmentIds.includes(id))
+                                  }
+                                  inputProps={{
+                                    'aria-label': t('procurementAssignments.removeSelectedAssignments'),
+                                  }}
+                                  onChange={(e) => {
+                                    onSelectAllVisibleAssignments(e.target.checked ? selectableIds : []);
+                                  }}
+                                />
+                              </Tooltip>
                             </TableCell>
                           )}
-                          {canCreate && <TableCell padding="checkbox">{t('procurementAssignments.assign')}</TableCell>}
-                          <TableCell>{t('procurementAssignments.item')}</TableCell>
-                          <TableCell>{t('procurementAssignments.assignedProcurementUsers')}</TableCell>
-                          <TableCell>{t('procurementAssignments.assignmentStatus')}</TableCell>
+                          {canCreate && (
+                            <TableCell padding="checkbox" sx={{ whiteSpace: 'nowrap', textAlign: isFa ? 'right' : 'left' }}>
+                              {t('procurementAssignments.assign')}
+                            </TableCell>
+                          )}
+                          <TableCell sx={{ whiteSpace: 'nowrap', textAlign: isFa ? 'right' : 'left' }}>
+                            {t('procurementAssignments.item')}
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 220, textAlign: isFa ? 'right' : 'left' }}>
+                            {t('procurementAssignments.assignedProcurementUsers')}
+                          </TableCell>
+                          <TableCell sx={{ whiteSpace: 'nowrap', textAlign: isFa ? 'right' : 'left' }}>
+                            {t('procurementAssignments.assignmentStatus')}
+                          </TableCell>
+                          {canCancel && (
+                            <TableCell sx={{ whiteSpace: 'nowrap', textAlign: isFa ? 'right' : 'left' }}>
+                              {t('procurement.actions')}
+                            </TableCell>
+                          )}
                         </TableRow>
                       </TableHead>
                       <TableBody>
                         {finalizedProjectItems.map((item) => {
                           const itemAssignments = assignmentsForProjectItem(assignments, item.id);
-                          const activeAssignments = itemAssignments.filter(isSelectableForRemoval);
+                          const removableAssignments = itemAssignments.filter(isSelectableForRemoval);
                           const assignableForAssignment = getAssignableProjectItemIds(
                             projectId,
                             [item.id],
                             assignments
                           ).includes(item.id);
                           const allSelected =
-                            activeAssignments.length > 0 &&
-                            activeAssignments.every((a) => selectedAssignmentIds.includes(a.id));
+                            removableAssignments.length > 0 &&
+                            removableAssignments.every((a) => selectedAssignmentIds.includes(a.id));
 
                           return (
                             <TableRow key={item.id}>
                               {canCancel && (
                                 <TableCell padding="checkbox">
-                                  {activeAssignments.length > 0 && (
-                                    <Checkbox
-                                      checked={allSelected}
-                                      indeterminate={
-                                        activeAssignments.some((a) =>
-                                          selectedAssignmentIds.includes(a.id)
-                                        ) && !allSelected
-                                      }
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          onSelectAllVisibleAssignments([
-                                            ...new Set([
-                                              ...selectedAssignmentIds,
-                                              ...activeAssignments.map((a) => a.id),
-                                            ]),
-                                          ]);
-                                        } else {
-                                          onSelectAllVisibleAssignments(
-                                            selectedAssignmentIds.filter(
-                                              (id) => !activeAssignments.some((a) => a.id === id)
-                                            )
-                                          );
+                                  {removableAssignments.length > 0 && (
+                                    <Tooltip title={t('procurementAssignments.removeAssignment')}>
+                                      <Checkbox
+                                        checked={allSelected}
+                                        indeterminate={
+                                          removableAssignments.some((a) =>
+                                            selectedAssignmentIds.includes(a.id)
+                                          ) && !allSelected
                                         }
-                                      }}
-                                    />
+                                        inputProps={{
+                                          'aria-label': t('procurementAssignments.removeAssignment'),
+                                        }}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            onSelectAllVisibleAssignments([
+                                              ...new Set([
+                                                ...selectedAssignmentIds,
+                                                ...removableAssignments.map((a) => a.id),
+                                              ]),
+                                            ]);
+                                          } else {
+                                            onSelectAllVisibleAssignments(
+                                              selectedAssignmentIds.filter(
+                                                (id) => !removableAssignments.some((a) => a.id === id)
+                                              )
+                                            );
+                                          }
+                                        }}
+                                      />
+                                    </Tooltip>
                                   )}
                                 </TableCell>
                               )}
                               {canCreate && (
                                 <TableCell padding="checkbox">
-                                  <Checkbox
-                                    checked={selectedItemIdsForAssign.includes(item.id)}
-                                    disabled={!assignableForAssignment}
-                                    onChange={() => onToggleItemForAssign(item.id)}
-                                  />
+                                  <Tooltip title={t('procurementAssignments.assignSelectedItems')}>
+                                    <Checkbox
+                                      checked={selectedItemIdsForAssign.includes(item.id)}
+                                      disabled={!assignableForAssignment}
+                                      inputProps={{
+                                        'aria-label': t('procurementAssignments.assignSelectedItems'),
+                                      }}
+                                      onChange={() => onToggleItemForAssign(item.id)}
+                                    />
+                                  </Tooltip>
                                 </TableCell>
                               )}
-                              <TableCell>{`${item.item_code} — ${item.item_name}`}</TableCell>
-                              <TableCell>
+                              <TableCell sx={{ fontSize: 13, textAlign: isFa ? 'right' : 'left' }}>
+                                {`${item.item_code} — ${item.item_name}`}
+                              </TableCell>
+                              <TableCell sx={{ textAlign: isFa ? 'right' : 'left', verticalAlign: 'top' }}>
                                 {itemAssignments.length === 0 ? (
                                   <Typography variant="body2" color="text.secondary">
                                     {t('procurementAssignments.unassignedItem')}
@@ -312,33 +346,58 @@ export const ProcurementAssignmentProjectView: React.FC<ProcurementAssignmentPro
                                         alignItems="center"
                                         gap={0.5}
                                         flexWrap="wrap"
+                                        justifyContent={isFa ? 'flex-end' : 'flex-start'}
                                       >
                                         <Chip
                                           size="small"
                                           label={userLabel(assignment.assignee_user_id)}
                                           color={assignment.status === 'active' ? 'primary' : 'default'}
+                                          sx={{ maxWidth: 220 }}
                                         />
-                                        {canCancel && isSelectableForRemoval(assignment) && (
-                                          <Button
-                                            size="small"
-                                            color="warning"
-                                            onClick={() => onRemoveAssignment(assignment)}
-                                          >
-                                            {t('procurementAssignments.removeAssignment')}
-                                          </Button>
-                                        )}
                                       </Box>
                                     ))}
                                   </Box>
                                 )}
                               </TableCell>
-                              <TableCell>
+                              <TableCell sx={{ textAlign: isFa ? 'right' : 'left', verticalAlign: 'top' }}>
                                 {itemAssignments.length === 0
                                   ? '—'
-                                  : itemAssignments
-                                      .map((a) => t(statusLabelKey(a.status)))
-                                      .join(', ')}
+                                  : (
+                                    <Box display="flex" flexDirection="column" gap={0.5}>
+                                      {itemAssignments.map((assignment) => (
+                                        <Chip
+                                          key={`status-${assignment.id}`}
+                                          size="small"
+                                          label={t(statusLabelKey(assignment.status))}
+                                          color={assignment.status === 'active' ? 'success' : 'default'}
+                                          sx={{ alignSelf: isFa ? 'flex-end' : 'flex-start' }}
+                                        />
+                                      ))}
+                                    </Box>
+                                  )}
                               </TableCell>
+                              {canCancel && (
+                                <TableCell sx={{ textAlign: isFa ? 'right' : 'left', verticalAlign: 'top' }}>
+                                  {removableAssignments.length === 0 ? (
+                                    '—'
+                                  ) : (
+                                    <Box display="flex" flexDirection="column" gap={0.5}>
+                                      {removableAssignments.map((assignment) => (
+                                        <Button
+                                          key={`remove-${assignment.id}`}
+                                          size="small"
+                                          color="warning"
+                                          variant="text"
+                                          onClick={() => onRemoveAssignment(assignment)}
+                                          sx={{ alignSelf: isFa ? 'flex-end' : 'flex-start' }}
+                                        >
+                                          {t('procurementAssignments.removeAssignment')}
+                                        </Button>
+                                      ))}
+                                    </Box>
+                                  )}
+                                </TableCell>
+                              )}
                             </TableRow>
                           );
                         })}

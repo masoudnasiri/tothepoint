@@ -68,6 +68,23 @@ describe('procurement assignment workbench UX (5E-R2)', () => {
     expect(itemViewSource).toContain('isSelectableForRemoval(row)');
   });
 
+  it('keeps assignees, status, and remove action in separate table columns', () => {
+    expect(projectViewSource).toContain("t('procurementAssignments.assignedProcurementUsers')");
+    expect(projectViewSource).toContain("t('procurementAssignments.assignmentStatus')");
+    expect(projectViewSource).toContain("t('procurement.actions')");
+    expect(projectViewSource).toContain("key={`remove-${assignment.id}`}");
+
+    const assigneeColumnBlock = projectViewSource.match(
+      /<TableCell sx=\{\{ textAlign: isFa \? 'right' : 'left', verticalAlign: 'top' \}\}>[\s\S]*?itemAssignments\.map\(\(assignment\) => \([\s\S]*?<\/TableCell>/
+    );
+    expect(assigneeColumnBlock?.[0]).toBeTruthy();
+    expect(assigneeColumnBlock?.[0]).not.toContain('onRemoveAssignment');
+
+    expect(itemViewSource).toContain("t('procurement.actions')");
+    expect(itemViewSource).toContain("t('procurementAssignments.assignedUser')");
+    expect(itemViewSource).toContain("t('procurementAssignments.assignmentStatus')");
+  });
+
   it('keeps project items as summary-only surface', () => {
     expect(projectItemsSource).toContain('ProjectAssignmentSummaryPanel');
     expect(projectItemsSource).not.toContain('ProcurementAssignmentManagementPanel');

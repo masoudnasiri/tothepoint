@@ -8,6 +8,7 @@ import {
   DialogContent,
   DialogTitle,
   FormControl,
+  Paper,
   InputLabel,
   ListItemText,
   MenuItem,
@@ -66,6 +67,7 @@ export const ProcurementAssignmentManagementPanel: React.FC<
   ProcurementAssignmentManagementPanelProps
 > = ({ initialProjectId = null }) => {
   const { t, i18n } = useTranslation();
+  const isFa = i18n.language?.startsWith('fa');
   const { user } = useAuth();
   const [assignments, setAssignments] = useState<ProcurementAssignment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -510,100 +512,126 @@ export const ProcurementAssignmentManagementPanel: React.FC<
         size="small"
         value={viewMode}
         onChange={(_, value: WorkbenchViewMode | null) => value && setViewMode(value)}
-        sx={{ mb: 2 }}
+        sx={{ mb: 2, alignSelf: isFa ? 'flex-end' : 'flex-start' }}
       >
         <ToggleButton value="project">{t('procurementAssignments.viewByProject')}</ToggleButton>
         <ToggleButton value="item">{t('procurementAssignments.viewByItem')}</ToggleButton>
       </ToggleButtonGroup>
 
-      <Box display="flex" gap={1} flexWrap="wrap" mb={2}>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>{t('procurementAssignments.selectProject')}</InputLabel>
-          <Select
-            value={projectFilter}
-            label={t('procurementAssignments.selectProject')}
-            onChange={(e) => {
-              setProjectFilter(e.target.value === '' ? '' : Number(e.target.value));
-              clearSelection();
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: 2 }}>
+        <Box
+          display="grid"
+          gap={1}
+          sx={{
+            gridTemplateColumns: {
+              xs: '1fr',
+              sm: 'repeat(2, minmax(0, 1fr))',
+              lg: 'repeat(4, minmax(0, 1fr))',
+            },
+          }}
+        >
+          <FormControl
+            size="small"
+            fullWidth
+            sx={{
+              '& .MuiSelect-select, & .MuiInputBase-input': { textAlign: isFa ? 'right' : 'left' },
             }}
           >
-            <MenuItem value="">{t('procurementAssignments.allProjects')}</MenuItem>
-            {projects.map((project) => (
-              <MenuItem key={project.id} value={project.id}>
-                {project.project_code} — {project.name}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel>{t('procurementAssignments.statusFilter')}</InputLabel>
-          <Select
-            value={statusFilter}
-            label={t('procurementAssignments.statusFilter')}
-            onChange={(e) => {
-              setStatusFilter(e.target.value as StatusFilter);
-              clearSelection();
+            <InputLabel>{t('procurementAssignments.selectProject')}</InputLabel>
+            <Select
+              value={projectFilter}
+              label={t('procurementAssignments.selectProject')}
+              onChange={(e) => {
+                setProjectFilter(e.target.value === '' ? '' : Number(e.target.value));
+                clearSelection();
+              }}
+            >
+              <MenuItem value="">{t('procurementAssignments.allProjects')}</MenuItem>
+              {projects.map((project) => (
+                <MenuItem key={project.id} value={project.id}>
+                  {project.project_code} — {project.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl
+            size="small"
+            fullWidth
+            sx={{
+              '& .MuiSelect-select, & .MuiInputBase-input': { textAlign: isFa ? 'right' : 'left' },
             }}
           >
-            <MenuItem value="active">{t('procurementAssignments.statusActive')}</MenuItem>
-            <MenuItem value="completed">{t('procurementAssignments.statusCompleted')}</MenuItem>
-            <MenuItem value="cancelled">{t('procurementAssignments.statusCancelled')}</MenuItem>
-            <MenuItem value="all">{t('procurementAssignments.assignmentHistory')}</MenuItem>
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 180 }}>
-          <InputLabel>{t('procurementAssignments.assignedUser')}</InputLabel>
-          <Select
-            value={assigneeFilter}
-            label={t('procurementAssignments.assignedUser')}
-            onChange={(e) => {
-              setAssigneeFilter(e.target.value === '' ? '' : Number(e.target.value));
-              clearSelection();
+            <InputLabel>{t('procurementAssignments.statusFilter')}</InputLabel>
+            <Select
+              value={statusFilter}
+              label={t('procurementAssignments.statusFilter')}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as StatusFilter);
+                clearSelection();
+              }}
+            >
+              <MenuItem value="active">{t('procurementAssignments.statusActive')}</MenuItem>
+              <MenuItem value="completed">{t('procurementAssignments.statusCompleted')}</MenuItem>
+              <MenuItem value="cancelled">{t('procurementAssignments.statusCancelled')}</MenuItem>
+              <MenuItem value="all">{t('procurementAssignments.assignmentHistory')}</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl
+            size="small"
+            fullWidth
+            sx={{
+              '& .MuiSelect-select, & .MuiInputBase-input': { textAlign: isFa ? 'right' : 'left' },
             }}
           >
-            <MenuItem value="">{t('procurementAssignments.allAssignees')}</MenuItem>
-            {assigneeOptions.map((assignee) => (
-              <MenuItem key={assignee.id} value={assignee.id}>
-                {assignee.username}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel>{t('procurementAssignments.assignmentScope')}</InputLabel>
-          <Select
-            value={scopeFilter}
-            label={t('procurementAssignments.assignmentScope')}
-            onChange={(e) => {
-              setScopeFilter(
-                e.target.value === '' ? '' : (e.target.value as ProcurementAssignmentScope)
-              );
-              clearSelection();
+            <InputLabel>{t('procurementAssignments.assignedUser')}</InputLabel>
+            <Select
+              value={assigneeFilter}
+              label={t('procurementAssignments.assignedUser')}
+              onChange={(e) => {
+                setAssigneeFilter(e.target.value === '' ? '' : Number(e.target.value));
+                clearSelection();
+              }}
+            >
+              <MenuItem value="">{t('procurementAssignments.allAssignees')}</MenuItem>
+              {assigneeOptions.map((assignee) => (
+                <MenuItem key={assignee.id} value={assignee.id}>
+                  {assignee.username}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl
+            size="small"
+            fullWidth
+            sx={{
+              '& .MuiSelect-select, & .MuiInputBase-input': { textAlign: isFa ? 'right' : 'left' },
             }}
           >
-            <MenuItem value="">{t('procurementAssignments.allScopes')}</MenuItem>
-            <MenuItem value="project">{t('procurementAssignments.projectLevelResponsibility')}</MenuItem>
-            <MenuItem value="project_item">{t('procurementAssignments.itemAssignment')}</MenuItem>
-          </Select>
-        </FormControl>
-      </Box>
+            <InputLabel>{t('procurementAssignments.assignmentScope')}</InputLabel>
+            <Select
+              value={scopeFilter}
+              label={t('procurementAssignments.assignmentScope')}
+              onChange={(e) => {
+                setScopeFilter(
+                  e.target.value === '' ? '' : (e.target.value as ProcurementAssignmentScope)
+                );
+                clearSelection();
+              }}
+            >
+              <MenuItem value="">{t('procurementAssignments.allScopes')}</MenuItem>
+              <MenuItem value="project">{t('procurementAssignments.projectLevelResponsibility')}</MenuItem>
+              <MenuItem value="project_item">{t('procurementAssignments.itemAssignment')}</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
+      </Paper>
 
       {(selectedAssignableCount > 0 || (canCancel && selectedRemovableCount > 0)) && (
-        <Box display="flex" alignItems="center" gap={1} mb={2}>
-          {selectedAssignableCount > 0 && (
-            <Typography variant="body2">
-              {t('procurementAssignments.selectedAssignableItemsCount', {
-                count: selectedAssignableCount,
-              })}
-            </Typography>
-          )}
-          {canCancel && selectedRemovableCount > 0 && (
-            <>
-              <Typography variant="body2">
-                {t('procurementAssignments.selectedRemovableAssignmentsCount', {
-                  count: selectedRemovableCount,
-                })}
-              </Typography>
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            canCancel && selectedRemovableCount > 0 ? (
               <Button
                 size="small"
                 color="warning"
@@ -613,9 +641,24 @@ export const ProcurementAssignmentManagementPanel: React.FC<
               >
                 {t('procurementAssignments.removeSelectedAssignments')}
               </Button>
-            </>
+            ) : undefined
+          }
+        >
+          {selectedAssignableCount > 0 && (
+            <Typography variant="body2">
+              {t('procurementAssignments.selectedAssignableItemsCount', {
+                count: selectedAssignableCount,
+              })}
+            </Typography>
           )}
-        </Box>
+          {canCancel && selectedRemovableCount > 0 && (
+            <Typography variant="body2">
+              {t('procurementAssignments.selectedRemovableAssignmentsCount', {
+                count: selectedRemovableCount,
+              })}
+            </Typography>
+          )}
+        </Alert>
       )}
 
       {error && (
