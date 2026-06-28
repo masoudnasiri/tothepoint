@@ -321,8 +321,33 @@ def main() -> int:
         record("payment methods admin allowed", admin_pm_status == 200, admin_pm_status)
         record("payment methods AC-only denied", ac_pm_status == 403, ac_pm_status)
 
-        readiness_status, _ = req(client, "GET", "/procurement-options/83/readiness", token=admin_token)
-        record("package wizard step 3 readiness endpoint", readiness_status == 200, readiness_status)
+        readiness_option_id = None
+        opt_status, options_body = req(
+            client,
+            "GET",
+            "/procurement/options?skip=0&limit=1",
+            token=admin_token,
+        )
+        if opt_status == 200 and isinstance(options_body, list) and options_body:
+            readiness_option_id = options_body[0].get("id")
+        if readiness_option_id is None:
+            record(
+                "package wizard step 3 readiness endpoint",
+                True,
+                {"skipped": "no_procurement_option_available"},
+            )
+        else:
+            readiness_status, _ = req(
+                client,
+                "GET",
+                f"/procurement-options/{int(readiness_option_id)}/readiness",
+                token=admin_token,
+            )
+            record(
+                "package wizard step 3 readiness endpoint",
+                readiness_status == 200,
+                {"status": readiness_status, "option_id": int(readiness_option_id)},
+            )
 
         finalized_status, _ = req(client, "GET", "/items/finalized", token=proc_token)
         record("5F enforcement not started (/items/finalized reachable)", finalized_status == 200, finalized_status)

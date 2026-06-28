@@ -37,8 +37,35 @@ from app.services.package_combination_service import (
     compute_item_coverage_state,
     get_project_item_optimization_state,
 )
+from app.services.procurement_assignment_scope_service import (
+    resolve_procurement_scope_access,
+)
 
 router = APIRouter(prefix="/items", tags=["project-items"])
+
+SCOPED_FINALIZED_ITEM_ALLOWLIST = {
+    "id",
+    "project_id",
+    "master_item_id",
+    "item_code",
+    "item_name",
+    "quantity",
+    "delivery_options",
+    "status",
+    "external_purchase",
+    "description",
+    "is_finalized",
+    "created_at",
+    "updated_at",
+    "sub_items",
+    "coverage_state",
+    "coverage_percentage",
+    "optimization_state",
+    "is_sent_to_optimization",
+    "active_package_count",
+    "finalized_package_count",
+    "can_rollback_optimization_submission",
+}
 
 
 def _build_procurement_eligibility_http_detail(
@@ -254,20 +281,30 @@ async def list_finalized_items(
     from app.models import ProjectItem as ProjectItemModel, FinalizedDecision, ProcurementPackage
     from app.services.package_service import calculate_coverage_summary
     from app.services.package_service import get_package_finalization_status
-    
-    # Only procurement and admin users can see finalized items
-    if current_user.role not in ["procurement", "admin", "pmo", "pm"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied - procurement role required"
-        )
-    
-    # Get finalized items; optimization gating is handled via optimization_state metadata.
+
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.view",
+            "procurement.packages.view",
+            "project_items.view",
+        },
+    )
+
+    query = select(ProjectItemModel).where(
+        ProjectItemModel.is_finalized == True  # noqa: E712
+    )
+    if access.assigned_only_scope:
+        allowed_item_ids = access.active_scope.finalized_project_item_ids
+        if not allowed_item_ids:
+            return []
+        query = query.where(ProjectItemModel.id.in_(allowed_item_ids))
+
     result = await db.execute(
-        select(ProjectItemModel)
-        .where(
-            ProjectItemModel.is_finalized == True  # noqa: E712
-        )
+        query
         .offset(skip)
         .limit(limit)
         .order_by(ProjectItemModel.finalized_at.desc())
@@ -343,7 +380,7 @@ async def list_finalized_items(
             if required_main > 0:
                 coverage_pct = round((covered_main / required_main) * 100, 2)
 
-        serialized_items.append({
+        row = {
             "id": item.id,
             "project_id": item.project_id,
             "master_item_id": item.master_item_id,
@@ -378,7 +415,10 @@ async def list_finalized_items(
                 optimization_state_value == "sent_to_optimization"
                 and not has_blocking_decisions
             ),
-        })
+        }
+        if access.assigned_only_scope:
+            row = {k: v for k, v in row.items() if k in SCOPED_FINALIZED_ITEM_ALLOWLIST}
+        serialized_items.append(row)
     
     return serialized_items
 

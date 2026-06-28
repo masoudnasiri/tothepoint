@@ -45,8 +45,28 @@ from app.services.optimization_rollback_service import (
     build_bulk_rollback_preview,
     execute_bulk_rollback,
 )
+from app.services.procurement_assignment_scope_service import (
+    resolve_procurement_scope_access,
+)
 
 router = APIRouter(prefix="/packages", tags=["packages"])
+
+PACKAGE_VIEW_PERMISSIONS = {
+    "procurement.packages.view",
+    "procurement.options.view",
+    "procurement.view",
+    "procurement.assignments.view",
+}
+PACKAGE_MUTATION_PERMISSIONS = {
+    "procurement.packages.create",
+    "procurement.packages.edit",
+    "procurement.packages.delete",
+}
+PACKAGE_OPTIMIZATION_PERMISSIONS = {
+    "procurement.packages.edit",
+    "procurement.options.submit",
+    "procurement.edit",
+}
 
 
 async def _ensure_item_editable_for_packages(db: AsyncSession, project_item_id: int) -> None:
@@ -58,6 +78,26 @@ async def _ensure_item_editable_for_packages(db: AsyncSession, project_item_id: 
                 "Rollback is required before package changes."
             ),
         )
+
+
+async def _ensure_item_in_active_scope(
+    *,
+    db: AsyncSession,
+    current_user: User,
+    project_item_id: int,
+    required_permissions: set[str],
+) -> None:
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions=required_permissions,
+    )
+    if access.assigned_only_scope:
+        if int(project_item_id) not in access.active_scope.finalized_project_item_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Project item is outside your active procurement assignment scope",
+            )
 
 
 def _derive_package_status(
@@ -183,6 +223,17 @@ async def create_package(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project item not found"
         )
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=int(project_item.id),
+        required_permissions=PACKAGE_MUTATION_PERMISSIONS,
+    )
+    if not bool(project_item.is_finalized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Packages can only be created for finalized project items",
+        )
 
     await _ensure_item_editable_for_packages(db, project_item.id)
 
@@ -273,6 +324,12 @@ async def update_package(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement package not found"
         )
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=int(package.project_item_id),
+        required_permissions=PACKAGE_MUTATION_PERMISSIONS,
+    )
 
     await _ensure_item_editable_for_packages(db, package.project_item_id)
 
@@ -354,6 +411,12 @@ async def delete_package(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement package not found"
         )
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=int(package.project_item_id),
+        required_permissions=PACKAGE_MUTATION_PERMISSIONS,
+    )
 
     await _ensure_item_editable_for_packages(db, package.project_item_id)
 
@@ -377,6 +440,12 @@ async def list_packages_by_project_item(
     Includes supplier relationship for efficient data loading.
     """
     try:
+        await _ensure_item_in_active_scope(
+            db=db,
+            current_user=current_user,
+            project_item_id=project_item_id,
+            required_permissions=PACKAGE_VIEW_PERMISSIONS,
+        )
         query = select(ProcurementPackage).options(
             selectinload(ProcurementPackage.supplier),
             selectinload(ProcurementPackage.subitems)  # Load subitems for serialization
@@ -435,6 +504,12 @@ async def get_package(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement package not found"
         )
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=int(package.project_item_id),
+        required_permissions=PACKAGE_VIEW_PERMISSIONS,
+    )
     await _enrich_packages_runtime_state(db, [package])
     return package
 
@@ -458,6 +533,12 @@ async def create_package_subitem(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Package not found"
         )
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=int(package.project_item_id),
+        required_permissions=PACKAGE_MUTATION_PERMISSIONS,
+    )
     await _ensure_item_editable_for_packages(db, package.project_item_id)
 
     # Check for duplicate
@@ -524,6 +605,12 @@ async def update_package_subitem(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Package not found"
         )
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=int(package.project_item_id),
+        required_permissions=PACKAGE_MUTATION_PERMISSIONS,
+    )
     await _ensure_item_editable_for_packages(db, package.project_item_id)
 
     # Update fields
@@ -576,6 +663,12 @@ async def delete_package_subitem(
     )
     package = package_result.scalar_one_or_none()
     if package:
+        await _ensure_item_in_active_scope(
+            db=db,
+            current_user=current_user,
+            project_item_id=int(package.project_item_id),
+            required_permissions=PACKAGE_MUTATION_PERMISSIONS,
+        )
         await _ensure_item_editable_for_packages(db, package.project_item_id)
 
     await db.delete(subitem)
@@ -595,6 +688,12 @@ async def get_coverage_summary(
     Get coverage summary for a project item showing how much is covered by packages.
     """
     from app.services.package_service import calculate_coverage_summary
+    await _ensure_item_in_active_scope(
+        db=db,
+        current_user=current_user,
+        project_item_id=project_item_id,
+        required_permissions=PACKAGE_VIEW_PERMISSIONS,
+    )
     return await calculate_coverage_summary(db, project_item_id)
 
 
@@ -608,13 +707,19 @@ async def submit_packages_to_optimization(
     Submit finalized package combinations to optimization gate.
     Supports single item, multiple items, or all finalized items.
     """
-    if current_user.role not in ["procurement", "admin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only procurement/admin users can submit packages to optimization",
-        )
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions=PACKAGE_OPTIMIZATION_PERMISSIONS,
+    )
 
     target_item_ids = await _resolve_target_project_item_ids(db, request)
+    if access.assigned_only_scope:
+        scoped_ids = access.active_scope.finalized_project_item_ids
+        if request.send_all_finalized:
+            target_item_ids = sorted(scoped_ids)
+        else:
+            target_item_ids = [v for v in target_item_ids if int(v) in scoped_ids]
     if not target_item_ids:
         return {
             "submitted_items": [],
@@ -802,10 +907,15 @@ async def rollback_packages_from_optimization(
     """
     Roll back optimization submission lock for a project item (when safe).
     """
-    if current_user.role not in ["procurement", "admin"]:
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions=PACKAGE_OPTIMIZATION_PERMISSIONS,
+    )
+    if access.assigned_only_scope and int(project_item_id) not in access.active_scope.finalized_project_item_ids:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only procurement/admin users can rollback optimization submission",
+            detail="Project item is outside your active procurement assignment scope",
         )
 
     record = await rollback_project_item_optimization_submission(
@@ -845,10 +955,15 @@ async def preview_bulk_optimization_rollback(
     Preview rollback eligibility for sent-to-optimization items using checklist/range filters.
     This endpoint is read-only and does not mutate data.
     """
-    if current_user.role not in ["procurement", "admin"]:
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions=PACKAGE_OPTIMIZATION_PERMISSIONS,
+    )
+    if access.assigned_only_scope:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only procurement/admin users can preview optimization rollback",
+            detail="Bulk optimization rollback preview is not available for assigned-only procurement scope",
         )
 
     preview = await build_bulk_rollback_preview(
@@ -867,10 +982,15 @@ async def execute_bulk_optimization_rollback(
     """
     Execute controlled bulk rollback for safe sent-to-optimization items.
     """
-    if current_user.role not in ["procurement", "admin"]:
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions=PACKAGE_OPTIMIZATION_PERMISSIONS,
+    )
+    if access.assigned_only_scope:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only procurement/admin users can execute optimization rollback",
+            detail="Bulk optimization rollback is not available for assigned-only procurement scope",
         )
 
     result = await execute_bulk_rollback(

@@ -8,14 +8,25 @@ from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
-from app.auth import get_current_user, require_procurement
+from app.auth import get_current_user
 from app.crud import (
-    create_procurement_option, get_procurement_option, get_procurement_options,
-    update_procurement_option, delete_procurement_option, get_unique_item_codes, log_audit
+    create_procurement_option, get_procurement_option, update_procurement_option, delete_procurement_option, log_audit
 )
-from app.models import User, ProcurementOption as ProcurementOptionModel, ProcurementPackage
+from app.models import (
+    DeliveryOption,
+    FinalizedDecision,
+    ProcurementOption as ProcurementOptionModel,
+    ProcurementPackage,
+    ProjectItem,
+    User,
+)
 from app.schemas import ProcurementOption, ProcurementOptionCreate, ProcurementOptionUpdate, ProcurementOptionWithSupplier, SupplierSummary
 from app.services.package_service import get_project_item_sent_state
+from app.services.procurement_assignment_scope_service import (
+    filter_procurement_options_by_scope,
+    resolve_procurement_option_project_item_id,
+    resolve_procurement_scope_access,
+)
 
 router = APIRouter(prefix="/procurement", tags=["procurement"])
 
@@ -33,6 +44,33 @@ async def _resolve_option_project_item_id(db: AsyncSession, option_payload: Proc
     return None
 
 
+async def _ensure_item_is_finalized(db: AsyncSession, project_item_id: int) -> None:
+    item = await db.get(ProjectItem, project_item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project item not found",
+        )
+    if not bool(item.is_finalized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Procurement options require finalized project items",
+        )
+
+
+def _enforce_item_scope(
+    *,
+    allowed_project_item_ids: set[int],
+    project_item_id: Optional[int],
+    denied_detail: str,
+) -> None:
+    if project_item_id is None or int(project_item_id) not in allowed_project_item_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=denied_detail,
+        )
+
+
 @router.get("/item-codes", response_model=List[str])
 async def list_unique_item_codes(
     current_user: User = Depends(get_current_user),
@@ -44,32 +82,36 @@ async def list_unique_item_codes(
     Excludes items with LOCKED or PROPOSED finalized decisions.
     Includes items with REVERTED decisions (can add new options).
     """
-    from sqlalchemy import select
-    from app.models import ProjectItem, FinalizedDecision
-    
-    # Get all unique item codes
-    all_codes = await get_unique_item_codes(db)
-    
-    # Filter out items with LOCKED or PROPOSED decisions
-    available_codes = []
-    
-    for code in all_codes:
-        # Check if item has LOCKED or PROPOSED decisions
-        finalized_check = await db.execute(
-            select(FinalizedDecision)
-            .where(
-                FinalizedDecision.item_code == code,
-                FinalizedDecision.status.in_(['LOCKED', 'PROPOSED'])
-            )
-            .limit(1)
+    from sqlalchemy import and_, distinct
+
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.view",
+            "project_items.view",
+        },
+    )
+
+    blocking_decision_subquery = (
+        select(FinalizedDecision.project_item_id).where(
+            FinalizedDecision.status.in_(["LOCKED", "PROPOSED"])
         )
-        has_finalized = finalized_check.scalar_one_or_none() is not None
-        
-        # Only include if not finalized (LOCKED or PROPOSED)
-        if not has_finalized:
-            available_codes.append(code)
-    
-    return available_codes
+    )
+    query = select(distinct(ProjectItem.item_code)).where(
+        ProjectItem.is_finalized == True,  # noqa: E712
+        ProjectItem.id.notin_(blocking_decision_subquery),
+    )
+    if access.assigned_only_scope:
+        allowed_item_ids = access.active_scope.finalized_project_item_ids
+        if not allowed_item_ids:
+            return []
+        query = query.where(ProjectItem.id.in_(allowed_item_ids))
+
+    result = await db.execute(query.order_by(ProjectItem.item_code))
+    return [str(row[0]) for row in result.fetchall() if row[0]]
 
 
 @router.get("/items-with-details")
@@ -84,42 +126,59 @@ async def list_items_with_details(
     - Items from projects where the specific project_item has NO LOCKED or PROPOSED decision
     - Uses a single optimized SQL query instead of N+1 queries
     """
-    from sqlalchemy import select, distinct, and_, or_, func, case, text
-    from app.models import ProjectItem, FinalizedDecision
-    
-    # OPTIMIZED: Single SQL query using LEFT JOIN and aggregation
-    # Excludes items with LOCKED or PROPOSED finalized decisions
-    query = text("""
-        SELECT DISTINCT ON (pi.item_code)
-            pi.item_code,
-            pi.item_name,
-            pi.description,
-            pi.project_id,
-            pi.id as project_item_id
-        FROM project_items pi
-        LEFT JOIN finalized_decisions fd ON pi.id = fd.project_item_id AND fd.status IN ('LOCKED', 'PROPOSED')
-        WHERE fd.id IS NULL  -- Only items without LOCKED or PROPOSED decisions
-          AND pi.is_finalized = true  -- Only finalized project items
-        ORDER BY pi.item_code, 
-                 CASE WHEN pi.description IS NOT NULL AND pi.description != '' THEN 1 ELSE 2 END,
-                 pi.created_at DESC
-    """)
-    
-    result = await db.execute(query)
-    rows = result.fetchall()
-    
-    # Convert to list of dicts
-    available_items = []
-    for row in rows:
-        available_items.append({
-            "item_code": row.item_code,
-            "item_name": row.item_name or "",
-            "description": row.description or "",
-            "project_id": row.project_id,
-            "project_item_id": row.project_item_id
-        })
-    
-    return available_items
+    from sqlalchemy import and_
+
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.view",
+            "project_items.view",
+        },
+    )
+
+    blocking_decision_subquery = (
+        select(FinalizedDecision.project_item_id).where(
+            FinalizedDecision.status.in_(["LOCKED", "PROPOSED"])
+        )
+    )
+    query = (
+        select(ProjectItem)
+        .where(
+            ProjectItem.is_finalized == True,  # noqa: E712
+            ProjectItem.id.notin_(blocking_decision_subquery),
+        )
+        .order_by(ProjectItem.item_code, ProjectItem.created_at.desc())
+    )
+    if access.assigned_only_scope:
+        allowed_item_ids = access.active_scope.finalized_project_item_ids
+        if not allowed_item_ids:
+            return []
+        query = query.where(ProjectItem.id.in_(allowed_item_ids))
+
+    rows = (await db.execute(query)).scalars().all()
+    by_item_code: dict[str, ProjectItem] = {}
+    for item in rows:
+        code = item.item_code or ""
+        existing = by_item_code.get(code)
+        if existing is None:
+            by_item_code[code] = item
+            continue
+        if not existing.description and item.description:
+            by_item_code[code] = item
+
+    return [
+        {
+            "item_code": code,
+            "item_name": item.item_name or "",
+            "description": item.description or "",
+            "project_id": item.project_id,
+            "project_item_id": item.id,
+        }
+        for code, item in sorted(by_item_code.items(), key=lambda entry: entry[0])
+    ]
 
 
 @router.get("/suppliers", response_model=List[SupplierSummary])
@@ -129,6 +188,16 @@ async def list_suppliers_for_procurement(
 ):
     """Get list of active suppliers for procurement option creation"""
     import logging
+    await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.create",
+            "procurement.options.view",
+        },
+    )
     
     try:
         # --- START of original code ---
@@ -168,8 +237,34 @@ async def list_procurement_options(
     db: AsyncSession = Depends(get_db)
 ):
     """Get procurement options with optional filtering by item_code"""
-    options = await get_procurement_options(db, skip=skip, limit=limit, item_code=item_code)
-    return options
+    from sqlalchemy.orm import selectinload
+
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.view",
+        },
+    )
+    query = (
+        select(ProcurementOptionModel)
+        .where(ProcurementOptionModel.is_active == True)  # noqa: E712
+        .options(selectinload(ProcurementOptionModel.supplier))
+        .order_by(ProcurementOptionModel.created_at.desc())
+    )
+    if item_code:
+        query = query.where(ProcurementOptionModel.item_code == item_code)
+
+    if access.assigned_only_scope:
+        query = filter_procurement_options_by_scope(
+            query,
+            allowed_project_item_ids=access.active_scope.finalized_project_item_ids,
+        )
+
+    result = await db.execute(query.offset(skip).limit(limit))
+    return result.scalars().all()
 
 
 @router.get("/options/{item_code}", response_model=List[ProcurementOptionWithSupplier])
@@ -179,14 +274,19 @@ async def list_procurement_options_by_item_code(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all procurement options for a specific item code"""
-    options = await get_procurement_options(db, item_code=item_code)
-    return options
+    return await list_procurement_options(
+        skip=0,
+        limit=50000,
+        item_code=item_code,
+        current_user=current_user,
+        db=db,
+    )
 
 
 @router.post("/options", response_model=ProcurementOption)
 async def create_new_procurement_option(
     option: ProcurementOptionCreate,
-    current_user: User = Depends(require_procurement()),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     request: Request = None
 ):
@@ -199,7 +299,28 @@ async def create_new_procurement_option(
     logger = logging.getLogger(__name__)
     
     try:
+        access = await resolve_procurement_scope_access(
+            db,
+            current_user,
+            required_any_permissions={
+                "procurement.options.create",
+                "procurement.create",
+            },
+        )
         project_item_id = await _resolve_option_project_item_id(db, option)
+        if project_item_id is not None:
+            await _ensure_item_is_finalized(db, int(project_item_id))
+        if access.assigned_only_scope:
+            if project_item_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Assigned procurement scope requires a scoped project item",
+                )
+            _enforce_item_scope(
+                allowed_project_item_ids=access.active_scope.finalized_project_item_ids,
+                project_item_id=int(project_item_id),
+                denied_detail="Project item is outside your active procurement assignment scope",
+            )
         if project_item_id is not None and await get_project_item_sent_state(db, project_item_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -262,6 +383,8 @@ async def create_new_procurement_option(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create procurement option: {str(e)}")
         import traceback
@@ -279,11 +402,27 @@ async def get_procurement_option_by_id(
     db: AsyncSession = Depends(get_db)
 ):
     """Get procurement option by ID"""
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.view",
+        },
+    )
     option = await get_procurement_option(db, option_id)
     if not option:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Procurement option not found"
+        )
+    if access.assigned_only_scope:
+        project_item_id = await resolve_procurement_option_project_item_id(db, option)
+        _enforce_item_scope(
+            allowed_project_item_ids=access.active_scope.finalized_project_item_ids,
+            project_item_id=project_item_id,
+            denied_detail="Procurement option is outside your active procurement assignment scope",
         )
     return option
 
@@ -297,7 +436,23 @@ async def list_procurement_options_by_project_item(
     """Fetch procurement options for a project item with package/legacy compatibility."""
     from sqlalchemy import select, and_, or_
     from sqlalchemy.orm import selectinload
-    from app.models import ProcurementOption, DeliveryOption, Supplier
+    from app.models import ProcurementOption
+
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.assignments.view",
+            "procurement.view",
+            "procurement.options.view",
+        },
+    )
+    if access.assigned_only_scope:
+        _enforce_item_scope(
+            allowed_project_item_ids=access.active_scope.finalized_project_item_ids,
+            project_item_id=project_item_id,
+            denied_detail="Project item is outside your active procurement assignment scope",
+        )
 
     try:
         delivery_option_ids_subquery = (
@@ -312,6 +467,11 @@ async def list_procurement_options_by_project_item(
             .where(
                 or_(
                     ProcurementOption.project_item_id == project_item_id,
+                    ProcurementOption.package_id.in_(
+                        select(ProcurementPackage.id).where(
+                            ProcurementPackage.project_item_id == project_item_id
+                        )
+                    ),
                     and_(
                         ProcurementOption.project_item_id.is_(None),
                         ProcurementOption.delivery_option_id.in_(delivery_option_ids_subquery)
@@ -335,10 +495,19 @@ async def list_procurement_options_by_project_item(
 async def update_procurement_option_by_id(
     option_id: int,
     option_update: ProcurementOptionUpdate,
-    current_user: User = Depends(require_procurement()),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Update procurement option (procurement specialist only)"""
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.options.edit",
+            "procurement.edit",
+        },
+    )
+
     existing = await db.execute(
         select(ProcurementOptionModel).where(ProcurementOptionModel.id == option_id)
     )
@@ -358,6 +527,12 @@ async def update_procurement_option_by_id(
         )
         project_item_id = package_result.scalar_one_or_none()
 
+    if access.assigned_only_scope:
+        _enforce_item_scope(
+            allowed_project_item_ids=access.active_scope.finalized_project_item_ids,
+            project_item_id=project_item_id,
+            denied_detail="Procurement option is outside your active procurement assignment scope",
+        )
     if project_item_id is not None and await get_project_item_sent_state(db, project_item_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -394,10 +569,19 @@ async def update_procurement_option_by_id(
 @router.delete("/option/{option_id}")
 async def delete_procurement_option_by_id(
     option_id: int,
-    current_user: User = Depends(require_procurement()),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete procurement option (procurement specialist only)"""
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.options.delete",
+            "procurement.delete",
+        },
+    )
+
     existing = await db.execute(
         select(ProcurementOptionModel).where(ProcurementOptionModel.id == option_id)
     )
@@ -417,6 +601,12 @@ async def delete_procurement_option_by_id(
         )
         project_item_id = package_result.scalar_one_or_none()
 
+    if access.assigned_only_scope:
+        _enforce_item_scope(
+            allowed_project_item_ids=access.active_scope.finalized_project_item_ids,
+            project_item_id=project_item_id,
+            denied_detail="Procurement option is outside your active procurement assignment scope",
+        )
     if project_item_id is not None and await get_project_item_sent_state(db, project_item_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

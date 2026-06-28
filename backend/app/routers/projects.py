@@ -19,6 +19,9 @@ from app.schemas import (
     Project, ProjectCreate, ProjectUpdate, ProjectAssignmentCreate,
     ProjectAssignment, ProjectSummary, ProcurementPackageResponse
 )
+from app.services.procurement_assignment_scope_service import (
+    resolve_procurement_scope_access,
+)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -218,12 +221,28 @@ async def list_packages_by_project(
             detail="Access denied to this project"
         )
     
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.packages.view",
+            "procurement.options.view",
+            "procurement.view",
+            "procurement.assignments.view",
+        },
+    )
+
     query = select(ProcurementPackage).options(
         selectinload(ProcurementPackage.supplier),
         selectinload(ProcurementPackage.subitems),
     ).join(ProjectItem).where(
         ProjectItem.project_id == project_id
     )
+    if access.assigned_only_scope:
+        allowed_ids = access.active_scope.finalized_project_item_ids
+        if not allowed_ids:
+            return []
+        query = query.where(ProjectItem.id.in_(allowed_ids))
     
     if active_only:
         query = query.where(ProcurementPackage.is_active == True)
@@ -256,13 +275,33 @@ async def get_project_coverage_summary(
             detail="Access denied to this project"
         )
     
+    access = await resolve_procurement_scope_access(
+        db,
+        current_user,
+        required_any_permissions={
+            "procurement.packages.view",
+            "procurement.options.view",
+            "procurement.view",
+            "procurement.assignments.view",
+        },
+    )
+
     # Import helper function from package service
     from app.services.package_service import calculate_coverage_summary
     
     # Get all project items
-    result = await db.execute(
-        select(ProjectItem).where(ProjectItem.project_id == project_id)
-    )
+    item_query = select(ProjectItem).where(ProjectItem.project_id == project_id)
+    if access.assigned_only_scope:
+        allowed_ids = access.active_scope.finalized_project_item_ids
+        if not allowed_ids:
+            return {
+                "project_id": project_id,
+                "items": [],
+                "total_items": 0,
+                "fully_covered_items": 0,
+            }
+        item_query = item_query.where(ProjectItem.id.in_(allowed_ids))
+    result = await db.execute(item_query)
     project_items = result.scalars().all()
     
     coverage_summaries = []

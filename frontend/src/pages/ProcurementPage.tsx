@@ -62,9 +62,11 @@ import { RivarPageHeader } from '../components/ui/RivarPageHeader.tsx';
 import { MyProcurementAssignmentsPanel } from '../components/procurement/MyProcurementAssignmentsPanel.tsx';
 import { ProcurementAssignmentManagementPanel } from '../components/procurement/ProcurementAssignmentManagementPanel.tsx';
 import {
+  hasAnyPermission,
   canCreateProcurementAssignments,
   canViewAllProcurementAssignments,
   canViewProcurementAssignments,
+  isAssignedOnlyProcurementScopeUser,
 } from '../utils/permissions.ts';
 import { RivarMetricCard } from '../components/ui/RivarMetricCard.tsx';
 import { RivarPanel } from '../components/ui/RivarPanel.tsx';
@@ -182,6 +184,38 @@ export const ProcurementPage: React.FC = () => {
   const showAssignmentsArea = canViewProcurementAssignments(user);
   const showAssignmentManagement =
     canCreateProcurementAssignments(user) || canViewAllProcurementAssignments(user);
+  const isAssignedOnlyScopeUser = isAssignedOnlyProcurementScopeUser(user);
+  const canViewProcurementOperations = Boolean(
+    user &&
+      (user.role === 'admin' ||
+        hasAnyPermission(user, [
+          'procurement.view',
+          'procurement.options.view',
+          'procurement.packages.view',
+          'procurement.assignments.view',
+        ]))
+  );
+  const canMutateProcurementPackages = Boolean(
+    user &&
+      (user.role === 'admin' ||
+        hasAnyPermission(user, [
+          'procurement.packages.create',
+          'procurement.packages.edit',
+          'procurement.packages.delete',
+          'procurement.options.create',
+          'procurement.options.edit',
+          'procurement.options.delete',
+        ]))
+  );
+  const canSubmitOptimization = Boolean(
+    user &&
+      (user.role === 'admin' ||
+        hasAnyPermission(user, [
+          'procurement.options.submit',
+          'procurement.packages.edit',
+          'procurement.edit',
+        ]))
+  );
   const [pageTab, setPageTab] = useState<'operations' | 'assignments'>(() =>
     searchParams.get('tab') === 'assignments' ? 'assignments' : 'operations'
   );
@@ -697,7 +731,7 @@ export const ProcurementPage: React.FC = () => {
     );
   }
 
-  const canProcure = user?.role === 'procurement' || user?.role === 'admin';
+  const canProcure = canViewProcurementOperations;
 
   return (
     <Box>
@@ -733,33 +767,37 @@ export const ProcurementPage: React.FC = () => {
             >
               {t('procurement.analyzeCoverage') || 'Analyze Coverage'}
             </Button>
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<SendIcon sx={{ fontSize: 15 }} />}
-              onClick={async () => {
-                try {
-                  await submitToOptimizationGate(
-                    { send_all_finalized: true },
-                    t('procurement.bulkSendFinalized') || 'Bulk send finalized packages'
-                  );
-                } catch (err: any) {
-                  setError(formatApiError(err, t('procurement.sendToOptimizerFailed') || 'Failed to send finalized packages'));
-                }
-              }}
-            >
-              {t('procurement.sendAllFinalizedToOptimization') || 'Send all finalized packages to optimization'}
-            </Button>
-            <Button
-              variant="outlined"
-              size="small"
-              color="warning"
-              startIcon={<RestartAltIcon sx={{ fontSize: 15 }} />}
-              disabled={sentItemsCount === 0}
-              onClick={openBulkRollbackDialog}
-            >
-              {t('procurement.bulkRollbackFromOptimization') || 'Rollback from optimization'}
-            </Button>
+            {canSubmitOptimization && !isAssignedOnlyScopeUser && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<SendIcon sx={{ fontSize: 15 }} />}
+                onClick={async () => {
+                  try {
+                    await submitToOptimizationGate(
+                      { send_all_finalized: true },
+                      t('procurement.bulkSendFinalized') || 'Bulk send finalized packages'
+                    );
+                  } catch (err: any) {
+                    setError(formatApiError(err, t('procurement.sendToOptimizerFailed') || 'Failed to send finalized packages'));
+                  }
+                }}
+              >
+                {t('procurement.sendAllFinalizedToOptimization') || 'Send all finalized packages to optimization'}
+              </Button>
+            )}
+            {canSubmitOptimization && !isAssignedOnlyScopeUser && (
+              <Button
+                variant="outlined"
+                size="small"
+                color="warning"
+                startIcon={<RestartAltIcon sx={{ fontSize: 15 }} />}
+                disabled={sentItemsCount === 0}
+                onClick={openBulkRollbackDialog}
+              >
+                {t('procurement.bulkRollbackFromOptimization') || 'Rollback from optimization'}
+              </Button>
+            )}
           </>
         ) : undefined}
       />
@@ -787,6 +825,12 @@ export const ProcurementPage: React.FC = () => {
         </Box>
       ) : (
         <>
+      {isAssignedOnlyScopeUser && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {t('procurement.assignedOnlyScopeMessage') ||
+            'This view is limited to procurement work assigned to you.'}
+        </Alert>
+      )}
       {notice && (
         <Alert severity="success" sx={{ mb: 3 }} onClose={() => setNotice('')}>
           {notice}
@@ -1003,8 +1047,8 @@ export const ProcurementPage: React.FC = () => {
                         itemCode={item.item_code}
                         itemName={item.item_name}
                         enabled={expandedAccordion === accordionKey}
-                        onEdit={(packageId) => openEditPackage(packageId, item)}
-                        onDelete={async (packageId) => {
+                        onEdit={canMutateProcurementPackages ? (packageId) => openEditPackage(packageId, item) : undefined}
+                        onDelete={canMutateProcurementPackages ? async (packageId) => {
                           if (window.confirm(t('procurement.confirmDeletePackage') || 'Delete this package?')) {
                             try {
                               await packagesAPI.delete(packageId);
@@ -1014,7 +1058,7 @@ export const ProcurementPage: React.FC = () => {
                               setError(formatApiError(err, t('procurement.failedToDeletePackage') || 'Failed to delete'));
                             }
                           }
-                        }}
+                        } : undefined}
                         refreshTrigger={packageRefreshTrigger}
                       />
                       {canProcure && (
@@ -1035,7 +1079,7 @@ export const ProcurementPage: React.FC = () => {
                             variant="outlined"
                             size="small"
                             startIcon={<SendIcon sx={{ fontSize: 15 }} />}
-                            disabled={item.is_sent_to_optimization || (item.finalized_package_count || 0) === 0}
+                            disabled={!canSubmitOptimization || item.is_sent_to_optimization || (item.finalized_package_count || 0) === 0}
                             onClick={async () => {
                               try {
                                 await submitToOptimizationGate(
@@ -1055,7 +1099,7 @@ export const ProcurementPage: React.FC = () => {
                               size="small"
                               color="warning"
                               startIcon={<RestartAltIcon sx={{ fontSize: 15 }} />}
-                              disabled={!item.can_rollback_optimization_submission}
+                              disabled={!canSubmitOptimization || !item.can_rollback_optimization_submission}
                               onClick={() => handleRollbackOptimizationSubmission(item)}
                             >
                               {t('procurement.rollbackOptimizationSubmission') || 'Rollback submission'}
@@ -1065,7 +1109,7 @@ export const ProcurementPage: React.FC = () => {
                             variant="contained"
                             size="small"
                             startIcon={<AddIcon sx={{ fontSize: 15 }} />}
-                            disabled={item.is_sent_to_optimization}
+                            disabled={!canMutateProcurementPackages || item.is_sent_to_optimization}
                             onClick={() => openPackageWizard(item)}
                           >
                             {t('procurement.createPackage') || 'Create Package'}

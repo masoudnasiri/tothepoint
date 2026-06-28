@@ -673,6 +673,7 @@
     "baseCostHelper": "Enter amount with commas for thousands (e.g., 1,000,000.00)",
     "shippingCostHelper": "Enter shipping cost with commas for thousands (e.g., 500.00)",
     "subtitle": "Manage procurement packages for finalized project items",
+    "assignedOnlyScopeMessage": "This view is limited to procurement work assigned to you.",
     "totalPackages": "Total Packages",
     "activePackages": "Active Packages",
     "itemsWithPackages": "Items with Packages",
