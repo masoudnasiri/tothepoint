@@ -118,3 +118,8 @@ Runtime evidence rechecked in this sprint-fix run:
 ## Recommendation
 
 - Create `Sprint 5F-Fix-2` for deployment/runtime closure immediately after SSH credential access is available.
+
+## Addendum (closed by 5F-Fix-2)
+
+- Runtime deployment/provenance closure is completed in `81_sprint5f_fix2_runtime_ui_closure.md`.
+- `/opt/rivar-demo` markers now point to branch `restart/sprint5f-fix-assignment-table-display-closure`, commit `ab7f7131ef67714036cf2cf88a722e78179d2d1c`, sprint `5F-Fix-2`.
