@@ -187,6 +187,9 @@ Sensitive finance/cash-in/payment fields are omitted for assigned-only users.
 - Ran:
   - `npm test -- --watch=false --runTestsByPath src/pages/ProcurementPage.scopeEnforcement.test.ts src/pages/ProcurementPage.secureAssignedItems.test.ts src/pages/ProcurementPage.workbenchUx.test.ts`
   - Result: `3 passed`
+- Regression checks:
+  - `npm test -- --watch=false --runTestsByPath src/components/Layout.masterDataNavigation.test.tsx src/components/PaymentMethodsRoute.test.tsx src/components/PackageWizard/PackageWizardStep3.test.tsx`
+  - Result: `3 passed`
 
 ## Carry-over cleanups included
 
@@ -199,8 +202,21 @@ Sensitive finance/cash-in/payment fields are omitted for assigned-only users.
 ## Runtime deployment and smoke
 
 - Official target path: `/opt/rivar-demo`
-- `verify.sh`: **pending in this local change set**
-- Runtime smoke script: **pending in this local change set**
+- Deployed marker updated on server:
+  - `branch=restart/sprint5f-procurement-assignment-scope-enforcement`
+  - `commit=c1e90b2c32035055e98bba90d0312fa8c98d353e`
+  - `sprint=5F`
+- `verify.sh`: `PASS`
+  - frontend route checks passed
+  - backend `/health` and `/openapi.json` passed
+  - compose services healthy
+  - fixture/reseed + Sprint 3A-R3 runtime verification passed
+- Runtime smoke:
+  - `python backend/scripts/sprint5e_r4_runtime_smoke.py` -> `PASS`
+  - includes assignment visibility/finalized filtering, non-finalized rejection, direct project-items denial for procurement view-only, bulk remove regression, Payment Methods RBAC regression, and dynamic readiness endpoint check (`option_id=87`)
+- Deployment incident and recovery:
+  - initial backend start failed with `InvalidPasswordError` against Postgres during container recreate
+  - resolved by re-syncing the Postgres role password from `/opt/rivar-demo/.env`, then restarting services and rerunning verify
 
 ## Scope exclusions respected
 
@@ -213,9 +229,9 @@ Sensitive finance/cash-in/payment fields are omitted for assigned-only users.
 ## Remaining risks / minor issues
 
 - Bulk rollback preview/execute is intentionally denied (not scoped) for assigned-only users; if product requires scoped bulk rollback UX, this needs a follow-up implementation (`5F-Fix`)
-- Runtime deploy/verify evidence should be captured on `/opt/rivar-demo` after branch push
+- A dedicated 5F runtime script for procurement-option mutation scope on the live demo dataset is not yet committed; local backend tests already cover these mutation paths comprehensively
 
 ## Git provenance
 
-- Commit hash: _pending_
+- Commit hash: `c1e90b2c32035055e98bba90d0312fa8c98d353e`
 - Pushed branch: `restart/sprint5f-procurement-assignment-scope-enforcement`
