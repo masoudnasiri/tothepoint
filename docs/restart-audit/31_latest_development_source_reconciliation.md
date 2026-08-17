@@ -195,3 +195,33 @@ Result:
 1. Open a focused fix task for the Phase 13F import/test mismatch (`financial_projections` router import contract).
 2. After fixing, rerun full backend suite and re-verify runtime.
 3. If Sprint 5G functional code is expected beyond docs, prepare a separate controlled integration with explicit acceptance criteria and QA gate.
+
+## 14) Re-verification on 2026-08-17
+
+This prompt was re-run after the original 2026-08-08 reconciliation. No second source swap was required.
+
+Live server re-check:
+
+- Path: `/root/pdss`
+- Branch: `restart/sprint5f-fix2-runtime-ui-closure`
+- HEAD: `ad55a733b6648638a150b7cf6fc9fc1d0251c31a`
+- Contains `ab7f713`: yes
+- Contains `ad55a733`: yes
+- Contains `e811238`: yes
+- Sprint 5F-Fix-2 / Phase 10 / Phase 8 artifacts still present
+- Health: `{"status":"healthy","version":"1.0.0-rc1","product":"Rivar","producer":"Corbit"}`
+- OpenAPI: `200`
+- Frontend: `200`
+- Bundle still served: `/static/js/bundle.js` `ETag W/"b2fb36-C0Z02/NBGau3iSnsxj1m20fvKJ4"` `Content-Length 11729718`
+
+Login re-check found a runtime-only regression, not a source mismatch:
+
+- Symptom: `/auth/login` returned `500`
+- Backend log: `asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"`
+- Action: synced Postgres password from compose values and recreated backend only (`docker compose up -d --no-deps --force-recreate backend`)
+- No volumes deleted
+- No `docker compose down -v`
+- Source commit unchanged
+- Login after fix: `admin`, `finance1`, `proc1`, `pmo1`, `pm1` all `200`
+
+No new integration branch was created. Sprint 5G remains excluded because its only extra commit over 5F-Fix-2 is documentation commit `86158c7`.
